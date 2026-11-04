@@ -280,96 +280,49 @@ with t4:
 
 
 with t5:
-    st.subheader("投資大師策略：歷史比較回測")
-    st.caption("目前先測試三種可用日線資料量化的技術策略代理。買賣以訊號日後一交易日開盤價成交；成本包含估算手續費、賣出證交稅及滑價。")
+    st.subheader("投資大師策略：單股策略比較")
+    st.caption("比較三種技術策略代理。所有策略共用研究引擎，訊號在收盤後形成、下一交易日開盤成交，包含估算成本與 ATR 停損。")
     bs=st.selectbox("策略回測標的",list(data),format_func=lambda z:z+" "+W[z],key="master_bt")
     initial=st.number_input("策略回測本金",100000,10000000,1000000,100000,key="master_capital")
     frame=data[bs].copy().reset_index(drop=True)
-    close=frame.close
-    high52=frame.high.rolling(252,min_periods=120).max()
-    low52=frame.low.rolling(252,min_periods=120).min()
-    sma150=close.rolling(150).mean()
-    sma200=close.rolling(200).mean()
-    sma200_old=sma200.shift(20)
-    sma50=close.rolling(50).mean()
-    rel20=close.pct_change(20)
-    rel60=close.pct_change(60)
-    # Technical proxies only; not full CAN SLIM or fundamental screens.
-    signal_map={
-        "Minervini 趨勢模板":(
-            (close>sma50)&(sma50>sma150)&(sma150>sma200)&(sma200>sma200_old)&
-            (close>=low52*1.25)&(close>=high52*0.75)&(rel20>0)&(rel60>0),
-            (close<sma50)|(close<sma150)
-        ),
-        "O’Neil CAN SLIM 技術代理":(
-            (close>frame.h20)&(frame.volume>1.4*frame.v20)&(close>sma50)&(rel20>0),
-            (close<sma50)|(close<frame.ema21)
-        ),
-        "Livermore 順勢突破":(
-            (close>frame.h20)&(close>frame.ema50)&frame.up&(rel20>0),
-            (close<frame.ema21)|(close<frame.ema50)
-        )
-    }
-    def run_master_backtest(entry_signal, exit_signal, hist, starting_cash):
-        cash=float(starting_cash); qty=0.0; entry_cost=0.0; stop=0.0
-        trades=[]; curve=[]; fee=0.001425; tax=0.003; slip=0.001
-        for i in range(len(hist)-1):
-            today=hist.iloc[i]; nxt=hist.iloc[i+1]
-            next_open=float(nxt.open)
-            if qty>0 and (bool(exit_signal.iloc[i]) or float(nxt.low)<=stop):
-                fill=min(next_open,stop) if float(nxt.low)<=stop else next_open
-                fill*=1-slip
-                proceeds=qty*fill*(1-fee-tax)
-                pnl=proceeds-entry_cost
-                trades.append({"進場日":entry_date,"出場日":str(nxt.date.date()),"股數":qty,"損益":pnl,"報酬率":pnl/entry_cost if entry_cost else 0})
-                cash+=proceeds; qty=0.0; entry_cost=0.0; stop=0.0
-            if qty==0 and bool(entry_signal.iloc[i]):
-                fill=next_open*(1+slip)
-                atr=float(today.atr) if pd.notna(today.atr) else fill*0.04
-                stop=fill-2*atr
-                risk_budget=starting_cash*0.005
-                shares=max(0,int(risk_budget/max(fill-stop,0.01)))
-                shares=min(shares,int(cash/(fill*(1+fee))))
-                if shares>0:
-                    entry_cost=shares*fill*(1+fee)
-                    cash-=entry_cost; qty=float(shares); entry_date=str(nxt.date.date())
-            curve.append({"日期":today.date,"資產":cash+qty*float(today.close)})
-        if qty>0:
-            last=hist.iloc[-1]; fill=float(last.close)*(1-slip)
-            proceeds=qty*fill*(1-fee-tax); pnl=proceeds-entry_cost
-            trades.append({"進場日":entry_date,"出場日":str(last.date.date()),"股數":qty,"損益":pnl,"報酬率":pnl/entry_cost if entry_cost else 0})
-            cash+=proceeds
-        eq=pd.DataFrame(curve)
-        final_value=float(cash)
-        if not eq.empty:
-            vals=eq["資產"].astype(float)
-            peaks=vals.cummax()
-            maxdd=float((vals/peaks-1).min())
-            daily=vals.pct_change().dropna()
-            sharpe=float((daily.mean()/daily.std())*np.sqrt(252)) if daily.std()>0 else 0.0
-            years=max((pd.to_datetime(eq["日期"].iloc[-1])-pd.to_datetime(eq["日期"].iloc[0])).days/365.25,0.1)
-            cagr=(final_value/starting_cash)**(1/years)-1 if final_value>0 else -1.0
-        else:
-            maxdd=0.0; sharpe=0.0; cagr=0.0
-        winrate=float(np.mean([t["損益"]>0 for t in trades])) if trades else 0.0
-        return {"期末資產":final_value,"總報酬":final_value/starting_cash-1,"年化報酬":cagr,"最大回撤":maxdd,"Sharpe":sharpe,"交易筆數":len(trades),"勝率":winrate},eq,pd.DataFrame(trades)
-    results=[]; curves={}; trade_tables={}
-    for name,(ent,ex) in signal_map.items():
-        metrics,equity,trades=run_master_backtest(ent.fillna(False),ex.fillna(False),frame,initial)
-        metrics["策略"]=name
-        results.append(metrics); curves[name]=equity; trade_tables[name]=trades
-    result_df=pd.DataFrame(results)[["策略","期末資產","總報酬","年化報酬","最大回撤","Sharpe","交易筆數","勝率"]]
-    st.dataframe(result_df.style.format({"期末資產":"{:,.0f}","總報酬":"{:.1%}","年化報酬":"{:.1%}","最大回撤":"{:.1%}","Sharpe":"{:.2f}","勝率":"{:.1%}"}),use_container_width=True,hide_index=True)
-    fig=go.Figure()
-    for name,equity in curves.items():
-        if not equity.empty:
-            fig.add_trace(go.Scatter(x=equity["日期"],y=equity["資產"],name=name))
-    fig.add_hline(y=initial,line_dash="dash")
-    fig.update_layout(title="不同策略資產曲線（含估算交易成本）",yaxis_title="新台幣")
-    st.plotly_chart(fig,use_container_width=True)
-    chosen=st.selectbox("查看交易明細",list(signal_map),key="master_trade_detail")
-    st.dataframe(trade_tables[chosen],use_container_width=True,hide_index=True)
-    st.warning("這是單一股票、單策略、簡化的歷史比較，不是全市場逐期選股測試。尚未納入股息再投資、漲跌停成交限制、流動性衝擊及完整存活者偏誤處理。樣本外／滾動驗證尚待下一階段完成；歷史績效不保證未來表現。")
+    if st.button("執行單股策略比較",key="run_single_master"):
+        results=[]; curves={}; trade_tables={}
+        for strategy in STRATEGIES:
+            result=shared_capital_backtest(
+                {bs:frame},strategy,initial_capital=float(initial),
+                max_positions=1,warmup=0
+            )
+            metrics=result["metrics"].copy()
+            trades=result["trades"]
+            metrics["策略"]=strategy
+            metrics["交易筆數"]=len(trades)
+            metrics["勝率"]=float((trades["損益"]>0).mean()) if not trades.empty else 0.0
+            results.append(metrics)
+            curves[strategy]=result["equity"]
+            trade_tables[strategy]=trades
+        st.session_state["single_master_results"]=pd.DataFrame(results)
+        st.session_state["single_master_curves"]=curves
+        st.session_state["single_master_trades"]=trade_tables
+        st.session_state["single_master_config"]=(bs,float(initial),period)
+    current_single_config=(bs,float(initial),period)
+    if st.session_state.get("single_master_config")==current_single_config:
+        result_df=st.session_state["single_master_results"]
+        st.dataframe(result_df[["策略","期末資產","總報酬","年化報酬","最大回撤","Sharpe","交易筆數","勝率"]].style.format({
+            "期末資產":"{:,.0f}","總報酬":"{:.1%}","年化報酬":"{:.1%}",
+            "最大回撤":"{:.1%}","Sharpe":"{:.2f}","勝率":"{:.1%}",
+        }),use_container_width=True,hide_index=True)
+        fig=go.Figure()
+        for strategy,equity in st.session_state["single_master_curves"].items():
+            if not equity.empty:
+                fig.add_trace(go.Scatter(x=equity["日期"],y=equity["資產"],name=strategy))
+        fig.add_hline(y=initial,line_dash="dash")
+        fig.update_layout(title="單股策略資產曲線（統一回測引擎）",yaxis_title="新台幣")
+        st.plotly_chart(fig,use_container_width=True)
+        chosen=st.selectbox("查看交易明細",STRATEGIES,key="master_trade_detail")
+        st.dataframe(st.session_state["single_master_trades"][chosen],use_container_width=True,hide_index=True)
+    elif "single_master_results" in st.session_state:
+        st.info("標的、期間或本金已變更；請重新執行策略比較。")
+    st.warning("Minervini、O’Neil、Livermore 為公開理念的技術代理，不是完整複製原策略。回測仍未完整處理除權息、停牌、漲跌停排隊、流動性衝擊及下市股偏誤。");
 
 
 with t6:
