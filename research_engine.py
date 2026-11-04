@@ -291,6 +291,28 @@ def shared_capital_backtest(
                 ix = z.index[pd.to_datetime(z["date"]) == d]
                 p["exit_next"] = bool(z.iloc[int(ix[0])]["_exit"])
 
+        # A symbol's history can end before the portfolio calendar. Liquidate
+        # on that symbol's own final available close instead of postponing the
+        # cash credit until the final date of another symbol.
+        for code in list(positions):
+            z = prepared[code]
+            last_date = pd.Timestamp(z["date"].iloc[-1])
+            if last_date != pd.Timestamp(d) or code not in todays:
+                continue
+            p = positions[code]
+            fill = float(todays[code]["close"]) * (1.0 - slip_rate)
+            proceeds = p["shares"] * fill * (1.0 - fee_rate - tax_rate)
+            pnl = proceeds - p["entry_cost"]
+            trades.append({
+                "代號": code, "訊號日": p["signal_date"], "進場日": p["entry_date"],
+                "出場日": str(pd.Timestamp(d).date()), "股數": p["shares"],
+                "進場成本": p["entry_cost"], "出場收入": proceeds,
+                "損益": pnl, "報酬率": pnl / p["entry_cost"] if p["entry_cost"] else 0.0,
+                "出場原因": "該標的資料期末平倉",
+            })
+            cash += proceeds
+            del positions[code]
+
         market_value = 0.0
         for code, p in positions.items():
             row = todays.get(code)
@@ -307,22 +329,6 @@ def shared_capital_backtest(
             equity_rows.append({"日期": pd.Timestamp(d), "現金": cash,
                                 "持倉市值": market_value, "持倉數": len(positions),
                                 "資產": cash + market_value})
-
-    # Liquidate remaining positions on their last available close with costs.
-    for code, p in list(positions.items()):
-        z = prepared[code]
-        last = z.iloc[-1]
-        fill = float(last["close"]) * (1.0 - slip_rate)
-        proceeds = p["shares"] * fill * (1.0 - fee_rate - tax_rate)
-        pnl = proceeds - p["entry_cost"]
-        trades.append({
-            "代號": code, "訊號日": p["signal_date"], "進場日": p["entry_date"],
-            "出場日": str(pd.Timestamp(last["date"]).date()), "股數": p["shares"],
-            "進場成本": p["entry_cost"], "出場收入": proceeds,
-            "損益": pnl, "報酬率": pnl / p["entry_cost"] if p["entry_cost"] else 0.0,
-            "出場原因": "資料期末平倉",
-        })
-        cash += proceeds
 
     eq = pd.DataFrame(equity_rows)
     if not eq.empty:
