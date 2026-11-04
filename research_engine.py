@@ -1,83 +1,336 @@
+"""Research utilities for the Taiwan stock paper-trading app.
+
+All functions use historical OHLCV only. Fundamental data is deliberately kept
+as a latest-available snapshot and must not be mixed into historical signals.
+"""
+from __future__ import annotations
+
+from typing import Dict, Mapping, Tuple
 import numpy as np
 import pandas as pd
 import yfinance as yf
 
-STRATEGIES = ["Minervini 趨勢模板", "O’Neil CAN SLIM 技術代理", "Livermore 順勢突破"]
+STRATEGIES = [
+    "Minervini 趨勢模板",
+    "O’Neil CAN SLIM 技術代理",
+    "Livermore 順勢突破",
+]
 
-def strategy_signals(frame):
-    c = frame["close"]
-    s50 = c.rolling(50).mean()
-    s150 = c.rolling(150).mean()
-    s200 = c.rolling(200).mean()
-    h52 = frame["high"].rolling(252, min_periods=120).max()
-    l52 = frame["low"].rolling(252, min_periods=120).min()
+
+def _signals(frame: pd.DataFrame) -> Dict[str, Tuple[pd.Series, pd.Series]]:
+    z = frame.copy()
+    c = z["close"].astype(float)
+    s50 = c.rolling(50, min_periods=50).mean()
+    s150 = c.rolling(150, min_periods=150).mean()
+    s200 = c.rolling(200, min_periods=200).mean()
+    h52 = z["high"].rolling(252, min_periods=120).max()
+    l52 = z["low"].rolling(252, min_periods=120).min()
     r20, r60 = c.pct_change(20), c.pct_change(60)
+    h20 = z["high"].shift(1).rolling(20, min_periods=20).max()
+    v20 = z["volume"].shift(1).rolling(20, min_periods=20).mean()
+    ema21 = c.ewm(span=21, adjust=False).mean()
+    ema50 = c.ewm(span=50, adjust=False).mean()
+    ema21_up = ema21 > ema21.shift(5)
+    vol_ok = z["volume"] > 1.4 * v20
     return {
         STRATEGIES[0]: (
-            (c > s50) & (s50 > s150) & (s150 > s200) &
-            (s200 > s200.shift(20)) & (c >= l52 * 1.25) &
-            (c >= h52 * .75) & (r20 > 0) & (r60 > 0),
-            (c < s50) | (c < s150)),
+            (c > s50) & (s50 > s150) & (s150 > s200)
+            & (s200 > s200.shift(20)) & (c >= l52 * 1.25)
+            & (c >= h52 * .75) & (r20 > 0) & (r60 > 0),
+            (c < s50) | (c < s150),
+        ),
         STRATEGIES[1]: (
-            (c > frame["h20"]) & (frame["volume"] > 1.4 * frame["v20"]) &
-            (c > s50) & (r20 > 0),
-            (c < s50) | (c < frame["ema21"])),
+            (c > h20) & vol_ok & (c > s50) & (r20 > 0),
+            (c < s50) | (c < ema21),
+        ),
         STRATEGIES[2]: (
-            (c > frame["h20"]) & (c > frame["ema50"]) &
-            frame["up"] & (r20 > 0),
-            (c < frame["ema21"]) | (c < frame["ema50"]))
+            (c > h20) & (c > ema50) & ema21_up & (r20 > 0),
+            (c < ema21) | (c < ema50),
+        ),
     }
 
-def daily_strategy_returns(frame, strategy, fee=0.001425, sell_tax=0.003, slippage=0.001):
-    z = frame.reset_index(drop=True)
-    entries, exits = strategy_signals(z)[strategy]
-    state, positions = 0, []
-    for i in range(len(z)):
-        if state and bool(exits.iloc[i]):
-            state = 0
-        elif not state and bool(entries.iloc[i]):
-            state = 1
-        positions.append(state)
-    position = pd.Series(positions).shift(1).fillna(0)
-    returns = z["close"].pct_change().fillna(0)
-    turnover = position.diff().abs().fillna(position.iloc[0])
-    costs = turnover * (fee + slippage)
-    # Add sell tax only on exits.
-    exits_turnover = ((position.shift(1).fillna(0) == 1) & (position == 0)).astype(float)
-    net = position * returns - costs - exits_turnover * sell_tax
-    return pd.Series(net.to_numpy(), index=pd.to_datetime(z["date"]))
 
-def performance(returns, initial_capital):
-    if returns.empty:
-        return {"期末資產": initial_capital, "總報酬": 0.0, "年化報酬": 0.0,
-                "最大回撤": 0.0, "Sharpe": 0.0, "交易日數": 0}
-    equity = initial_capital * (1 + returns).cumprod()
-    drawdown = equity / equity.cummax() - 1
-    years = max(len(returns) / 252, 0.1)
-    cagr = (equity.iloc[-1] / initial_capital) ** (1 / years) - 1
-    vol = returns.std()
-    return {"期末資產": float(equity.iloc[-1]),
-            "總報酬": float(equity.iloc[-1] / initial_capital - 1),
-            "年化報酬": float(cagr), "最大回撤": float(drawdown.min()),
-            "Sharpe": float(returns.mean() / vol * np.sqrt(252)) if vol > 0 else 0.0,
-            "交易日數": int(len(returns))}
+def strategy_signals(frame: pd.DataFrame):
+    """Public strategy signal helper; returns entry/exit Series per strategy."""
+    return _signals(frame)
+
+
+def daily_strategy_returns(
+    frame: pd.DataFrame,
+    strategy: str,
+    fee: float = 0.001425,
+    sell_tax: float = 0.003,
+    slippage: float = 0.001,
+) -> pd.Series:
+    """Single-symbol daily net returns; signals execute on the next session.
+
+    This is a single-position return series, not a portfolio capital simulator.
+    For multiple symbols use shared_capital_backtest().
+    """
+    if frame.empty:
+        return pd.Series(dtype=float)
+    z = frame.reset_index(drop=True)
+    entries, exits = _signals(z)[strategy]
+    held = False
+    position, turnover, sell = [], [], []
+    for i in range(len(z)):
+        was_held = held
+        if held and bool(exits.iloc[i]):
+            held = False
+        elif not held and bool(entries.iloc[i]):
+            held = True
+        position.append(1.0 if held else 0.0)
+        turnover.append(1.0 if was_held != held else 0.0)
+        sell.append(1.0 if was_held and not held else 0.0)
+
+    # Positions are shifted: signal at t is filled at t+1 open.
+    pos = pd.Series(position).shift(1).fillna(0.0)
+    prev_pos = pos.shift(1).fillna(0.0)
+    open_to_open = z["open"].shift(-1) / z["open"] - 1.0
+    open_to_open = open_to_open.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    # Costs charged on changes in exposure; costs are conservative estimates.
+    turn = pos.sub(prev_pos).abs()
+    exit_turn = ((prev_pos > 0) & (pos == 0)).astype(float)
+    net = pos * open_to_open - turn * (fee + slippage) - exit_turn * sell_tax
+    idx = pd.to_datetime(z["date"])
+    return pd.Series(net.to_numpy(), index=idx, name=strategy)
+
+
+def performance(returns: pd.Series, initial_capital: float) -> dict:
+    r = pd.Series(returns, dtype=float).replace([np.inf, -np.inf], np.nan).dropna()
+    if r.empty:
+        return {
+            "期末資產": float(initial_capital), "總報酬": 0.0,
+            "年化報酬": 0.0, "最大回撤": 0.0, "Sharpe": 0.0, "交易日數": 0,
+        }
+    equity = float(initial_capital) * (1.0 + r).cumprod()
+    peak = equity.cummax()
+    dd = equity / peak - 1.0
+    years = max(len(r) / 252.0, 1.0 / 252.0)
+    ending = float(equity.iloc[-1])
+    cagr = (ending / float(initial_capital)) ** (1.0 / years) - 1.0 if ending > 0 else -1.0
+    vol = float(r.std(ddof=1)) if len(r) > 1 else 0.0
+    sharpe = float(r.mean() / vol * np.sqrt(252)) if vol > 0 else 0.0
+    return {
+        "期末資產": ending,
+        "總報酬": ending / float(initial_capital) - 1.0,
+        "年化報酬": float(cagr),
+        "最大回撤": float(dd.min()),
+        "Sharpe": sharpe,
+        "交易日數": int(len(r)),
+    }
+
+
+def shared_capital_backtest(
+    frames: Mapping[str, pd.DataFrame],
+    strategy: str,
+    initial_capital: float = 1_000_000,
+    max_positions: int = 5,
+    fee: float = 0.001425,
+    sell_tax: float = 0.003,
+    slippage: float = 0.001,
+    warmup: int = 260,
+) -> dict:
+    """Multi-symbol portfolio simulation with one shared cash balance.
+
+    At each close, eligible entries are ranked by 20-session momentum. Orders
+    execute at the next session open. Available cash is split equally among
+    available slots; existing positions are marked to market daily. No
+    leverage, shorting, or fractional shares. Risk sizing is capped by an
+    ATR-based stop distance, while total exposure is limited by available cash.
+    """
+    if not frames:
+        return {"metrics": performance(pd.Series(dtype=float), initial_capital),
+                "equity": pd.DataFrame(), "trades": pd.DataFrame(),
+                "coverage": {"symbols_requested": 0, "symbols_used": 0}}
+
+    prepared = {}
+    for code, raw in frames.items():
+        if raw is None or raw.empty or len(raw) <= warmup + 2:
+            continue
+        z = raw.copy().sort_values("date").reset_index(drop=True)
+        sigs = _signals(z)
+        if strategy not in sigs:
+            continue
+        entry, exit_ = sigs[strategy]
+        z["_entry"] = entry.fillna(False).to_numpy()
+        z["_exit"] = exit_.fillna(False).to_numpy()
+        z["_momentum"] = z["close"].pct_change(20).fillna(-999).to_numpy()
+        if "atr" in z:
+            z["_atr"] = pd.to_numeric(z["atr"], errors="coerce").fillna(z["close"] * .04).to_numpy()
+        else:
+            tr = pd.concat([
+                z["high"] - z["low"],
+                (z["high"] - z["close"].shift()).abs(),
+                (z["low"] - z["close"].shift()).abs(),
+            ], axis=1).max(axis=1)
+            z["_atr"] = tr.ewm(alpha=1/14, adjust=False).mean().fillna(z["close"] * .04).to_numpy()
+        prepared[code] = z
+
+    if not prepared:
+        return {"metrics": performance(pd.Series(dtype=float), initial_capital),
+                "equity": pd.DataFrame(), "trades": pd.DataFrame(),
+                "coverage": {"symbols_requested": len(frames), "symbols_used": 0}}
+
+    # Calendar dates are unioned. A symbol without a bar on a date is not traded.
+    date_sets = [set(pd.to_datetime(z["date"])) for z in prepared.values()]
+    dates = sorted(set.union(*date_sets))
+    cash = float(initial_capital)
+    positions = {}
+    trades = []
+    equity_rows = []
+    fee_rate = float(fee)
+    tax_rate = float(sell_tax)
+    slip_rate = float(slippage)
+
+    for d in dates:
+        todays = {}
+        for code, z in prepared.items():
+            match = z.index[pd.to_datetime(z["date"]) == d]
+            if len(match):
+                todays[code] = z.iloc[int(match[0])]
+
+        # Mark current portfolio using today's close; execute exits at today's
+        # open based on signals formed at the prior close.
+        for code in list(positions):
+            row = todays.get(code)
+            if row is None:
+                continue
+            p = positions[code]
+            open_px = float(row["open"])
+            low_px = float(row["low"])
+            stop_hit = low_px <= p["stop"]
+            prior_exit = p["exit_next"]
+            if stop_hit or prior_exit:
+                raw_fill = min(open_px, p["stop"]) if stop_hit else open_px
+                fill = raw_fill * (1.0 - slip_rate)
+                proceeds = p["shares"] * fill * (1.0 - fee_rate - tax_rate)
+                pnl = proceeds - p["entry_cost"]
+                trades.append({
+                    "代號": code, "進場日": p["entry_date"],
+                    "出場日": str(pd.Timestamp(d).date()), "股數": p["shares"],
+                    "進場成本": p["entry_cost"], "出場收入": proceeds,
+                    "損益": pnl, "報酬率": pnl / p["entry_cost"] if p["entry_cost"] else 0.0,
+                    "出場原因": "停損" if stop_hit else "策略出場",
+                })
+                cash += proceeds
+                del positions[code]
+
+        # Entry decisions from previous close; the first warmup period is not traded.
+        candidates = []
+        for code, row in todays.items():
+            z = prepared[code]
+            ix = z.index[pd.to_datetime(z["date"]) == d]
+            i = int(ix[0])
+            if i <= warmup or code in positions or not bool(row["_entry"]):
+                continue
+            candidates.append((float(row["_momentum"]), code, row))
+
+        free_slots = max(0, int(max_positions) - len(positions))
+        if free_slots and candidates:
+            candidates.sort(reverse=True)
+            chosen = candidates[:free_slots]
+            for _, code, row in chosen:
+                slots_left = max(1, int(max_positions) - len(positions))
+                allocation = cash / slots_left
+                open_px = float(row["open"]) * (1.0 + slip_rate)
+                atr = max(float(row["_atr"]), open_px * .005)
+                stop = open_px - 2.0 * atr
+                risk_budget = float(initial_capital) * 0.005
+                shares_by_risk = int(risk_budget / max(open_px - stop, 0.01))
+                shares_by_cash = int(cash / (open_px * (1.0 + fee_rate)))
+                shares_by_alloc = int(allocation / (open_px * (1.0 + fee_rate)))
+                shares = max(0, min(shares_by_risk, shares_by_cash, shares_by_alloc))
+                if shares <= 0:
+                    continue
+                entry_cost = shares * open_px * (1.0 + fee_rate)
+                cash -= entry_cost
+                positions[code] = {
+                    "shares": shares, "entry_cost": entry_cost,
+                    "entry_date": str(pd.Timestamp(d).date()), "stop": stop,
+                    "exit_next": False,
+                }
+
+        # The current close creates an exit instruction for the next session.
+        for code, p in positions.items():
+            row = todays.get(code)
+            if row is not None:
+                z = prepared[code]
+                ix = z.index[pd.to_datetime(z["date"]) == d]
+                p["exit_next"] = bool(z.iloc[int(ix[0])]["_exit"])
+
+        market_value = 0.0
+        for code, p in positions.items():
+            row = todays.get(code)
+            if row is None:
+                z = prepared[code]
+                prior = z[pd.to_datetime(z["date"]) < d]
+                if prior.empty:
+                    continue
+                mark = float(prior.iloc[-1]["close"])
+            else:
+                mark = float(row["close"])
+            market_value += p["shares"] * mark
+        equity_rows.append({"日期": pd.Timestamp(d), "現金": cash,
+                            "持倉市值": market_value, "資產": cash + market_value})
+
+    # Liquidate remaining positions on their last available close with costs.
+    for code, p in list(positions.items()):
+        z = prepared[code]
+        last = z.iloc[-1]
+        fill = float(last["close"]) * (1.0 - slip_rate)
+        proceeds = p["shares"] * fill * (1.0 - fee_rate - tax_rate)
+        pnl = proceeds - p["entry_cost"]
+        trades.append({
+            "代號": code, "進場日": p["entry_date"],
+            "出場日": str(pd.Timestamp(last["date"]).date()), "股數": p["shares"],
+            "進場成本": p["entry_cost"], "出場收入": proceeds,
+            "損益": pnl, "報酬率": pnl / p["entry_cost"] if p["entry_cost"] else 0.0,
+            "出場原因": "資料期末平倉",
+        })
+        cash += proceeds
+
+    eq = pd.DataFrame(equity_rows)
+    if not eq.empty:
+        daily_returns = eq.set_index("日期")["資產"].pct_change().fillna(0.0)
+        metrics = performance(daily_returns, initial_capital)
+        metrics["期末資產"] = float(cash)
+        metrics["總報酬"] = float(cash / initial_capital - 1.0)
+        years = max((pd.Timestamp(eq["日期"].iloc[-1]) - pd.Timestamp(eq["日期"].iloc[0])).days / 365.25, 1/252)
+        metrics["年化報酬"] = float((cash / initial_capital) ** (1 / years) - 1) if cash > 0 else -1.0
+        peak = eq["資產"].cummax()
+        metrics["最大回撤"] = float((eq["資產"] / peak - 1).min())
+    else:
+        metrics = performance(pd.Series(dtype=float), initial_capital)
+
+    return {
+        "metrics": metrics,
+        "equity": eq,
+        "trades": pd.DataFrame(trades),
+        "coverage": {"symbols_requested": len(frames), "symbols_used": len(prepared)},
+    }
+
 
 def fundamental_snapshot(codes):
+    """Latest snapshot only; never use this function for historical backtests."""
     rows = []
     for code in codes:
         info = {}
         for suffix in [".TW", ".TWO"]:
             try:
-                info = yf.Ticker(code + suffix).get_info()
+                info = yf.Ticker(str(code) + suffix).get_info()
                 if info:
                     break
             except Exception:
                 continue
-        rows.append({"代號": code, "ROE": info.get("returnOnEquity"),
-                     "營收成長率": info.get("revenueGrowth"),
-                     "獲利成長率": info.get("earningsGrowth"),
-                     "自由現金流": info.get("freeCashflow"),
-                     "負債／權益": info.get("debtToEquity"),
-                     "本益比": info.get("trailingPE"),
-                     "資料狀態": "有回傳" if info else "來源未提供"})
+        rows.append({
+            "代號": code,
+            "ROE": info.get("returnOnEquity"),
+            "營收成長率": info.get("revenueGrowth"),
+            "獲利成長率": info.get("earningsGrowth"),
+            "自由現金流": info.get("freeCashflow"),
+            "負債／權益": info.get("debtToEquity"),
+            "本益比": info.get("trailingPE"),
+            "資料狀態": "有回傳（最新快照，非歷史資料）" if info else "來源未提供",
+        })
     return pd.DataFrame(rows)
