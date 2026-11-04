@@ -21,6 +21,9 @@ with st.sidebar:
     custom_codes=st.text_input("額外股票代號（逗號分隔）",placeholder="例如 0050, 006208, 6669")
     extra_codes=[x.strip() for x in custom_codes.replace("，",",").split(",") if x.strip().isdigit() and 4<=len(x.strip())<=6]
     ss=list(dict.fromkeys(ss+extra_codes))
+    if len(ss)>30:
+        st.sidebar.warning("單次最多載入 30 檔，已先取前 30 檔以避免行情來源限流。")
+        ss=ss[:30]
     period=st.selectbox("歷史期間",["5y","3y","2y","1y"])
     capital=st.number_input("模擬本金",100000,10000000,1000000,100000)
     risk=st.number_input("單筆風險上限",500,50000,5000,500)
