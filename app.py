@@ -7,6 +7,7 @@ from sklearn.metrics import balanced_accuracy_score
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+from research_engine import STRATEGIES, daily_strategy_returns, performance, fundamental_snapshot
 from datetime import datetime
 from zoneinfo import ZoneInfo
 TZ=ZoneInfo("Asia/Taipei")
@@ -130,7 +131,7 @@ with st.spinner("讀取歷史行情…"):
         quotes.append({"代號":s,"名稱":W[s],"盤中參考價":price,"報價時間":qt,"資料約幾分鐘前":age})
         rows.append({"代號":s,"名稱":W[s],"規則分數":int(score),"訊號":("多因子觀察" if score>=70 and prob is not None and prob>=0.55 else "技術候選（AI資料不足）" if score>=70 and prob is None else "AI未確認" if score>=70 else "等待" if score>=50 else "不進場"),"AI五日上漲機率":round(prob,3) if prob is not None else None,"模型測試平衡準確率":round(metric,3) if metric is not None else None,"三大法人買賣超(股)":net,"法人資料日期":inst.get("資料日期") if inst else None,"RSI14":round(r.rsi,1) if pd.notna(r.rsi) else None,"20日報酬":r.r20,"60日報酬":r.r60,"日線日期":r.date.strftime("%Y-%m-%d")})
 if not data: st.error("目前無法取得歷史行情，請稍後重試。"); st.stop()
-t1,t2,t3,t4,t5=st.tabs(["行情監控","歷史回測","模擬帳本","資料限制","大師策略回測"])
+t1,t2,t3,t4,t5,t6=st.tabs(["行情監控","歷史回測","模擬帳本","資料限制","大師策略回測","整合研究中心"])
 with t1:
     st.subheader("盤中參考行情（可能延遲）")
     st.dataframe(pd.DataFrame(quotes),use_container_width=True,hide_index=True)
@@ -309,3 +310,37 @@ with t5:
     chosen=st.selectbox("查看交易明細",list(signal_map),key="master_trade_detail")
     st.dataframe(trade_tables[chosen],use_container_width=True,hide_index=True)
     st.warning("這是單一股票、單策略、簡化的歷史比較，不是全市場逐期選股測試。尚未納入股息再投資、漲跌停成交限制、流動性衝擊及完整存活者偏誤處理。樣本外／滾動驗證尚待下一階段完成；歷史績效不保證未來表現。")
+
+
+with t6:
+    st.subheader("整合研究中心")
+    st.markdown("**基本面快照（最新可取得資料）**")
+    st.caption("這些是目前快照，不是歷史逐期財報；不會回填成過去資料，也不直接用來產生歷史買賣訊號。")
+    if st.button("載入基本面資料",key="fund_load"):
+        with st.spinner("讀取財務資料…"):
+            st.session_state["fund_data"]=fundamental_snapshot(tuple(data.keys()))
+    if "fund_data" in st.session_state:
+        st.dataframe(st.session_state["fund_data"],use_container_width=True,hide_index=True)
+    st.divider()
+    st.markdown("**多股票策略組合：樣本內／樣本外測試**")
+    holdout=st.slider("保留作樣本外測試比例",20,40,30,5,key="wf_holdout")/100
+    pc=st.number_input("組合測試本金",100000,10000000,1000000,100000,key="wf_capital")
+    summaries=[]
+    for strategy in STRATEGIES:
+        in_series=[]; out_series=[]
+        for code,z in data.items():
+            split=int(len(z)*(1-holdout))
+            if split<260 or len(z)-split<60:
+                continue
+            r=daily_strategy_returns(z.iloc[:split],strategy)
+            q=daily_strategy_returns(z.iloc[split:],strategy)
+            if len(r): in_series.append(r.rename(code))
+            if len(q): out_series.append(q.rename(code))
+        ins=pd.concat(in_series,axis=1).mean(axis=1).fillna(0) if in_series else pd.Series(dtype=float)
+        outs=pd.concat(out_series,axis=1).mean(axis=1).fillna(0) if out_series else pd.Series(dtype=float)
+        im=performance(ins,pc); om=performance(outs,pc)
+        summaries.append({"策略":strategy,"樣本內年化":im["年化報酬"],"樣本內最大回撤":im["最大回撤"],"樣本外年化":om["年化報酬"],"樣本外最大回撤":om["最大回撤"],"樣本外Sharpe":om["Sharpe"],"樣本外期末資產":om["期末資產"],"樣本外交易日":om["交易日數"]})
+    result=pd.DataFrame(summaries)
+    st.dataframe(result.style.format({"樣本內年化":"{:.1%}","樣本內最大回撤":"{:.1%}","樣本外年化":"{:.1%}","樣本外最大回撤":"{:.1%}","樣本外Sharpe":"{:.2f}","樣本外期末資產":"{:,.0f}"}),use_container_width=True,hide_index=True)
+    st.caption("各股票先分別計算每日策略報酬，再以等權平均組合；這是研究用近似回測，不等於逐筆成交的完整資金池模型。")
+    st.warning("目前股票池僅為左側選取的觀察名單，尚非全台上市櫃股票。樣本外測試區段不可用於調參。尚未處理完整歷史成分、逐期財報、漲跌停、流動性衝擊與存活者偏誤。")
