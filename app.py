@@ -7,7 +7,7 @@ from sklearn.metrics import balanced_accuracy_score
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-from research_engine import STRATEGIES, daily_strategy_returns, performance, fundamental_snapshot
+from research_engine import STRATEGIES, daily_strategy_returns, performance, fundamental_snapshot, shared_capital_backtest
 from datetime import datetime
 from zoneinfo import ZoneInfo
 TZ=ZoneInfo("Asia/Taipei")
