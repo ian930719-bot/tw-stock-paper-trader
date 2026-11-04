@@ -24,6 +24,7 @@ streamlit run app.py
 - 成本敏感度：固定手續費與一般股票賣出稅，測試單邊滑價 0.1%、0.2%、0.3% 對策略結果的影響。
 - 最新基本面快照與巴菲特／彼得林區風格簡化條件檢查。
 - 行情資料品質檢查：日期間隔、缺漏列、非正價格與資料新鮮度。
+- 盤中報價狀態：區分盤中更新、盤中延遲／可能休市、當日最後報價、非當日報價與無報價；非盤中時段不會把當日收盤價誤標成即時行情。
 - 模擬帳本買賣、CSV 成交紀錄、JSON 備份與還原。
 - GitHub Actions 語法檢查及研究引擎單元測試。
 
@@ -44,6 +45,6 @@ streamlit run app.py
 ## 自動測試
 
 ```bash
-python -m py_compile app.py research_engine.py tests/test_research_engine.py
+python -m py_compile app.py research_engine.py market_data.py tests/test_research_engine.py tests/test_market_data.py
 python -m unittest discover -s tests -v
 ```
