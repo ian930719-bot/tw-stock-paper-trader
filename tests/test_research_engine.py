@@ -2,6 +2,7 @@
 import unittest
 import numpy as np
 import pandas as pd
+from unittest.mock import patch
 
 from research_engine import STRATEGIES, daily_strategy_returns, performance, shared_capital_backtest
 
@@ -68,6 +69,36 @@ class ResearchEngineTests(unittest.TestCase):
         result = shared_capital_backtest({}, STRATEGIES[0])
         self.assertEqual(result["coverage"]["symbols_used"], 0)
         self.assertTrue(result["equity"].empty)
+
+    def test_symbol_is_liquidated_on_its_own_last_available_date(self):
+        short = sample_frame(25)
+        long = sample_frame(28, phase=0.4)
+        short["symbol"] = "SHORT"
+        long["symbol"] = "LONG"
+
+        def controlled_signals(frame):
+            entry = pd.Series(False, index=frame.index)
+            if frame["symbol"].iloc[0] == "SHORT":
+                entry.iloc[20] = True
+            exit_ = pd.Series(False, index=frame.index)
+            return {STRATEGIES[0]: (entry, exit_)}
+
+        with patch("research_engine._signals", side_effect=controlled_signals):
+            result = shared_capital_backtest(
+                {"SHORT": short, "LONG": long}, STRATEGIES[0],
+                initial_capital=1_000_000, max_positions=1, warmup=0,
+            )
+
+        short_trades = result["trades"].loc[result["trades"]["代號"] == "SHORT"]
+        self.assertEqual(len(short_trades), 1)
+        self.assertEqual(
+            pd.Timestamp(short_trades.iloc[0]["出場日"]),
+            pd.Timestamp(short["date"].iloc[-1]),
+        )
+        self.assertLess(
+            pd.Timestamp(short_trades.iloc[0]["出場日"]),
+            pd.Timestamp(long["date"].iloc[-1]),
+        )
 
 
 if __name__ == "__main__":
