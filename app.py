@@ -12,6 +12,7 @@ import plotly.graph_objects as go
 from research_engine import STRATEGIES, daily_strategy_returns, performance, fundamental_snapshot, shared_capital_backtest
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from market_data import quote_freshness
 TZ=ZoneInfo("Asia/Taipei")
 W={"2330":"台積電","2454":"聯發科","2308":"台達電","2317":"鴻海","2382":"廣達","3231":"緯創","3017":"奇鋐","2603":"長榮","2881":"富邦金","2891":"中信金"}
 st.set_page_config(page_title="台股模擬交易",layout="wide")
@@ -145,14 +146,23 @@ with st.spinner("讀取歷史行情…"):
         base=20*(r.close>r.ema21 and r.up)+10*(r.close>r.ema50)+10*(r.close>r.ema200)+10*(r.r20>0)+5*(r.r60>0)+10*(50<=r.rsi<=70)+10*(r.macd>r.sig)+10*(pd.notna(r.v20) and r.volume>1.5*r.v20 and r.close>r.h20)+5*(r.obv>r.obvp if pd.notna(r.obvp) else False)
         score=base+(10 if net is not None and net>0 else 0)
         prob,metric=train_ml(d); price,qt,age=get_quote(s)
-        quotes.append({"代號":s,"名稱":W.get(s,s),"盤中參考價":price,"報價時間":qt,"資料約幾分鐘前":age})
+        quote_status, quote_age = quote_freshness(qt)
+        quotes.append({"代號":s,"名稱":W.get(s,s),"盤中參考價":price,"報價時間":qt,
+                       "報價狀態":quote_status,"資料約幾分鐘前":quote_age})
         rows.append({"代號":s,"名稱":W.get(s,s),"規則分數":int(score),"訊號":("多因子觀察" if score>=70 and prob is not None and prob>=0.55 else "技術候選（AI資料不足）" if score>=70 and prob is None else "AI未確認" if score>=70 else "等待" if score>=50 else "不進場"),"AI五日上漲機率":round(prob,3) if prob is not None else None,"模型測試平衡準確率":round(metric,3) if metric is not None else None,"三大法人買賣超(股)":net,"法人資料日期":inst.get("資料日期") if inst else None,"RSI14":round(r.rsi,1) if pd.notna(r.rsi) else None,"20日報酬":r.r20,"60日報酬":r.r60,"日線日期":r.date.strftime("%Y-%m-%d")})
 if not data: st.error("目前無法取得歷史行情，請稍後重試。"); st.stop()
 t1,t2,t3,t4,t5,t6=st.tabs(["行情監控","歷史回測","模擬帳本","資料限制","大師策略回測","整合研究中心"])
 with t1:
     st.subheader("盤中參考行情（可能延遲）")
-    st.dataframe(pd.DataFrame(quotes),use_container_width=True,hide_index=True)
-    st.caption("盤中價取自 Yahoo Finance 1 分鐘資料，可能延遲或缺漏；請留意報價時間與分鐘差。")
+    quote_frame=pd.DataFrame(quotes)
+    st.dataframe(quote_frame,use_container_width=True,hide_index=True)
+    stale_labels={"盤中延遲／可能休市","非當日報價","無報價","時間異常"}
+    stale_rows=quote_frame[quote_frame["報價狀態"].isin(stale_labels)] if not quote_frame.empty else pd.DataFrame()
+    if not stale_rows.empty:
+        st.warning("部分股票報價可能延遲、非當日或無資料。請先核對報價時間，不要將舊報價當成可成交價格。")
+    if not quote_frame.empty and quote_frame["報價狀態"].eq("當日最後報價（非盤中）").any():
+        st.info("目前不是台股一般盤中時段；表內為當日最後可取得報價，不代表盤後仍可成交。")
+    st.caption("盤中參考價取自 Yahoo Finance 1 分鐘資料；更新狀態依台灣一般交易時段及報價時間估算，仍可能受休市日、來源延遲與資料缺漏影響。")
     st.subheader("技術面、AI 與法人觀察")
     st.dataframe(pd.DataFrame(rows).sort_values("規則分數",ascending=False),use_container_width=True,hide_index=True)
     st.caption("規則分數已加入最新可取得的三大法人買賣超加分；AI 機率由隨機森林模型提供。法人歷史序列、融資融券與分點籌碼尚未接入。")
