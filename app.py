@@ -315,32 +315,96 @@ with t5:
 with t6:
     st.subheader("整合研究中心")
     st.markdown("**基本面快照（最新可取得資料）**")
-    st.caption("這些是目前快照，不是歷史逐期財報；不會回填成過去資料，也不直接用來產生歷史買賣訊號。")
+    st.caption("以下為目前可取得的最新快照，不是歷史逐期財報；不會用來回填歷史交易訊號。")
     if st.button("載入基本面資料",key="fund_load"):
         with st.spinner("讀取財務資料…"):
             st.session_state["fund_data"]=fundamental_snapshot(tuple(data.keys()))
     if "fund_data" in st.session_state:
         st.dataframe(st.session_state["fund_data"],use_container_width=True,hide_index=True)
+
     st.divider()
-    st.markdown("**多股票策略組合：樣本內／樣本外測試**")
-    holdout=st.slider("保留作樣本外測試比例",20,40,30,5,key="wf_holdout")/100
-    pc=st.number_input("組合測試本金",100000,10000000,1000000,100000,key="wf_capital")
-    summaries=[]
-    for strategy in STRATEGIES:
-        in_series=[]; out_series=[]
-        for code,z in data.items():
-            split=int(len(z)*(1-holdout))
-            if split<260 or len(z)-split<60:
-                continue
-            r=daily_strategy_returns(z.iloc[:split],strategy)
-            q=daily_strategy_returns(z.iloc[split:],strategy)
-            if len(r): in_series.append(r.rename(code))
-            if len(q): out_series.append(q.rename(code))
-        ins=pd.concat(in_series,axis=1).mean(axis=1).fillna(0) if in_series else pd.Series(dtype=float)
-        outs=pd.concat(out_series,axis=1).mean(axis=1).fillna(0) if out_series else pd.Series(dtype=float)
-        im=performance(ins,pc); om=performance(outs,pc)
-        summaries.append({"策略":strategy,"樣本內年化":im["年化報酬"],"樣本內最大回撤":im["最大回撤"],"樣本外年化":om["年化報酬"],"樣本外最大回撤":om["最大回撤"],"樣本外Sharpe":om["Sharpe"],"樣本外期末資產":om["期末資產"],"樣本外交易日":om["交易日數"]})
-    result=pd.DataFrame(summaries)
-    st.dataframe(result.style.format({"樣本內年化":"{:.1%}","樣本內最大回撤":"{:.1%}","樣本外年化":"{:.1%}","樣本外最大回撤":"{:.1%}","樣本外Sharpe":"{:.2f}","樣本外期末資產":"{:,.0f}"}),use_container_width=True,hide_index=True)
-    st.caption("各股票先分別計算每日策略報酬，再以等權平均組合；這是研究用近似回測，不等於逐筆成交的完整資金池模型。")
-    st.warning("目前股票池僅為左側選取的觀察名單，尚非全台上市櫃股票。樣本外測試區段不可用於調參。尚未處理完整歷史成分、逐期財報、漲跌停、流動性衝擊與存活者偏誤。")
+    st.markdown("**多股票共享資金池：訓練／驗證／樣本外**")
+    st.caption("各策略僅用日線技術資料產生訊號；同一個投資組合共用現金、持倉上限及成本假設。")
+    train_pct=st.slider("訓練資料比例",50,70,60,5,key="wf_train")/100
+    valid_pct=st.slider("驗證資料比例",10,25,20,5,key="wf_valid")/100
+    if train_pct + valid_pct >= 0.9:
+        st.error("訓練與驗證比例總和必須小於 90%，以保留至少 10% 樣本外資料。")
+    else:
+        pc=st.number_input("組合測試本金",100000,10000000,1000000,100000,key="wf_capital")
+        maxpos=st.slider("最多同時持有股票數",1,10,5,key="wf_max_positions")
+        st.caption("三段期間依共同交易日曆切分；每段開始會清空前段持倉並以本金重新開始。策略參數不會依樣本外結果調整。")
+        if st.button("執行全觀察清單組合回測",key="run_shared_portfolio"):
+            summaries=[]; curve_map={}; trade_map={}
+            n_total=max((len(z) for z in data.values()),default=0)
+            train_end=int(n_total*train_pct)
+            valid_end=int(n_total*(train_pct+valid_pct))
+            # Keep pre-segment history as indicator warm-up, but only trade inside
+            # each segment's own date window.
+            for strategy in STRATEGIES:
+                periods={}
+                for label,lo,hi in [
+                    ("訓練",0,train_end),
+                    ("驗證",train_end,valid_end),
+                    ("樣本外",valid_end,n_total),
+                ]:
+                    segment_frames={}
+                    for code,z in data.items():
+                        zz=z.copy().reset_index(drop=True)
+                        if hi <= lo or lo >= len(zz):
+                            continue
+                        # Cut on each symbol's own chronological observations.
+                        local_lo=min(lo,len(zz))
+                        local_hi=min(hi,len(zz))
+                        if local_hi-local_lo < 40:
+                            continue
+                        # Include up to 260 prior sessions for indicators.
+                        warm_lo=max(0,local_lo-260)
+                        segment_frames[code]=zz.iloc[warm_lo:local_hi].copy()
+                    # To prevent trading during warm-up, the shared engine has a
+                    # fixed warmup guard; restrict input to segment with 260 warmup rows.
+                    result=shared_capital_backtest(
+                        segment_frames,strategy,initial_capital=float(pc),
+                        max_positions=int(maxpos),warmup=260
+                    ) if segment_frames else None
+                    if result:
+                        periods[label]=result
+                for label,result in periods.items():
+                    m=result["metrics"]
+                    summaries.append({
+                        "策略":strategy,"期間":label,"期末資產":m["期末資產"],
+                        "總報酬":m["總報酬"],"年化報酬":m["年化報酬"],
+                        "最大回撤":m["最大回撤"],"Sharpe":m["Sharpe"],
+                        "交易筆數":len(result["trades"]),
+                        "有效股票數":result["coverage"]["symbols_used"],
+                    })
+                    curve_map[(strategy,label)]=result["equity"]
+                    trade_map[(strategy,label)]=result["trades"]
+            st.session_state["portfolio_summary"]=pd.DataFrame(summaries)
+            st.session_state["portfolio_curves"]=curve_map
+            st.session_state["portfolio_trades"]=trade_map
+
+        if "portfolio_summary" in st.session_state:
+            summary=st.session_state["portfolio_summary"]
+            st.dataframe(summary.style.format({
+                "期末資產":"{:,.0f}","總報酬":"{:.1%}","年化報酬":"{:.1%}",
+                "最大回撤":"{:.1%}","Sharpe":"{:.2f}",
+            }),use_container_width=True,hide_index=True)
+            strategy_pick=st.selectbox("查看策略資產曲線",STRATEGIES,key="portfolio_curve_strategy")
+            period_pick=st.selectbox("查看驗證區段",["訓練","驗證","樣本外"],index=2,key="portfolio_curve_period")
+            curve=st.session_state["portfolio_curves"].get((strategy_pick,period_pick),pd.DataFrame())
+            if not curve.empty:
+                fig=go.Figure()
+                fig.add_trace(go.Scatter(x=curve["日期"],y=curve["資產"],name="組合資產"))
+                fig.add_hline(y=float(pc) if "pc" in locals() else 1000000,line_dash="dash")
+                st.plotly_chart(fig,use_container_width=True)
+            trades=st.session_state["portfolio_trades"].get((strategy_pick,period_pick),pd.DataFrame())
+            st.subheader("組合成交明細")
+            st.dataframe(trades,use_container_width=True,hide_index=True)
+            if not trades.empty:
+                st.download_button(
+                    "下載組合交易紀錄 CSV",
+                    trades.to_csv(index=False).encode("utf-8-sig"),
+                    "portfolio_trades.csv","text/csv"
+                )
+            st.caption("注意：目前觀察清單是使用者選定的 10 檔樣本，不代表全台上市櫃股票。各股票依自身資料長度切分，非完全一致的交易所共同日曆。")
+            st.warning("這是歷史研究，不是投資建議。仍未完整納入股息再投資、除權息、漲跌停排隊、停牌、流動性衝擊、下市股及歷史成分股偏誤；樣本外結果不能回頭用於調參。")
