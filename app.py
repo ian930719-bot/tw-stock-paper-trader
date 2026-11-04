@@ -349,7 +349,32 @@ with t6:
         with st.spinner("讀取財務資料…"):
             st.session_state["fund_data"]=fundamental_snapshot(tuple(data.keys()))
     if "fund_data" in st.session_state:
-        st.dataframe(st.session_state["fund_data"],use_container_width=True,hide_index=True)
+        fund=st.session_state["fund_data"].copy()
+        st.dataframe(fund,use_container_width=True,hide_index=True)
+        st.markdown("**巴菲特／彼得林區風格：最新資料簡化篩選**")
+        st.caption("這是當前財務快照的條件檢查，不是完整投資大師模型，也不能用於歷史回測；缺值不會視為通過。")
+        def style_check(row, rules):
+            known=0; passed=0
+            for field, predicate in rules:
+                value=row.get(field)
+                if pd.notna(value):
+                    known+=1
+                    passed+=int(bool(predicate(float(value))))
+            return f"{passed}/{known} 項符合" if known else "資料不足"
+        buffett_rules=[
+            ("ROE",lambda x:x>=0.15),
+            ("自由現金流",lambda x:x>0),
+            ("負債／權益",lambda x:x<=100),
+            ("本益比",lambda x:0<x<=25),
+        ]
+        lynch_rules=[
+            ("營收成長率",lambda x:x>=0.10),
+            ("獲利成長率",lambda x:x>=0.10),
+            ("本益比",lambda x:0<x<=25),
+        ]
+        fund["巴菲特風格條件"] = fund.apply(lambda r:style_check(r,buffett_rules),axis=1)
+        fund["林區風格條件"] = fund.apply(lambda r:style_check(r,lynch_rules),axis=1)
+        st.dataframe(fund[["代號","巴菲特風格條件","林區風格條件","資料狀態"]],use_container_width=True,hide_index=True)
 
     st.divider()
     st.markdown("**多股票共享資金池：訓練／驗證／樣本外**")
