@@ -210,12 +210,20 @@ with t3:
             st.error("持股不足，無法模擬賣出。")
     holdings=[]
     total=st.session_state.paper_cash
+    missing_position_data=[]
     for code,q in st.session_state.paper_positions.items():
+        if code not in data:
+            if q:
+                missing_position_data.append(code)
+                holdings.append({"代號":code,"名稱":W.get(code,code),"股數":q,"參考收盤價":"未載入","市值":"未計入"})
+            continue
         px=float(data[code].iloc[-1].close)
         value=q*px
         total+=value
         if q:
             holdings.append({"代號":code,"名稱":W.get(code,code),"股數":q,"參考收盤價":px,"市值":value})
+    if missing_position_data:
+        st.warning("以下持倉未在目前觀察清單載入，帳戶總資產暫未計入其市值："+", ".join(missing_position_data))
     a,b=st.columns(2)
     a.metric("模擬可用現金",f"NTD {st.session_state.paper_cash:,.0f}")
     b.metric("帳戶總資產",f"NTD {total:,.0f}")
