@@ -1,5 +1,9 @@
 import streamlit as st
 import yfinance as yf
+import requests
+from datetime import timedelta
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import balanced_accuracy_score
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
@@ -41,7 +45,78 @@ def ind(d):
     x["v20"]=x.volume.rolling(20).mean(); x["h20"]=x.high.shift().rolling(20).max()
     x["r20"]=c.pct_change(20); x["r60"]=c.pct_change(60); x["up"]=x.ema21>x.ema21.shift(5)
     return x
-data={}; rows=[]
+
+@st.cache_data(ttl=1800)
+def get_institutional():
+    url = "https://www.twse.com.tw/rwd/zh/fund/T86"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    now = datetime.now(TZ).date()
+    for offset in range(10):
+        day = now - timedelta(days=offset)
+        if day.weekday() >= 5:
+            continue
+        try:
+            res = requests.get(url, params={"response":"json","date":day.strftime("%Y%m%d"),"selectType":"ALLBUT0999"}, headers=headers, timeout=12)
+            j = res.json()
+            fields, rows = j.get("fields", []), j.get("data", [])
+            if not rows:
+                continue
+            idx = {name:i for i,name in enumerate(fields)}
+            required = ["證券代號","外陸資買賣超股數(不含外資自營商)","投信買賣超股數","自營商買賣超股數","三大法人買賣超股數"]
+            if not all(k in idx for k in required):
+                continue
+            out = {}
+            for row in rows:
+                code = str(row[idx["證券代號"]]).strip()
+                def num(key):
+                    try:
+                        return int(float(str(row[idx[key]]).replace(",","").strip()))
+                    except Exception:
+                        return 0
+                out[code] = {"外資買賣超股數":num(required[1]),"投信買賣超股數":num(required[2]),"自營商買賣超股數":num(required[3]),"三大法人買賣超股數":num(required[4]),"資料日期":day.strftime("%Y-%m-%d")}
+            return out
+        except Exception:
+            continue
+    return {}
+
+@st.cache_data(ttl=60)
+def get_quote(code):
+    for suffix in [".TW", ".TWO"]:
+        try:
+            q = yf.Ticker(code+suffix).history(period="1d", interval="1m")
+            if not q.empty:
+                ts = q.index[-1].to_pydatetime()
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=TZ)
+                age = (datetime.now(TZ)-ts.astimezone(TZ)).total_seconds()/60
+                return float(q.Close.iloc[-1]), ts.astimezone(TZ).strftime("%Y-%m-%d %H:%M:%S"), round(age,1)
+        except Exception:
+            pass
+    return None, "無報價", None
+
+def train_ml(d):
+    features = ["rsi","macd","sig","r20","r60","atr","v20","ema21","ema50","ema200"]
+    z = d.copy()
+    z["target"] = (z.close.shift(-5)/z.close-1 > 0.015).astype(float)
+    z.loc[z.index[-5:], "target"] = np.nan
+    z = z.replace([np.inf,-np.inf], np.nan).dropna(subset=features+["target"])
+    if len(z) < 300 or z.target.nunique() < 2:
+        return None, None
+    split = int(len(z)*0.8)
+    train, test = z.iloc[:split], z.iloc[split:]
+    if train.target.nunique() < 2 or test.target.nunique() < 2:
+        return None, None
+    model = RandomForestClassifier(n_estimators=250,max_depth=6,min_samples_leaf=8,class_weight="balanced",random_state=42,n_jobs=-1)
+    model.fit(train[features], train.target.astype(int))
+    metric = balanced_accuracy_score(test.target.astype(int), model.predict(test[features]))
+    last = d.iloc[[-1]][features].replace([np.inf,-np.inf], np.nan)
+    if last.isna().any(axis=None):
+        return None, metric
+    prob = float(model.predict_proba(last)[0][list(model.classes_).index(1)])
+    return prob, metric
+
+inst_data=get_institutional()
+data={}; rows=[]; quotes=[]
 with st.spinner("讀取歷史行情…"):
     for s in ss:
         d=getdata(s,period)
