@@ -34,6 +34,12 @@ def sample_frame(n=620, drift=0.0008, phase=0.0):
 
 
 class ResearchEngineTests(unittest.TestCase):
+    def test_rejects_invalid_risk_budget(self):
+        with self.assertRaises(ValueError):
+            shared_capital_backtest({}, STRATEGIES[0], risk_fraction=0.5)
+        with self.assertRaises(ValueError):
+            shared_capital_backtest({}, STRATEGIES[0], initial_capital=0)
+
     def test_empty_performance(self):
         result = performance(pd.Series(dtype=float), 100000)
         self.assertEqual(result["期末資產"], 100000)
