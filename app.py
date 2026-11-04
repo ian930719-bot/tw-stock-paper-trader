@@ -341,6 +341,85 @@ with t5:
 
 with t6:
     st.subheader("整合研究中心")
+
+    st.markdown("**市場基準比較與成本敏感度**")
+    st.caption("基準使用 0050 還原價格（可投資 ETF）及加權指數價格指數；比較區間與觀察清單共同交易日曆一致。基準未扣交易成本、股息稅務與追蹤誤差，指數為價格報酬，不含股息。")
+    benchmark_period=st.selectbox("基準／成本分析期間",["完整歷史期間","樣本外區段"],index=1,key="benchmark_period")
+    benchmark_button=st.button("執行基準比較與成本敏感度",key="run_benchmark_cost")
+    if benchmark_button:
+        calendar_all=sorted(set().union(*[
+            set(pd.to_datetime(z["date"])) for z in data.values() if not z.empty
+        ]))
+        if benchmark_period=="樣本外區段":
+            start_idx=int(len(calendar_all)*0.8)
+            analysis_start=pd.Timestamp(calendar_all[start_idx]) if calendar_all else None
+        else:
+            analysis_start=pd.Timestamp(calendar_all[0]) if calendar_all else None
+        analysis_end=pd.Timestamp(calendar_all[-1]) if calendar_all else None
+        bench_rows=[]; bench_curves={}
+        if analysis_start is not None:
+            for code,label in [("0050","0050 買進持有"),("^TWII","加權指數價格報酬")]:
+                try:
+                    if code=="0050":
+                        raw_b=getdata("0050",period)
+                    else:
+                        raw_b=yf.Ticker("^TWII").history(period=period,interval="1d",auto_adjust=True)
+                        if not raw_b.empty:
+                            raw_b=raw_b.reset_index().rename(columns={"Date":"date","Datetime":"date","Close":"close"})
+                            raw_b["date"]=pd.to_datetime(raw_b["date"]).dt.tz_localize(None)
+                            raw_b=raw_b[["date","close"]].dropna()
+                    if raw_b is None or raw_b.empty:
+                        continue
+                    b=raw_b.copy()
+                    if "close" not in b:
+                        b=b.rename(columns={"Close":"close","Date":"date"})
+                    b["date"]=pd.to_datetime(b["date"])
+                    b=b[(b["date"]>=analysis_start)&(b["date"]<=analysis_end)].sort_values("date")
+                    if len(b)<2:
+                        continue
+                    base=float(b["close"].iloc[0])
+                    b["資產"]=float(capital)*b["close"]/base
+                    peak=b["資產"].cummax()
+                    dd=float((b["資產"]/peak-1).min())
+                    total=float(b["資產"].iloc[-1]/capital-1)
+                    years=max((b["date"].iloc[-1]-b["date"].iloc[0]).days/365.25,1/252)
+                    bench_rows.append({"比較標的":label,"起始日":b["date"].iloc[0].date(),"結束日":b["date"].iloc[-1].date(),"總報酬":total,"年化報酬":(1+total)**(1/years)-1,"最大回撤":dd,"資料筆數":len(b)})
+                    bench_curves[label]=b[["date","資產"]].rename(columns={"date":"日期"})
+                except Exception as exc:
+                    st.warning(f"{label} 資料取得失敗：{exc}")
+        st.session_state["benchmark_rows"]=pd.DataFrame(bench_rows)
+        st.session_state["benchmark_curves"]=bench_curves
+        # Stress test identical portfolio rules under progressively higher
+        # one-way slippage assumptions; no parameter is optimized on the result.
+        stress_rows=[]
+        for strategy in STRATEGIES:
+            for slip,label in [(0.001,"單邊滑價 0.10%"),(0.002,"單邊滑價 0.20%"),(0.003,"單邊滑價 0.30%")]:
+                result=shared_capital_backtest(
+                    data,strategy,initial_capital=float(capital),
+                    max_positions=5,fee=0.001425,sell_tax=0.003,
+                    slippage=slip,warmup=260
+                )
+                m=result["metrics"]
+                stress_rows.append({"策略":strategy,"成本情境":label,"期末資產":m["期末資產"],"總報酬":m["總報酬"],"年化報酬":m["年化報酬"],"最大回撤":m["最大回撤"],"Sharpe":m["Sharpe"],"交易筆數":len(result["trades"])})
+        st.session_state["cost_stress_rows"]=pd.DataFrame(stress_rows)
+        st.session_state["benchmark_config"]=(period,tuple(sorted(data.keys())),float(capital),benchmark_period)
+    current_benchmark_config=(period,tuple(sorted(data.keys())),float(capital),benchmark_period)
+    if st.session_state.get("benchmark_config")==current_benchmark_config:
+        if not st.session_state["benchmark_rows"].empty:
+            st.subheader("買進持有基準")
+            st.dataframe(st.session_state["benchmark_rows"].style.format({"總報酬":"{:.1%}","年化報酬":"{:.1%}","最大回撤":"{:.1%}"}),use_container_width=True,hide_index=True)
+            bf=go.Figure()
+            for label,curve in st.session_state["benchmark_curves"].items():
+                bf.add_trace(go.Scatter(x=curve["日期"],y=curve["資產"],name=label))
+            bf.add_hline(y=float(capital),line_dash="dash")
+            bf.update_layout(title="基準資產曲線（未扣交易成本）",yaxis_title="新台幣")
+            st.plotly_chart(bf,use_container_width=True)
+        else:
+            st.warning("未取得足夠的 0050 或加權指數資料，請稍後重試。")
+        st.subheader("滑價成本敏感度")
+        st.dataframe(st.session_state["cost_stress_rows"].style.format({"期末資產":"{:,.0f}","總報酬":"{:.1%}","年化報酬":"{:.1%}","最大回撤":"{:.1%}","Sharpe":"{:.2f}"}),use_container_width=True,hide_index=True)
+        st.caption("成本敏感度固定手續費 0.1425%、一般股票賣出稅 0.3%，只將單邊滑價由 0.1% 提高至 0.3%；完整交易成本、ETF 稅率與市場衝擊仍未涵蓋。")
+
     st.markdown("**基本面快照（最新可取得資料）**")
     st.caption("以下為目前可取得的最新快照，不是歷史逐期財報；不會用來回填歷史交易訊號。")
     if st.button("載入基本面資料",key="fund_load"):
