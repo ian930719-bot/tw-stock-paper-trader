@@ -162,7 +162,8 @@ with t2:
     s=st.selectbox("回測標的",list(data),key="bt"); x=data[s].copy().reset_index(drop=True)
     x["entry"]=(x.close>x.ema21)&x.up&x.rsi.between(50,70)&(x.macd>x.sig)&(x.volume>1.5*x.v20)&(x.close>x.h20)
     x["exit"]=(x.close<x.ema21)|(x.rsi>75)|(x.macd<x.sig)
-    cash=float(capital); qty=0; stop=0; trades=[]; curve=[]
+    cash=float(capital); qty=0; stop=0; trades=[]
+    curve=[{"日期":x.iloc[0].date,"資產":float(capital)}]
     for i in range(len(x)-1):
         r,n=x.iloc[i],x.iloc[i+1]; op=float(n.open)
         if qty and (r.exit or n.low<=stop):
@@ -172,9 +173,10 @@ with t2:
             px=op*1.001; stop=px-2*(r.atr if pd.notna(r.atr) else px*.04)
             q=max(0,min(int(risk/max(px-stop,.01)),int(cash/(px*1.001425))))
             if q: trades.append({"進場日":str(n.date.date()),"股數":q,"進場價":px,"投入前現金":cash}); cash-=q*px*1.001425; qty=q
-        curve.append({"日期":r.date,"資產":cash+qty*r.close})
+        curve.append({"日期":n.date,"資產":cash+qty*float(n.close)})
     if qty:
         px=float(x.iloc[-1].close)*.999; cash+=qty*px*(1-.001425-.003); trades[-1]["損益"]=cash-trades[-1]["投入前現金"]; trades[-1]["備註"]="期末平倉"
+        curve[-1]["資產"]=cash
     a,b,c=st.columns(3); a.metric("期末資產",f"NTD {cash:,.0f}"); b.metric("交易筆數",len(trades))
     c.metric("勝率",f"{sum(z.get('損益',0)>0 for z in trades)/len(trades):.1%}" if trades else "無交易")
     st.warning("簡化回測：收盤產生訊號、次日開盤成交，含估算手續費、證交稅及滑價；未完整處理除權息、停牌、漲跌停、流動性與下市股偏誤。")
