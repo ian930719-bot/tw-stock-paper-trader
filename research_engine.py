@@ -227,7 +227,9 @@ def shared_capital_backtest(
                 continue
             # Today's order may only use information available at the prior close.
             # Fill at today's open; never use today's close/high/low to create the entry.
-            if i < 1:
+            if i < 1 or i >= len(z) - 1:
+                # Do not open a new position on a symbol's final bar: there is
+                # no subsequent session in which the position can be managed.
                 continue
             signal_row = z.iloc[i - 1]
             if not bool(signal_row["_entry"]):
@@ -337,13 +339,20 @@ def shared_capital_backtest(
         eq.loc[eq.index[-1], "持倉數"] = 0
         eq.loc[eq.index[-1], "資產"] = cash
     if not eq.empty:
-        daily_returns = eq.set_index("日期")["資產"].pct_change().fillna(0.0)
+        daily_returns = eq.set_index("日期")["資產"].pct_change()
+        # Include first-day execution costs and mark-to-market P&L relative to
+        # the initial cash balance instead of forcing the first return to zero.
+        daily_returns.iloc[0] = float(eq["資產"].iloc[0]) / float(initial_capital) - 1.0
+        daily_returns = daily_returns.replace([np.inf, -np.inf], np.nan).fillna(0.0)
         metrics = performance(daily_returns, initial_capital)
         metrics["期末資產"] = float(cash)
         metrics["總報酬"] = float(cash / initial_capital - 1.0)
         years = max((pd.Timestamp(eq["日期"].iloc[-1]) - pd.Timestamp(eq["日期"].iloc[0])).days / 365.25, 1/252)
         metrics["年化報酬"] = float((cash / initial_capital) ** (1 / years) - 1) if cash > 0 else -1.0
-        peak = eq["資產"].cummax()
+        peak = pd.Series(
+            np.maximum.accumulate(np.r_[float(initial_capital), eq["資產"].to_numpy()])[1:],
+            index=eq.index,
+        )
         metrics["最大回撤"] = float((eq["資產"] / peak - 1).min())
     else:
         metrics = performance(pd.Series(dtype=float), initial_capital)
