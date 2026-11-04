@@ -387,6 +387,7 @@ with t6:
             train_ratio=float(st.session_state.get("wf_train",60))/100
             valid_ratio=float(st.session_state.get("wf_valid",20))/100
             risk_fraction=float(st.session_state.get("wf_risk_percent",0.5))/100
+            analysis_capital=float(st.session_state.get("wf_capital",capital))
             if benchmark_period=="樣本外區段":
                 start_idx=min(len(calendar_all)-1,int(len(calendar_all)*(train_ratio+valid_ratio)))
                 analysis_start=pd.Timestamp(calendar_all[start_idx])
@@ -428,10 +429,10 @@ with t6:
                     if len(b)<2:
                         continue
                     base=float(b["close"].iloc[0])
-                    b["資產"]=float(capital)*b["close"]/base
+                    b["資產"]=analysis_capital*b["close"]/base
                     peak=b["資產"].cummax()
                     dd=float((b["資產"]/peak-1).min())
-                    total=float(b["資產"].iloc[-1]/capital-1)
+                    total=float(b["資產"].iloc[-1]/analysis_capital-1)
                     years=max((b["date"].iloc[-1]-b["date"].iloc[0]).days/365.25,1/252)
                     bench_rows.append({"比較標的":label,"起始日":b["date"].iloc[0].date(),"結束日":b["date"].iloc[-1].date(),"總報酬":total,"年化報酬":(1+total)**(1/years)-1,"最大回撤":dd,"資料筆數":len(b)})
                     bench_curves[label]=b[["date","資產"]].rename(columns={"date":"日期"})
@@ -441,7 +442,7 @@ with t6:
             for strategy in STRATEGIES:
                 for slip,label in [(0.001,"單邊滑價 0.10%"),(0.002,"單邊滑價 0.20%"),(0.003,"單邊滑價 0.30%")]:
                     result=shared_capital_backtest(
-                        analysis_frames,strategy,initial_capital=float(capital),
+                        analysis_frames,strategy,initial_capital=analysis_capital,
                         max_positions=int(st.session_state.get("wf_max_positions",5)),
                         risk_fraction=risk_fraction,
                         fee=0.001425,sell_tax=0.003,slippage=slip,
@@ -455,8 +456,8 @@ with t6:
             st.session_state["benchmark_curves"]=bench_curves
             st.session_state["strategy_benchmark_curves"]=strategy_curves
             st.session_state["cost_stress_rows"]=pd.DataFrame(stress_rows)
-            st.session_state["benchmark_config"]=(period,tuple(sorted(data.keys())),float(capital),benchmark_period,train_ratio,valid_ratio,int(st.session_state.get("wf_max_positions",5)),risk_fraction)
-    current_benchmark_config=(period,tuple(sorted(data.keys())),float(capital),benchmark_period,float(st.session_state.get("wf_train",60))/100,float(st.session_state.get("wf_valid",20))/100,int(st.session_state.get("wf_max_positions",5)),float(st.session_state.get("wf_risk_percent",0.5))/100)
+            st.session_state["benchmark_config"]=(period,tuple(sorted(data.keys())),analysis_capital,benchmark_period,train_ratio,valid_ratio,int(st.session_state.get("wf_max_positions",5)),risk_fraction)
+    current_benchmark_config=(period,tuple(sorted(data.keys())),float(st.session_state.get("wf_capital",capital)),benchmark_period,float(st.session_state.get("wf_train",60))/100,float(st.session_state.get("wf_valid",20))/100,int(st.session_state.get("wf_max_positions",5)),float(st.session_state.get("wf_risk_percent",0.5))/100)
     if st.session_state.get("benchmark_config")==current_benchmark_config:
         if not st.session_state["benchmark_rows"].empty:
             st.subheader("策略與市場基準資產曲線")
@@ -467,7 +468,7 @@ with t6:
                 bf.add_trace(go.Scatter(x=selected_curve["日期"],y=selected_curve["資產"],name=strategy_curve_pick))
             for label,curve in st.session_state["benchmark_curves"].items():
                 bf.add_trace(go.Scatter(x=curve["日期"],y=curve["資產"],name=label))
-            bf.add_hline(y=float(capital),line_dash="dash")
+            bf.add_hline(y=float(st.session_state.get("wf_capital",capital)),line_dash="dash")
             bf.update_layout(title="相同區間策略與基準比較（基準未扣成本）",yaxis_title="新台幣")
             st.plotly_chart(bf,use_container_width=True)
             st.dataframe(st.session_state["benchmark_rows"].style.format({"總報酬":"{:.1%}","年化報酬":"{:.1%}","最大回撤":"{:.1%}"}),use_container_width=True,hide_index=True)
