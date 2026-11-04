@@ -266,6 +266,22 @@ def shared_capital_backtest(
                     "entry_date": str(pd.Timestamp(d).date()), "stop": stop,
                     "exit_next": False,
                 }
+                # If the stop is touched later on the entry day, simulate the
+                # stop fill rather than waiting until the following session.
+                if float(row["low"]) <= stop:
+                    fill = min(float(row["open"]), stop) * (1.0 - slip_rate)
+                    proceeds = shares * fill * (1.0 - fee_rate - tax_rate)
+                    pnl = proceeds - entry_cost
+                    trades.append({
+                        "代號": code, "訊號日": positions[code]["signal_date"],
+                        "進場日": positions[code]["entry_date"],
+                        "出場日": str(pd.Timestamp(d).date()), "股數": shares,
+                        "進場成本": entry_cost, "出場收入": proceeds,
+                        "損益": pnl, "報酬率": pnl / entry_cost if entry_cost else 0.0,
+                        "出場原因": "進場日觸及停損",
+                    })
+                    cash += proceeds
+                    del positions[code]
 
         # The current close creates an exit instruction for the next session.
         for code, p in positions.items():
@@ -308,6 +324,10 @@ def shared_capital_backtest(
         cash += proceeds
 
     eq = pd.DataFrame(equity_rows)
+    if not eq.empty:
+        eq.loc[eq.index[-1], "現金"] = cash
+        eq.loc[eq.index[-1], "持倉市值"] = 0.0
+        eq.loc[eq.index[-1], "資產"] = cash
     if not eq.empty:
         daily_returns = eq.set_index("日期")["資產"].pct_change().fillna(0.0)
         metrics = performance(daily_returns, initial_capital)
