@@ -130,7 +130,7 @@ with st.spinner("讀取歷史行情…"):
         quotes.append({"代號":s,"名稱":W[s],"盤中參考價":price,"報價時間":qt,"資料約幾分鐘前":age})
         rows.append({"代號":s,"名稱":W[s],"規則分數":int(score),"訊號":("多因子觀察" if score>=70 and prob is not None and prob>=0.55 else "技術候選（AI資料不足）" if score>=70 and prob is None else "AI未確認" if score>=70 else "等待" if score>=50 else "不進場"),"AI五日上漲機率":round(prob,3) if prob is not None else None,"模型測試平衡準確率":round(metric,3) if metric is not None else None,"三大法人買賣超(股)":net,"法人資料日期":inst.get("資料日期") if inst else None,"RSI14":round(r.rsi,1) if pd.notna(r.rsi) else None,"20日報酬":r.r20,"60日報酬":r.r60,"日線日期":r.date.strftime("%Y-%m-%d")})
 if not data: st.error("目前無法取得歷史行情，請稍後重試。"); st.stop()
-t1,t2,t3,t4=st.tabs(["行情監控","歷史回測","模擬帳本","資料限制"])
+t1,t2,t3,t4,t5=st.tabs(["行情監控","歷史回測","模擬帳本","資料限制","大師策略回測"])
 with t1:
     st.subheader("盤中參考行情（可能延遲）")
     st.dataframe(pd.DataFrame(quotes),use_container_width=True,hide_index=True)
@@ -216,3 +216,96 @@ with t4:
     st.markdown("AI 欄位使用隨機森林，以歷史技術特徵預測未來 5 個交易日報酬是否超過 1.5%，按時間順序切分訓練與測試資料。平衡準確率是歷史測試指標，不代表未來勝率或獲利保證。")
     st.markdown("回測成本假設：手續費 0.1425%、一般股票賣出稅 0.3%、滑價 0.1%。尚未完整處理除權息、停牌、漲跌停、流動性與下市股偏誤。不連接券商、不會下單。")
     st.write("台北時間：",datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"))
+
+
+with t5:
+    st.subheader("投資大師策略：歷史比較回測")
+    st.caption("目前先測試三種可用日線資料量化的技術策略代理。買賣以訊號日後一交易日開盤價成交；成本包含估算手續費、賣出證交稅及滑價。")
+    bs=st.selectbox("策略回測標的",list(data),format_func=lambda z:z+" "+W[z],key="master_bt")
+    initial=st.number_input("策略回測本金",100000,10000000,1000000,100000,key="master_capital")
+    frame=data[bs].copy().reset_index(drop=True)
+    close=frame.close
+    high52=frame.high.rolling(252,min_periods=120).max()
+    low52=frame.low.rolling(252,min_periods=120).min()
+    sma150=close.rolling(150).mean()
+    sma200=close.rolling(200).mean()
+    sma200_old=sma200.shift(20)
+    sma50=close.rolling(50).mean()
+    rel20=close.pct_change(20)
+    rel60=close.pct_change(60)
+    # Technical proxies only; not full CAN SLIM or fundamental screens.
+    signal_map={
+        "Minervini 趨勢模板":(
+            (close>sma50)&(sma50>sma150)&(sma150>sma200)&(sma200>sma200_old)&
+            (close>=low52*1.25)&(close>=high52*0.75)&(rel20>0)&(rel60>0),
+            (close<sma50)|(close<sma150)
+        ),
+        "O’Neil CAN SLIM 技術代理":(
+            (close>frame.h20)&(frame.volume>1.4*frame.v20)&(close>sma50)&(rel20>0),
+            (close<sma50)|(close<frame.ema21)
+        ),
+        "Livermore 順勢突破":(
+            (close>frame.h20)&(close>frame.ema50)&frame.up&(rel20>0),
+            (close<frame.ema21)|(close<frame.ema50)
+        )
+    }
+    def run_master_backtest(entry_signal, exit_signal, hist, starting_cash):
+        cash=float(starting_cash); qty=0.0; entry_cost=0.0; stop=0.0
+        trades=[]; curve=[]; fee=0.001425; tax=0.003; slip=0.001
+        for i in range(len(hist)-1):
+            today=hist.iloc[i]; nxt=hist.iloc[i+1]
+            next_open=float(nxt.open)
+            if qty>0 and (bool(exit_signal.iloc[i]) or float(nxt.low)<=stop):
+                fill=min(next_open,stop) if float(nxt.low)<=stop else next_open
+                fill*=1-slip
+                proceeds=qty*fill*(1-fee-tax)
+                pnl=proceeds-entry_cost
+                trades.append({"進場日":entry_date,"出場日":str(nxt.date.date()),"股數":qty,"損益":pnl,"報酬率":pnl/entry_cost if entry_cost else 0})
+                cash+=proceeds; qty=0.0; entry_cost=0.0; stop=0.0
+            if qty==0 and bool(entry_signal.iloc[i]):
+                fill=next_open*(1+slip)
+                atr=float(today.atr) if pd.notna(today.atr) else fill*0.04
+                stop=fill-2*atr
+                risk_budget=starting_cash*0.005
+                shares=max(0,int(risk_budget/max(fill-stop,0.01)))
+                shares=min(shares,int(cash/(fill*(1+fee))))
+                if shares>0:
+                    entry_cost=shares*fill*(1+fee)
+                    cash-=entry_cost; qty=float(shares); entry_date=str(nxt.date.date())
+            curve.append({"日期":today.date,"資產":cash+qty*float(today.close)})
+        if qty>0:
+            last=hist.iloc[-1]; fill=float(last.close)*(1-slip)
+            proceeds=qty*fill*(1-fee-tax); pnl=proceeds-entry_cost
+            trades.append({"進場日":entry_date,"出場日":str(last.date.date()),"股數":qty,"損益":pnl,"報酬率":pnl/entry_cost if entry_cost else 0})
+            cash+=proceeds
+        eq=pd.DataFrame(curve)
+        final_value=float(cash)
+        if not eq.empty:
+            vals=eq["資產"].astype(float)
+            peaks=vals.cummax()
+            maxdd=float((vals/peaks-1).min())
+            daily=vals.pct_change().dropna()
+            sharpe=float((daily.mean()/daily.std())*np.sqrt(252)) if daily.std()>0 else 0.0
+            years=max((pd.to_datetime(eq["日期"].iloc[-1])-pd.to_datetime(eq["日期"].iloc[0])).days/365.25,0.1)
+            cagr=(final_value/starting_cash)**(1/years)-1 if final_value>0 else -1.0
+        else:
+            maxdd=0.0; sharpe=0.0; cagr=0.0
+        winrate=float(np.mean([t["損益"]>0 for t in trades])) if trades else 0.0
+        return {"期末資產":final_value,"總報酬":final_value/starting_cash-1,"年化報酬":cagr,"最大回撤":maxdd,"Sharpe":sharpe,"交易筆數":len(trades),"勝率":winrate},eq,pd.DataFrame(trades)
+    results=[]; curves={}; trade_tables={}
+    for name,(ent,ex) in signal_map.items():
+        metrics,equity,trades=run_master_backtest(ent.fillna(False),ex.fillna(False),frame,initial)
+        metrics["策略"]=name
+        results.append(metrics); curves[name]=equity; trade_tables[name]=trades
+    result_df=pd.DataFrame(results)[["策略","期末資產","總報酬","年化報酬","最大回撤","Sharpe","交易筆數","勝率"]]
+    st.dataframe(result_df.style.format({"期末資產":"{:,.0f}","總報酬":"{:.1%}","年化報酬":"{:.1%}","最大回撤":"{:.1%}","Sharpe":"{:.2f}","勝率":"{:.1%}"}),use_container_width=True,hide_index=True)
+    fig=go.Figure()
+    for name,equity in curves.items():
+        if not equity.empty:
+            fig.add_trace(go.Scatter(x=equity["日期"],y=equity["資產"],name=name))
+    fig.add_hline(y=initial,line_dash="dash")
+    fig.update_layout(title="不同策略資產曲線（含估算交易成本）",yaxis_title="新台幣")
+    st.plotly_chart(fig,use_container_width=True)
+    chosen=st.selectbox("查看交易明細",list(signal_map),key="master_trade_detail")
+    st.dataframe(trade_tables[chosen],use_container_width=True,hide_index=True)
+    st.warning("這是單一股票、單策略、簡化的歷史比較，不是全市場逐期選股測試。尚未納入股息再投資、漲跌停成交限制、流動性衝擊及完整存活者偏誤處理。樣本外／滾動驗證尚待下一階段完成；歷史績效不保證未來表現。")
