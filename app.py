@@ -1,0 +1,85 @@
+import streamlit as st
+import yfinance as yf
+import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
+from datetime import datetime
+from zoneinfo import ZoneInfo
+TZ=ZoneInfo("Asia/Taipei")
+W={"2330":"台積電","2454":"聯發科","2308":"台達電","2317":"鴻海","2382":"廣達","3231":"緯創","3017":"奇鋐","2603":"長榮","2881":"富邦金","2891":"中信金"}
+st.set_page_config(page_title="台股模擬交易",layout="wide")
+st.title("台股模擬交易研究系統")
+st.caption("研究用途；行情可能延遲，非交易所認證即時行情。不連接券商、不會送出真實委託。")
+with st.sidebar:
+    ss=st.multiselect("觀察股票",list(W),default=list(W),format_func=lambda x:x+" "+W[x])
+    period=st.selectbox("歷史期間",["5y","3y","2y","1y"])
+    capital=st.number_input("模擬本金",100000,10000000,1000000,100000)
+    risk=st.number_input("單筆風險上限",500,50000,5000,500)
+    if st.button("重新抓取"): st.cache_data.clear()
+if not ss: st.stop()
+@st.cache_data(ttl=300)
+def getdata(code,p):
+    for suffix in [".TW",".TWO"]:
+        try:
+            d=yf.Ticker(code+suffix).history(period=p,interval="1d",auto_adjust=True)
+            if not d.empty:
+                d=d.reset_index(); d=d.rename(columns={"Date":"date","Datetime":"date","Open":"open","High":"high","Low":"low","Close":"close","Volume":"volume"})
+                d["date"]=pd.to_datetime(d.date).dt.tz_localize(None)
+                return d[["date","open","high","low","close","volume"]].dropna()
+        except Exception: pass
+    return pd.DataFrame()
+def ind(d):
+    x=d.copy(); c=x.close
+    for n in [21,50,200]: x["ema"+str(n)]=c.ewm(span=n,adjust=False).mean()
+    u=c.diff().clip(lower=0).ewm(alpha=1/14,adjust=False).mean()
+    v=(-c.diff().clip(upper=0)).ewm(alpha=1/14,adjust=False).mean()
+    x["rsi"]=100-100/(1+u/v.replace(0,np.nan))
+    x["macd"]=c.ewm(span=12,adjust=False).mean()-c.ewm(span=26,adjust=False).mean()
+    x["sig"]=x.macd.ewm(span=9,adjust=False).mean()
+    x["obv"]=(np.sign(c.diff()).fillna(0)*x.volume).cumsum()
+    x["atr"]=pd.concat([x.high-x.low,(x.high-c.shift()).abs(),(x.low-c.shift()).abs()],axis=1).max(axis=1).ewm(alpha=1/14,adjust=False).mean()
+    x["v20"]=x.volume.rolling(20).mean(); x["h20"]=x.high.shift().rolling(20).max()
+    x["r20"]=c.pct_change(20); x["r60"]=c.pct_change(60); x["up"]=x.ema21>x.ema21.shift(5)
+    return x
+data={}; rows=[]
+with st.spinner("讀取歷史行情…"):
+    for s in ss:
+        d=getdata(s,period)
+        if d.empty: continue
+        d=ind(d); d["obvp"]=d.obv.shift(5); data[s]=d; r=d.iloc[-1]
+        score=20*(r.close>r.ema21 and r.up)+10*(r.close>r.ema50)+10*(r.close>r.ema200)+10*(r.r20>0)+5*(r.r60>0)+10*(50<=r.rsi<=70)+10*(r.macd>r.sig)+10*(pd.notna(r.v20) and r.volume>1.5*r.v20 and r.close>r.h20)+5*(r.obv>r.obvp if pd.notna(r.obvp) else False)
+        rows.append({"代號":s,"名稱":W[s],"規則分數":int(score),"訊號":"觀察候選" if score>=70 else "等待" if score>=50 else "不進場","RSI14":round(r.rsi,1) if pd.notna(r.rsi) else None,"20日報酬":r.r20,"60日報酬":r.r60,"日線日期":r.date.strftime("%Y-%m-%d")})
+if not data: st.error("目前無法取得歷史行情，請稍後重試。"); st.stop()
+t1,t2,t3=st.tabs(["行情監控","歷史回測","資料限制"])
+with t1:
+    st.dataframe(pd.DataFrame(rows).sort_values("規則分數",ascending=False),use_container_width=True,hide_index=True)
+    st.caption("規則評分為技術面初版，不是經訓練驗證的機器學習模型；未納入法人與融資融券。")
+    s=st.selectbox("查看個股",list(data),format_func=lambda z:z+" "+W[z]); d=data[s]
+    f=go.Figure(); f.add_trace(go.Scatter(x=d.date,y=d.close,name="還原收盤")); f.add_trace(go.Scatter(x=d.date,y=d.ema21,name="EMA21")); f.add_trace(go.Scatter(x=d.date,y=d.ema50,name="EMA50")); st.plotly_chart(f,use_container_width=True)
+    st.download_button("下載行情指標 CSV",pd.concat([v.assign(代號=k) for k,v in data.items()]).to_csv(index=False).encode("utf-8-sig"),"tw_stock.csv","text/csv")
+with t2:
+    s=st.selectbox("回測標的",list(data),key="bt"); x=data[s].copy().reset_index(drop=True)
+    x["entry"]=(x.close>x.ema21)&x.up&x.rsi.between(50,70)&(x.macd>x.sig)&(x.volume>1.5*x.v20)&(x.close>x.h20)
+    x["exit"]=(x.close<x.ema21)|(x.rsi>75)|(x.macd<x.sig)
+    cash=float(capital); qty=0; stop=0; trades=[]; curve=[]
+    for i in range(len(x)-1):
+        r,n=x.iloc[i],x.iloc[i+1]; op=float(n.open)
+        if qty and (r.exit or n.low<=stop):
+            px=min(op,stop) if n.low<=stop else op; gross=qty*px*.999
+            cash+=gross*(1-.001425-.003); trades[-1]["損益"]=cash-trades[-1]["投入前現金"]; trades[-1]["出場日"]=str(n.date.date()); qty=0
+        if qty==0 and r.entry:
+            px=op*1.001; stop=px-2*(r.atr if pd.notna(r.atr) else px*.04)
+            q=max(0,min(int(risk/max(px-stop,.01)),int(cash/(px*1.001425))))
+            if q: trades.append({"進場日":str(n.date.date()),"股數":q,"進場價":px,"投入前現金":cash}); cash-=q*px*1.001425; qty=q
+        curve.append({"日期":r.date,"資產":cash+qty*r.close})
+    if qty:
+        px=float(x.iloc[-1].close)*.999; cash+=qty*px*(1-.001425-.003); trades[-1]["損益"]=cash-trades[-1]["投入前現金"]; trades[-1]["備註"]="期末平倉"
+    a,b,c=st.columns(3); a.metric("期末資產",f"NTD {cash:,.0f}"); b.metric("交易筆數",len(trades))
+    c.metric("勝率",f"{sum(z.get('損益',0)>0 for z in trades)/len(trades):.1%}" if trades else "無交易")
+    st.warning("簡化回測：收盤產生訊號、次日開盤成交，含估算手續費、證交稅及滑價；未完整處理除權息、停牌、漲跌停、流動性與下市股偏誤。")
+    if curve:
+        f=go.Figure(go.Scatter(x=[z["日期"] for z in curve],y=[z["資產"] for z in curve])); f.add_hline(y=capital,line_dash="dash"); st.plotly_chart(f,use_container_width=True)
+    st.dataframe(pd.DataFrame(trades).drop(columns=["投入前現金"],errors="ignore"),use_container_width=True)
+with t3:
+    st.markdown("歷史日線使用 Yahoo Finance 自動調整資料，逐檔可用期間可能不同。此版本尚未接入法人、融資融券、分點籌碼及交易所認證即時行情。沒有持久化紙上帳本或推播。不連接券商、不會下單。回測成本假設：手續費 0.1425%、一般股票賣出稅 0.3%、滑價 0.1%。")
+    st.write("台北時間：",datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"))
