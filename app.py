@@ -417,7 +417,8 @@ with t6:
     else:
         pc=st.number_input("組合測試本金",100000,10000000,1000000,100000,key="wf_capital")
         maxpos=st.slider("最多同時持有股票數",1,10,5,key="wf_max_positions")
-        st.caption("三段期間依共同交易日曆切分；每段開始會清空前段持倉並以本金重新開始。策略參數不會依樣本外結果調整。")
+        st.caption("三段期間依共同交易日曆切分；每段開始會清空前段持倉並以本金重新開始。策略目前是固定規則，訓練區段僅作樣本內績效參考，尚未自動調參；樣本外結果不得回頭用於調整。")
+        current_portfolio_config=(float(train_pct),float(valid_pct),float(pc),int(maxpos),tuple(sorted(data.keys())),period)
         if st.button("執行全觀察清單組合回測",key="run_shared_portfolio"):
             summaries=[]; curve_map={}; trade_map={}
             # Split by a shared calendar, not by each symbol's row number.
@@ -471,8 +472,9 @@ with t6:
             st.session_state["portfolio_summary"]=pd.DataFrame(summaries)
             st.session_state["portfolio_curves"]=curve_map
             st.session_state["portfolio_trades"]=trade_map
+            st.session_state["portfolio_config"]=current_portfolio_config
 
-        if "portfolio_summary" in st.session_state:
+        if "portfolio_summary" in st.session_state and st.session_state.get("portfolio_config")==current_portfolio_config:
             summary=st.session_state["portfolio_summary"]
             st.dataframe(summary.style.format({
                 "期末資產":"{:,.0f}","總報酬":"{:.1%}","年化報酬":"{:.1%}",
@@ -496,4 +498,6 @@ with t6:
                     "portfolio_trades.csv","text/csv"
                 )
             st.caption("切分依觀察清單共同交易日期進行；各股票僅使用該日以前資料暖機，績效只從各區段起始日計算。觀察清單仍不代表全台上市櫃股票。")
+        elif "portfolio_summary" in st.session_state:
+            st.info("回測參數或觀察清單已變更；請重新執行，避免沿用舊結果。")
             st.warning("這是歷史研究，不是投資建議。仍未完整納入股息再投資、除權息、漲跌停排隊、停牌、流動性衝擊、下市股及歷史成分股偏誤；樣本外結果不能回頭用於調參。")
