@@ -207,7 +207,7 @@ def shared_capital_backtest(
                 proceeds = p["shares"] * fill * (1.0 - fee_rate - tax_rate)
                 pnl = proceeds - p["entry_cost"]
                 trades.append({
-                    "代號": code, "進場日": p["entry_date"],
+                    "代號": code, "訊號日": p["signal_date"], "進場日": p["entry_date"],
                     "出場日": str(pd.Timestamp(d).date()), "股數": p["shares"],
                     "進場成本": p["entry_cost"], "出場收入": proceeds,
                     "損益": pnl, "報酬率": pnl / p["entry_cost"] if p["entry_cost"] else 0.0,
@@ -222,21 +222,35 @@ def shared_capital_backtest(
             z = prepared[code]
             ix = z.index[pd.to_datetime(z["date"]) == d]
             i = int(ix[0])
-            if i <= warmup or code in positions or not bool(row["_entry"]):
+            if i < warmup or code in positions:
                 continue
-            candidates.append((float(row["_momentum"]), code, row))
+            # Today's order may only use information available at the prior close.
+            # Fill at today's open; never use today's close/high/low to create the entry.
+            if i < 1:
+                continue
+            signal_row = z.iloc[i - 1]
+            if not bool(signal_row["_entry"]):
+                continue
+            candidates.append((float(signal_row["_momentum"]), code, row, signal_row))
 
         free_slots = max(0, int(max_positions) - len(positions))
         if free_slots and candidates:
             candidates.sort(reverse=True)
             chosen = candidates[:free_slots]
-            for _, code, row in chosen:
+            for _, code, row, signal_row in chosen:
                 slots_left = max(1, int(max_positions) - len(positions))
                 allocation = cash / slots_left
                 open_px = float(row["open"]) * (1.0 + slip_rate)
-                atr = max(float(row["_atr"]), open_px * .005)
+                atr = max(float(signal_row["_atr"]), open_px * .005)
                 stop = open_px - 2.0 * atr
-                risk_budget = float(initial_capital) * 0.005
+                prior_equity = cash + sum(
+                    p["shares"] * float(prepared[k].loc[
+                        pd.to_datetime(prepared[k]["date"]) < d, "close"
+                    ].iloc[-1])
+                    for k, p in positions.items()
+                    if not prepared[k].loc[pd.to_datetime(prepared[k]["date"]) < d].empty
+                )
+                risk_budget = max(float(prior_equity), 0.0) * 0.005
                 shares_by_risk = int(risk_budget / max(open_px - stop, 0.01))
                 shares_by_cash = int(cash / (open_px * (1.0 + fee_rate)))
                 shares_by_alloc = int(allocation / (open_px * (1.0 + fee_rate)))
@@ -247,6 +261,7 @@ def shared_capital_backtest(
                 cash -= entry_cost
                 positions[code] = {
                     "shares": shares, "entry_cost": entry_cost,
+                    "signal_date": str(pd.Timestamp(signal_row["date"]).date()),
                     "entry_date": str(pd.Timestamp(d).date()), "stop": stop,
                     "exit_next": False,
                 }
@@ -282,7 +297,7 @@ def shared_capital_backtest(
         proceeds = p["shares"] * fill * (1.0 - fee_rate - tax_rate)
         pnl = proceeds - p["entry_cost"]
         trades.append({
-            "代號": code, "進場日": p["entry_date"],
+            "代號": code, "訊號日": p["signal_date"], "進場日": p["entry_date"],
             "出場日": str(pd.Timestamp(last["date"]).date()), "股數": p["shares"],
             "進場成本": p["entry_cost"], "出場收入": proceeds,
             "損益": pnl, "報酬率": pnl / p["entry_cost"] if p["entry_cost"] else 0.0,
