@@ -94,6 +94,7 @@ def get_quote(code):
             pass
     return None, "無報價", None
 
+@st.cache_data(ttl=3600)
 def train_ml(d):
     features = ["rsi","macd","sig","r20","r60","atr","v20","ema21","ema50","ema200"]
     z = d.copy()
@@ -129,7 +130,7 @@ with st.spinner("讀取歷史行情…"):
         quotes.append({"代號":s,"名稱":W[s],"盤中參考價":price,"報價時間":qt,"資料約幾分鐘前":age})
         rows.append({"代號":s,"名稱":W[s],"規則分數":int(score),"訊號":"觀察候選" if score>=70 else "等待" if score>=50 else "不進場","AI五日上漲機率":round(prob,3) if prob is not None else None,"模型測試平衡準確率":round(metric,3) if metric is not None else None,"三大法人買賣超(股)":net,"法人資料日期":inst.get("資料日期") if inst else None,"RSI14":round(r.rsi,1) if pd.notna(r.rsi) else None,"20日報酬":r.r20,"60日報酬":r.r60,"日線日期":r.date.strftime("%Y-%m-%d")})
 if not data: st.error("目前無法取得歷史行情，請稍後重試。"); st.stop()
-t1,t2,t3=st.tabs(["行情監控","歷史回測","資料限制"])
+t1,t2,t3,t4=st.tabs(["行情監控","歷史回測","模擬帳本","資料限制"])
 with t1:
     st.subheader("盤中參考行情（可能延遲）")
     st.dataframe(pd.DataFrame(quotes),use_container_width=True,hide_index=True)
@@ -164,6 +165,51 @@ with t2:
         f=go.Figure(go.Scatter(x=[z["日期"] for z in curve],y=[z["資產"] for z in curve])); f.add_hline(y=capital,line_dash="dash"); st.plotly_chart(f,use_container_width=True)
     st.dataframe(pd.DataFrame(trades).drop(columns=["投入前現金"],errors="ignore"),use_container_width=True)
 with t3:
+    st.subheader("純模擬交易帳本")
+    st.caption("只在目前瀏覽器工作階段保存，不會連接券商；工作階段重啟或服務重啟時可能清空。")
+    if "paper_cash" not in st.session_state:
+        st.session_state.paper_cash=float(capital)
+        st.session_state.paper_positions={}
+        st.session_state.paper_trades=[]
+    ps=st.selectbox("模擬交易股票",list(data),format_func=lambda z:z+" "+W[z],key="paper_symbol")
+    ref=float(data[ps].iloc[-1].close)
+    shares=st.number_input("股數（可模擬零股）",min_value=1,value=100,step=1,key="paper_shares")
+    st.write("參考價（最近日線收盤）：",f"{ref:,.2f}")
+    buycol,sellcol=st.columns(2)
+    if buycol.button("模擬買進"):
+        cost=shares*ref*(1+0.001425)
+        if cost<=st.session_state.paper_cash:
+            st.session_state.paper_cash-=cost
+            st.session_state.paper_positions[ps]=st.session_state.paper_positions.get(ps,0)+shares
+            st.session_state.paper_trades.append({"時間":datetime.now(TZ).strftime("%Y-%m-%d %H:%M"),"代號":ps,"方向":"買進","股數":shares,"參考價":ref,"估算金額":cost})
+        else:
+            st.error("模擬現金不足。")
+    if sellcol.button("模擬賣出"):
+        held=st.session_state.paper_positions.get(ps,0)
+        if shares<=held:
+            gross=shares*ref
+            proceeds=gross*(1-0.001425-0.003)
+            st.session_state.paper_cash+=proceeds
+            st.session_state.paper_positions[ps]=held-shares
+            st.session_state.paper_trades.append({"時間":datetime.now(TZ).strftime("%Y-%m-%d %H:%M"),"代號":ps,"方向":"賣出","股數":shares,"參考價":ref,"估算金額":proceeds})
+        else:
+            st.error("持股不足，無法模擬賣出。")
+    holdings=[]
+    total=st.session_state.paper_cash
+    for code,q in st.session_state.paper_positions.items():
+        px=float(data[code].iloc[-1].close)
+        value=q*px
+        total+=value
+        if q:
+            holdings.append({"代號":code,"名稱":W[code],"股數":q,"參考收盤價":px,"市值":value})
+    a,b=st.columns(2)
+    a.metric("模擬可用現金",f"NTD {st.session_state.paper_cash:,.0f}")
+    b.metric("帳戶總資產",f"NTD {total:,.0f}")
+    st.subheader("目前持倉")
+    st.dataframe(pd.DataFrame(holdings),use_container_width=True,hide_index=True)
+    st.subheader("模擬成交紀錄")
+    st.dataframe(pd.DataFrame(st.session_state.paper_trades),use_container_width=True,hide_index=True)
+with t4:
     st.markdown("歷史日線使用 Yahoo Finance 自動調整資料。盤中參考價可能延遲，非交易所認證即時行情。三大法人數據使用證交所 T86 日報，取最近可取得交易日；API 不可用時顯示空值。尚未接入法人歷史序列、融資融券與分點籌碼。")
     st.markdown("AI 欄位使用隨機森林，以歷史技術特徵預測未來 5 個交易日報酬是否超過 1.5%，按時間順序切分訓練與測試資料。平衡準確率是歷史測試指標，不代表未來勝率或獲利保證。")
     st.markdown("回測成本假設：手續費 0.1425%、一般股票賣出稅 0.3%、滑價 0.1%。尚未完整處理除權息、停牌、漲跌停、流動性與下市股偏誤。不連接券商、不會下單。")
