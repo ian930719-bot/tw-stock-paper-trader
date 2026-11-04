@@ -335,36 +335,40 @@ with t6:
         st.caption("三段期間依共同交易日曆切分；每段開始會清空前段持倉並以本金重新開始。策略參數不會依樣本外結果調整。")
         if st.button("執行全觀察清單組合回測",key="run_shared_portfolio"):
             summaries=[]; curve_map={}; trade_map={}
-            n_total=max((len(z) for z in data.values()),default=0)
+            # Split by a shared calendar, not by each symbol's row number.
+            calendar=sorted(set().union(*[
+                set(pd.to_datetime(z["date"])) for z in data.values() if not z.empty
+            ]))
+            n_total=len(calendar)
             train_end=int(n_total*train_pct)
             valid_end=int(n_total*(train_pct+valid_pct))
-            # Keep pre-segment history as indicator warm-up, but only trade inside
-            # each segment's own date window.
+            segments=[
+                ("訓練",0,train_end),
+                ("驗證",train_end,valid_end),
+                ("樣本外",valid_end,n_total),
+            ]
             for strategy in STRATEGIES:
                 periods={}
-                for label,lo,hi in [
-                    ("訓練",0,train_end),
-                    ("驗證",train_end,valid_end),
-                    ("樣本外",valid_end,n_total),
-                ]:
+                for label,lo,hi in segments:
+                    if hi <= lo:
+                        continue
+                    segment_start=pd.Timestamp(calendar[lo])
+                    segment_end=pd.Timestamp(calendar[hi-1])
                     segment_frames={}
                     for code,z in data.items():
-                        zz=z.copy().reset_index(drop=True)
-                        if hi <= lo or lo >= len(zz):
+                        zz=z.copy().sort_values("date").reset_index(drop=True)
+                        dates=pd.to_datetime(zz["date"])
+                        history=zz.loc[dates < segment_start].tail(260)
+                        active=zz.loc[(dates >= segment_start)&(dates <= segment_end)]
+                        if len(active) < 40:
                             continue
-                        # Cut on each symbol's own chronological observations.
-                        local_lo=min(lo,len(zz))
-                        local_hi=min(hi,len(zz))
-                        if local_hi-local_lo < 40:
-                            continue
-                        # Include up to 260 prior sessions for indicators.
-                        warm_lo=max(0,local_lo-260)
-                        segment_frames[code]=zz.iloc[warm_lo:local_hi].copy()
-                    # To prevent trading during warm-up, the shared engine has a
-                    # fixed warmup guard; restrict input to segment with 260 warmup rows.
+                        # Keep prior observations for indicators, but report and
+                        # trade only from the segment's common start date onward.
+                        segment_frames[code]=pd.concat([history,active],ignore_index=True)
                     result=shared_capital_backtest(
                         segment_frames,strategy,initial_capital=float(pc),
-                        max_positions=int(maxpos),warmup=260
+                        max_positions=int(maxpos),warmup=260,
+                        report_start_date=segment_start
                     ) if segment_frames else None
                     if result:
                         periods[label]=result
@@ -406,5 +410,5 @@ with t6:
                     trades.to_csv(index=False).encode("utf-8-sig"),
                     "portfolio_trades.csv","text/csv"
                 )
-            st.caption("注意：目前觀察清單是使用者選定的 10 檔樣本，不代表全台上市櫃股票。各股票依自身資料長度切分，非完全一致的交易所共同日曆。")
+            st.caption("切分依觀察清單共同交易日期進行；各股票僅使用該日以前資料暖機，績效只從各區段起始日計算。觀察清單仍不代表全台上市櫃股票。")
             st.warning("這是歷史研究，不是投資建議。仍未完整納入股息再投資、除權息、漲跌停排隊、停牌、流動性衝擊、下市股及歷史成分股偏誤；樣本外結果不能回頭用於調參。")
