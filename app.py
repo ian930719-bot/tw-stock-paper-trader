@@ -137,7 +137,7 @@ with t1:
     st.caption("盤中價取自 Yahoo Finance 1 分鐘資料，可能延遲或缺漏；請留意報價時間與分鐘差。")
     st.subheader("技術面、AI 與法人觀察")
     st.dataframe(pd.DataFrame(rows).sort_values("規則分數",ascending=False),use_container_width=True,hide_index=True)
-    st.caption("規則評分為技術面初版，不是經訓練驗證的機器學習模型；未納入法人與融資融券。")
+    st.caption("規則分數已加入最新可取得的三大法人買賣超加分；AI 機率由隨機森林模型提供。法人歷史序列、融資融券與分點籌碼尚未接入。")
     s=st.selectbox("查看個股",list(data),format_func=lambda z:z+" "+W[z]); d=data[s]
     f=go.Figure(); f.add_trace(go.Scatter(x=d.date,y=d.close,name="還原收盤")); f.add_trace(go.Scatter(x=d.date,y=d.ema21,name="EMA21")); f.add_trace(go.Scatter(x=d.date,y=d.ema50,name="EMA50")); st.plotly_chart(f,use_container_width=True)
     st.download_button("下載行情指標 CSV",pd.concat([v.assign(代號=k) for k,v in data.items()]).to_csv(index=False).encode("utf-8-sig"),"tw_stock.csv","text/csv")
@@ -209,6 +209,8 @@ with t3:
     st.dataframe(pd.DataFrame(holdings),use_container_width=True,hide_index=True)
     st.subheader("模擬成交紀錄")
     st.dataframe(pd.DataFrame(st.session_state.paper_trades),use_container_width=True,hide_index=True)
+    if st.session_state.paper_trades:
+        st.download_button("下載模擬成交紀錄 CSV",pd.DataFrame(st.session_state.paper_trades).to_csv(index=False).encode("utf-8-sig"),"paper_trades.csv","text/csv")
 with t4:
     st.markdown("歷史日線使用 Yahoo Finance 自動調整資料。盤中參考價可能延遲，非交易所認證即時行情。三大法人數據使用證交所 T86 日報，取最近可取得交易日；API 不可用時顯示空值。尚未接入法人歷史序列、融資融券與分點籌碼。")
     st.markdown("AI 欄位使用隨機森林，以歷史技術特徵預測未來 5 個交易日報酬是否超過 1.5%，按時間順序切分訓練與測試資料。平衡準確率是歷史測試指標，不代表未來勝率或獲利保證。")
