@@ -55,6 +55,9 @@ class ResearchEngineTests(unittest.TestCase):
         self.assertGreaterEqual(result["metrics"]["期末資產"], 0)
         if not result["equity"].empty:
             self.assertLessEqual(int(result["equity"]["持倉數"].max()), 3)
+            self.assertTrue((result["equity"]["現金"] >= -1e-6).all())
+            self.assertTrue(np.isfinite(result["equity"]["資產"].to_numpy()).all())
+        self.assertTrue(np.isfinite(list(result["metrics"].values())).all())
         if not result["trades"].empty:
             self.assertTrue((result["trades"]["股數"] > 0).all())
             signal_dates = pd.to_datetime(result["trades"]["訊號日"])
