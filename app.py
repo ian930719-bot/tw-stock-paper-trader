@@ -1,3 +1,4 @@
+import json
 import streamlit as st
 import yfinance as yf
 import requests
@@ -221,6 +222,36 @@ with t3:
     st.dataframe(pd.DataFrame(st.session_state.paper_trades),use_container_width=True,hide_index=True)
     if st.session_state.paper_trades:
         st.download_button("下載模擬成交紀錄 CSV",pd.DataFrame(st.session_state.paper_trades).to_csv(index=False).encode("utf-8-sig"),"paper_trades.csv","text/csv")
+
+    st.divider()
+    st.subheader("帳本備份與跨裝置還原")
+    st.caption("目前不提供雲端自動同步；可下載 JSON 備份，換裝置後再匯入。匯入會覆蓋目前模擬帳本。")
+    backup={
+        "version":1,
+        "cash":float(st.session_state.paper_cash),
+        "positions":st.session_state.paper_positions,
+        "trades":st.session_state.paper_trades,
+    }
+    st.download_button(
+        "下載完整帳本備份 JSON",
+        json.dumps(backup,ensure_ascii=False,indent=2).encode("utf-8"),
+        "paper_ledger_backup.json","application/json"
+    )
+    uploaded=st.file_uploader("選擇先前下載的帳本 JSON",type=["json"],key="ledger_upload")
+    if uploaded is not None and st.button("匯入並覆蓋目前帳本",key="ledger_restore"):
+        try:
+            payload=json.loads(uploaded.getvalue().decode("utf-8"))
+            cash_value=float(payload["cash"])
+            positions_value={str(k):int(v) for k,v in payload["positions"].items()}
+            trades_value=payload["trades"]
+            if cash_value < 0 or any(v < 0 for v in positions_value.values()) or not isinstance(trades_value,list):
+                raise ValueError("帳本內容不符合格式")
+            st.session_state.paper_cash=cash_value
+            st.session_state.paper_positions=positions_value
+            st.session_state.paper_trades=trades_value
+            st.success("帳本已匯入目前工作階段。")
+        except Exception as exc:
+            st.error(f"匯入失敗：{exc}")
 with t4:
     st.markdown("歷史日線使用 Yahoo Finance 自動調整資料。盤中參考價可能延遲，非交易所認證即時行情。三大法人數據使用證交所 T86 日報，取最近可取得交易日；API 不可用時顯示空值。尚未接入法人歷史序列、融資融券與分點籌碼。")
     st.markdown("AI 欄位使用隨機森林，以歷史技術特徵預測未來 5 個交易日報酬是否超過 1.5%，按時間順序切分訓練與測試資料。平衡準確率是歷史測試指標，不代表未來勝率或獲利保證。")
