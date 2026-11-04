@@ -335,7 +335,7 @@ with t5:
         for strategy in STRATEGIES:
             result=shared_capital_backtest(
                 {bs:frame},strategy,initial_capital=float(initial),
-                max_positions=1,warmup=0
+                max_positions=1,risk_fraction=min(max(float(risk)/float(initial),0.0001),0.10),warmup=0
             )
             metrics=result["metrics"].copy()
             trades=result["trades"]
@@ -386,6 +386,7 @@ with t6:
         else:
             train_ratio=float(st.session_state.get("wf_train",60))/100
             valid_ratio=float(st.session_state.get("wf_valid",20))/100
+            risk_fraction=float(st.session_state.get("wf_risk_percent",0.5))/100
             if benchmark_period=="樣本外區段":
                 start_idx=min(len(calendar_all)-1,int(len(calendar_all)*(train_ratio+valid_ratio)))
                 analysis_start=pd.Timestamp(calendar_all[start_idx])
@@ -442,6 +443,7 @@ with t6:
                     result=shared_capital_backtest(
                         analysis_frames,strategy,initial_capital=float(capital),
                         max_positions=int(st.session_state.get("wf_max_positions",5)),
+                        risk_fraction=risk_fraction,
                         fee=0.001425,sell_tax=0.003,slippage=slip,
                         warmup=warmup_n,report_start_date=report_start
                     )
@@ -453,8 +455,8 @@ with t6:
             st.session_state["benchmark_curves"]=bench_curves
             st.session_state["strategy_benchmark_curves"]=strategy_curves
             st.session_state["cost_stress_rows"]=pd.DataFrame(stress_rows)
-            st.session_state["benchmark_config"]=(period,tuple(sorted(data.keys())),float(capital),benchmark_period,train_ratio,valid_ratio,int(st.session_state.get("wf_max_positions",5)))
-    current_benchmark_config=(period,tuple(sorted(data.keys())),float(capital),benchmark_period,float(st.session_state.get("wf_train",60))/100,float(st.session_state.get("wf_valid",20))/100,int(st.session_state.get("wf_max_positions",5)))
+            st.session_state["benchmark_config"]=(period,tuple(sorted(data.keys())),float(capital),benchmark_period,train_ratio,valid_ratio,int(st.session_state.get("wf_max_positions",5)),risk_fraction)
+    current_benchmark_config=(period,tuple(sorted(data.keys())),float(capital),benchmark_period,float(st.session_state.get("wf_train",60))/100,float(st.session_state.get("wf_valid",20))/100,int(st.session_state.get("wf_max_positions",5)),float(st.session_state.get("wf_risk_percent",0.5))/100)
     if st.session_state.get("benchmark_config")==current_benchmark_config:
         if not st.session_state["benchmark_rows"].empty:
             st.subheader("策略與市場基準資產曲線")
@@ -517,8 +519,9 @@ with t6:
     else:
         pc=st.number_input("組合測試本金",100000,10000000,1000000,100000,key="wf_capital")
         maxpos=st.slider("最多同時持有股票數",1,10,5,key="wf_max_positions")
-        st.caption("三段期間依共同交易日曆切分；每段開始會清空前段持倉並以本金重新開始。策略目前是固定規則，訓練區段僅作樣本內績效參考，尚未自動調參；樣本外結果不得回頭用於調整。")
-        current_portfolio_config=(float(train_pct),float(valid_pct),float(pc),int(maxpos),tuple(sorted(data.keys())),period)
+        risk_pct=st.slider("單筆風險預算（資產百分比）",0.1,2.0,0.5,0.1,key="wf_risk_percent")/100
+        st.caption("單筆風險預算依進場價至 ATR 停損價的距離估算；實際虧損可能因跳空、流動性及滑價超過預算。三段期間依共同交易日曆切分；每段開始會清空前段持倉並以本金重新開始。")
+        current_portfolio_config=(float(train_pct),float(valid_pct),float(pc),int(maxpos),float(risk_pct),tuple(sorted(data.keys())),period)
         if st.button("執行全觀察清單組合回測",key="run_shared_portfolio"):
             summaries=[]; curve_map={}; trade_map={}
             # Split by a shared calendar, not by each symbol's row number.
@@ -553,7 +556,7 @@ with t6:
                         segment_frames[code]=pd.concat([history,active],ignore_index=True)
                     result=shared_capital_backtest(
                         segment_frames,strategy,initial_capital=float(pc),
-                        max_positions=int(maxpos),warmup=260,
+                        max_positions=int(maxpos),risk_fraction=float(risk_pct),warmup=260,
                         report_start_date=segment_start
                     ) if segment_frames else None
                     if result:
