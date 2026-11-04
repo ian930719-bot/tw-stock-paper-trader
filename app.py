@@ -177,7 +177,7 @@ with t2:
     st.dataframe(pd.DataFrame(trades).drop(columns=["投入前現金"],errors="ignore"),use_container_width=True)
 with t3:
     st.subheader("純模擬交易帳本")
-    st.caption("只在目前瀏覽器工作階段保存，不會連接券商；工作階段重啟或服務重啟時可能清空。")
+    st.caption("目前帳本存在 Streamlit 工作階段，不會連接券商；工作階段或服務重啟時可能清空。請使用下方 JSON 備份功能保存與跨裝置還原。")
     if "paper_cash" not in st.session_state:
         st.session_state.paper_cash=float(capital)
         st.session_state.paper_positions={}
