@@ -254,15 +254,46 @@ with t3:
     uploaded=st.file_uploader("選擇先前下載的帳本 JSON",type=["json"],key="ledger_upload")
     if uploaded is not None and st.button("匯入並覆蓋目前帳本",key="ledger_restore"):
         try:
+            if uploaded.size > 5 * 1024 * 1024:
+                raise ValueError("備份檔不得超過 5 MB")
             payload=json.loads(uploaded.getvalue().decode("utf-8"))
+            if not isinstance(payload,dict) or payload.get("version") != 1:
+                raise ValueError("不支援的帳本版本")
             cash_value=float(payload["cash"])
-            positions_value={str(k):int(v) for k,v in payload["positions"].items()}
+            raw_positions=payload["positions"]
             trades_value=payload["trades"]
-            if cash_value < 0 or any(v < 0 for v in positions_value.values()) or not isinstance(trades_value,list):
-                raise ValueError("帳本內容不符合格式")
+            if not np.isfinite(cash_value) or cash_value < 0:
+                raise ValueError("現金必須是有限且不小於零的數值")
+            if not isinstance(raw_positions,dict) or not isinstance(trades_value,list) or len(trades_value)>10000:
+                raise ValueError("持倉或成交紀錄格式不正確")
+            positions_value={}
+            for code,value in raw_positions.items():
+                code=str(code)
+                quantity=int(value)
+                if not code.isdigit() or not 4<=len(code)<=6 or quantity<0 or quantity>100000000:
+                    raise ValueError("持倉代號或股數不合法")
+                positions_value[code]=quantity
+            required_trade_fields={"時間","代號","方向","股數","參考價","估算金額"}
+            clean_trades=[]
+            for trade in trades_value:
+                if not isinstance(trade,dict) or not required_trade_fields.issubset(trade):
+                    raise ValueError("成交紀錄欄位不完整")
+                if not str(trade["代號"]).isdigit() or not 4<=len(str(trade["代號"]))<=6:
+                    raise ValueError("成交紀錄股票代號不合法")
+                if trade["方向"] not in ("買進","賣出"):
+                    raise ValueError("成交方向不合法")
+                quantity=int(trade["股數"])
+                price=float(trade["參考價"])
+                amount=float(trade["估算金額"])
+                if quantity<=0 or not np.isfinite(price) or not np.isfinite(amount) or price<=0 or amount<0:
+                    raise ValueError("成交股數、價格或金額不合法")
+                clean_trades.append({
+                    "時間":str(trade["時間"])[:32],"代號":str(trade["代號"]),
+                    "方向":trade["方向"],"股數":quantity,"參考價":price,"估算金額":amount
+                })
             st.session_state.paper_cash=cash_value
             st.session_state.paper_positions=positions_value
-            st.session_state.paper_trades=trades_value
+            st.session_state.paper_trades=clean_trades
             st.success("帳本已匯入目前工作階段。")
         except Exception as exc:
             st.error(f"匯入失敗：{exc}")
