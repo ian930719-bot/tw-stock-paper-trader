@@ -53,6 +53,8 @@ class ResearchEngineTests(unittest.TestCase):
         self.assertEqual(result["coverage"]["symbols_used"], 7)
         self.assertIsInstance(result["equity"], pd.DataFrame)
         self.assertGreaterEqual(result["metrics"]["期末資產"], 0)
+        if not result["equity"].empty:
+            self.assertLessEqual(int(result["equity"]["持倉數"].max()), 3)
         if not result["trades"].empty:
             self.assertTrue((result["trades"]["股數"] > 0).all())
             signal_dates = pd.to_datetime(result["trades"]["訊號日"])
