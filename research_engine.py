@@ -305,7 +305,8 @@ def shared_capital_backtest(
             market_value += p["shares"] * mark
         if report_start_date is None or pd.Timestamp(d) >= pd.Timestamp(report_start_date):
             equity_rows.append({"日期": pd.Timestamp(d), "現金": cash,
-                                "持倉市值": market_value, "資產": cash + market_value})
+                                "持倉市值": market_value, "持倉數": len(positions),
+                                "資產": cash + market_value})
 
     # Liquidate remaining positions on their last available close with costs.
     for code, p in list(positions.items()):
@@ -327,6 +328,7 @@ def shared_capital_backtest(
     if not eq.empty:
         eq.loc[eq.index[-1], "現金"] = cash
         eq.loc[eq.index[-1], "持倉市值"] = 0.0
+        eq.loc[eq.index[-1], "持倉數"] = 0
         eq.loc[eq.index[-1], "資產"] = cash
     if not eq.empty:
         daily_returns = eq.set_index("日期")["資產"].pct_change().fillna(0.0)
