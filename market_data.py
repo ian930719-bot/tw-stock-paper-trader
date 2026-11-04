@@ -38,11 +38,12 @@ def quote_freshness(quote_time, now=None, stale_after_minutes=20):
         and time(9, 0) <= current.time().replace(tzinfo=None) <= time(13, 30)
     )
 
+    if not same_day:
+        return "非當日報價", round(age, 1)
+
     if in_regular_session:
-        if same_day and age <= stale_after_minutes:
+        if age <= stale_after_minutes:
             return "盤中更新", round(max(age, 0.0), 1)
         return "盤中延遲／可能休市", round(age, 1)
 
-    if same_day:
-        return "當日最後報價（非盤中）", round(max(age, 0.0), 1)
-    return "非當日報價", round(age, 1)
+    return "當日最後報價（非盤中）", round(max(age, 0.0), 1)
