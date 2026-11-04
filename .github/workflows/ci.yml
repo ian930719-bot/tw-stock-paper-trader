@@ -3,7 +3,7 @@ on:
   push:
     branches: [main]
 jobs:
-  syntax:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -11,4 +11,5 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install streamlit yfinance pandas numpy plotly requests scikit-learn
-      - run: python -m py_compile app.py research_engine.py
+      - run: python -m py_compile app.py research_engine.py tests/test_research_engine.py
+      - run: python -m unittest discover -s tests -v
