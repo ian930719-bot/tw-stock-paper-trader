@@ -17,7 +17,10 @@ st.set_page_config(page_title="台股模擬交易",layout="wide")
 st.title("台股模擬交易研究系統")
 st.caption("研究用途；行情可能延遲，非交易所認證即時行情。不連接券商、不會送出真實委託。")
 with st.sidebar:
-    ss=st.multiselect("觀察股票",list(W),default=list(W),format_func=lambda x:x+" "+W[x])
+    ss=st.multiselect("觀察股票",list(W),default=list(W),format_func=lambda x:x+" "+W.get(x,x))
+    custom_codes=st.text_input("額外股票代號（逗號分隔）",placeholder="例如 0050, 006208, 6669")
+    extra_codes=[x.strip() for x in custom_codes.replace("，",",").split(",") if x.strip().isdigit() and 4<=len(x.strip())<=6]
+    ss=list(dict.fromkeys(ss+extra_codes))
     period=st.selectbox("歷史期間",["5y","3y","2y","1y"])
     capital=st.number_input("模擬本金",100000,10000000,1000000,100000)
     risk=st.number_input("單筆風險上限",500,50000,5000,500)
@@ -138,8 +141,8 @@ with st.spinner("讀取歷史行情…"):
         base=20*(r.close>r.ema21 and r.up)+10*(r.close>r.ema50)+10*(r.close>r.ema200)+10*(r.r20>0)+5*(r.r60>0)+10*(50<=r.rsi<=70)+10*(r.macd>r.sig)+10*(pd.notna(r.v20) and r.volume>1.5*r.v20 and r.close>r.h20)+5*(r.obv>r.obvp if pd.notna(r.obvp) else False)
         score=base+(10 if net is not None and net>0 else 0)
         prob,metric=train_ml(d); price,qt,age=get_quote(s)
-        quotes.append({"代號":s,"名稱":W[s],"盤中參考價":price,"報價時間":qt,"資料約幾分鐘前":age})
-        rows.append({"代號":s,"名稱":W[s],"規則分數":int(score),"訊號":("多因子觀察" if score>=70 and prob is not None and prob>=0.55 else "技術候選（AI資料不足）" if score>=70 and prob is None else "AI未確認" if score>=70 else "等待" if score>=50 else "不進場"),"AI五日上漲機率":round(prob,3) if prob is not None else None,"模型測試平衡準確率":round(metric,3) if metric is not None else None,"三大法人買賣超(股)":net,"法人資料日期":inst.get("資料日期") if inst else None,"RSI14":round(r.rsi,1) if pd.notna(r.rsi) else None,"20日報酬":r.r20,"60日報酬":r.r60,"日線日期":r.date.strftime("%Y-%m-%d")})
+        quotes.append({"代號":s,"名稱":W.get(s,s),"盤中參考價":price,"報價時間":qt,"資料約幾分鐘前":age})
+        rows.append({"代號":s,"名稱":W.get(s,s),"規則分數":int(score),"訊號":("多因子觀察" if score>=70 and prob is not None and prob>=0.55 else "技術候選（AI資料不足）" if score>=70 and prob is None else "AI未確認" if score>=70 else "等待" if score>=50 else "不進場"),"AI五日上漲機率":round(prob,3) if prob is not None else None,"模型測試平衡準確率":round(metric,3) if metric is not None else None,"三大法人買賣超(股)":net,"法人資料日期":inst.get("資料日期") if inst else None,"RSI14":round(r.rsi,1) if pd.notna(r.rsi) else None,"20日報酬":r.r20,"60日報酬":r.r60,"日線日期":r.date.strftime("%Y-%m-%d")})
 if not data: st.error("目前無法取得歷史行情，請稍後重試。"); st.stop()
 t1,t2,t3,t4,t5,t6=st.tabs(["行情監控","歷史回測","模擬帳本","資料限制","大師策略回測","整合研究中心"])
 with t1:
@@ -149,7 +152,7 @@ with t1:
     st.subheader("技術面、AI 與法人觀察")
     st.dataframe(pd.DataFrame(rows).sort_values("規則分數",ascending=False),use_container_width=True,hide_index=True)
     st.caption("規則分數已加入最新可取得的三大法人買賣超加分；AI 機率由隨機森林模型提供。法人歷史序列、融資融券與分點籌碼尚未接入。")
-    s=st.selectbox("查看個股",list(data),format_func=lambda z:z+" "+W[z]); d=data[s]
+    s=st.selectbox("查看個股",list(data),format_func=lambda z:z+" "+W.get(z,z)); d=data[s]
     f=go.Figure(); f.add_trace(go.Scatter(x=d.date,y=d.close,name="還原收盤")); f.add_trace(go.Scatter(x=d.date,y=d.ema21,name="EMA21")); f.add_trace(go.Scatter(x=d.date,y=d.ema50,name="EMA50")); st.plotly_chart(f,use_container_width=True)
     st.download_button("下載行情指標 CSV",pd.concat([v.assign(代號=k) for k,v in data.items()]).to_csv(index=False).encode("utf-8-sig"),"tw_stock.csv","text/csv")
 with t2:
@@ -182,7 +185,7 @@ with t3:
         st.session_state.paper_cash=float(capital)
         st.session_state.paper_positions={}
         st.session_state.paper_trades=[]
-    ps=st.selectbox("模擬交易股票",list(data),format_func=lambda z:z+" "+W[z],key="paper_symbol")
+    ps=st.selectbox("模擬交易股票",list(data),format_func=lambda z:z+" "+W.get(z,z),key="paper_symbol")
     ref=float(data[ps].iloc[-1].close)
     shares=st.number_input("股數（可模擬零股）",min_value=1,value=100,step=1,key="paper_shares")
     st.write("參考價（最近日線收盤）：",f"{ref:,.2f}")
@@ -212,7 +215,7 @@ with t3:
         value=q*px
         total+=value
         if q:
-            holdings.append({"代號":code,"名稱":W[code],"股數":q,"參考收盤價":px,"市值":value})
+            holdings.append({"代號":code,"名稱":W.get(code,code),"股數":q,"參考收盤價":px,"市值":value})
     a,b=st.columns(2)
     a.metric("模擬可用現金",f"NTD {st.session_state.paper_cash:,.0f}")
     b.metric("帳戶總資產",f"NTD {total:,.0f}")
@@ -282,7 +285,7 @@ with t4:
 with t5:
     st.subheader("投資大師策略：單股策略比較")
     st.caption("比較三種技術策略代理。所有策略共用研究引擎，訊號在收盤後形成、下一交易日開盤成交，包含估算成本與 ATR 停損。")
-    bs=st.selectbox("策略回測標的",list(data),format_func=lambda z:z+" "+W[z],key="master_bt")
+    bs=st.selectbox("策略回測標的",list(data),format_func=lambda z:z+" "+W.get(z,z),key="master_bt")
     initial=st.number_input("策略回測本金",100000,10000000,1000000,100000,key="master_capital")
     frame=data[bs].copy().reset_index(drop=True)
     if st.button("執行單股策略比較",key="run_single_master"):
