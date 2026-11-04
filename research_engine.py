@@ -130,6 +130,7 @@ def shared_capital_backtest(
     sell_tax: float = 0.003,
     slippage: float = 0.001,
     warmup: int = 260,
+    report_start_date=None,
 ) -> dict:
     """Multi-symbol portfolio simulation with one shared cash balance.
 
@@ -286,8 +287,9 @@ def shared_capital_backtest(
             else:
                 mark = float(row["close"])
             market_value += p["shares"] * mark
-        equity_rows.append({"日期": pd.Timestamp(d), "現金": cash,
-                            "持倉市值": market_value, "資產": cash + market_value})
+        if report_start_date is None or pd.Timestamp(d) >= pd.Timestamp(report_start_date):
+            equity_rows.append({"日期": pd.Timestamp(d), "現金": cash,
+                                "持倉市值": market_value, "資產": cash + market_value})
 
     # Liquidate remaining positions on their last available close with costs.
     for code, p in list(positions.items()):
