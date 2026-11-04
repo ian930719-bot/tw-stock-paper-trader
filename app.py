@@ -105,16 +105,25 @@ def train_ml(d):
     if len(z) < 300 or z.target.nunique() < 2:
         return None, None
     split = int(len(z)*0.8)
-    train, test = z.iloc[:split], z.iloc[split:]
-    if train.target.nunique() < 2 or test.target.nunique() < 2:
+    # Purge the final five training labels: their five-day outcome window
+    # overlaps the first test observations and would leak future prices.
+    train, test = z.iloc[:max(0, split-5)], z.iloc[split:]
+    if len(train) < 100 or train.target.nunique() < 2 or test.target.nunique() < 2:
         return None, None
-    model = RandomForestClassifier(n_estimators=250,max_depth=6,min_samples_leaf=8,class_weight="balanced",random_state=42,n_jobs=-1)
-    model.fit(train[features], train.target.astype(int))
-    metric = balanced_accuracy_score(test.target.astype(int), model.predict(test[features]))
+    params=dict(n_estimators=250,max_depth=6,min_samples_leaf=8,
+                class_weight="balanced",random_state=42,n_jobs=-1)
+    evaluation_model = RandomForestClassifier(**params)
+    evaluation_model.fit(train[features], train.target.astype(int))
+    metric = balanced_accuracy_score(
+        test.target.astype(int), evaluation_model.predict(test[features])
+    )
     last = d.iloc[[-1]][features].replace([np.inf,-np.inf], np.nan)
     if last.isna().any(axis=None):
         return None, metric
-    prob = float(model.predict_proba(last)[0][list(model.classes_).index(1)])
+    # Refit a separate production model on every fully labelled observation.
+    forecast_model = RandomForestClassifier(**params)
+    forecast_model.fit(z[features], z.target.astype(int))
+    prob = float(forecast_model.predict_proba(last)[0][list(forecast_model.classes_).index(1)])
     return prob, metric
 
 inst_data=get_institutional()
@@ -216,6 +225,26 @@ with t4:
     st.markdown("歷史日線使用 Yahoo Finance 自動調整資料。盤中參考價可能延遲，非交易所認證即時行情。三大法人數據使用證交所 T86 日報，取最近可取得交易日；API 不可用時顯示空值。尚未接入法人歷史序列、融資融券與分點籌碼。")
     st.markdown("AI 欄位使用隨機森林，以歷史技術特徵預測未來 5 個交易日報酬是否超過 1.5%，按時間順序切分訓練與測試資料。平衡準確率是歷史測試指標，不代表未來勝率或獲利保證。")
     st.markdown("回測成本假設：手續費 0.1425%、一般股票賣出稅 0.3%、滑價 0.1%。尚未完整處理除權息、停牌、漲跌停、流動性與下市股偏誤。不連接券商、不會下單。")
+    st.subheader("觀察清單資料品質")
+    quality=[]
+    today=pd.Timestamp(datetime.now(TZ).date())
+    for code,z in data.items():
+        dates=pd.to_datetime(z["date"],errors="coerce")
+        gaps=dates.sort_values().diff().dt.days
+        last_date=dates.max()
+        age=(today-last_date.normalize()).days if pd.notna(last_date) else None
+        bad_prices=((z[["open","high","low","close"]]<=0).any(axis=1)).sum()
+        missing=int(z[["date","open","high","low","close","volume"]].isna().any(axis=1).sum())
+        quality.append({
+            "代號":code,"名稱":W.get(code,code),"資料筆數":len(z),
+            "起始日期":dates.min().strftime("%Y-%m-%d") if dates.notna().any() else None,
+            "最新日期":last_date.strftime("%Y-%m-%d") if pd.notna(last_date) else None,
+            "距今天數":age,"超過7日資料間隔":int((gaps>7).sum()),
+            "缺漏列":missing,"非正價格列":int(bad_prices),
+            "狀態":"檢查" if missing or bad_prices or age is None or age>7 else "可用（仍需人工核對）"
+        })
+    st.dataframe(pd.DataFrame(quality),use_container_width=True,hide_index=True)
+    st.caption("資料品質檢查只標示缺漏、日期間隔與價格異常；不代表資料來源完整或交易所認證。Yahoo Finance 自動調整日線仍可能有修訂、缺漏與公司行動處理差異。")
     st.write("台北時間：",datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"))
 
 
