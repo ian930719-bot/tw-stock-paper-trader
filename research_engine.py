@@ -126,6 +126,7 @@ def shared_capital_backtest(
     strategy: str,
     initial_capital: float = 1_000_000,
     max_positions: int = 5,
+    risk_fraction: float = 0.005,
     fee: float = 0.001425,
     sell_tax: float = 0.003,
     slippage: float = 0.001,
@@ -140,6 +141,17 @@ def shared_capital_backtest(
     leverage, shorting, or fractional shares. Risk sizing is capped by an
     ATR-based stop distance, while total exposure is limited by available cash.
     """
+    initial_capital = float(initial_capital)
+    risk_fraction = float(risk_fraction)
+    if not np.isfinite(initial_capital) or initial_capital <= 0:
+        raise ValueError("initial_capital must be a finite positive number")
+    if int(max_positions) < 1:
+        raise ValueError("max_positions must be at least 1")
+    if not np.isfinite(risk_fraction) or not 0 <= risk_fraction <= 0.10:
+        raise ValueError("risk_fraction must be between 0 and 0.10")
+    if any(not np.isfinite(float(v)) or float(v) < 0 for v in (fee, sell_tax, slippage)):
+        raise ValueError("fee, sell_tax and slippage must be finite non-negative rates")
+
     if not frames:
         return {"metrics": performance(pd.Series(dtype=float), initial_capital),
                 "equity": pd.DataFrame(), "trades": pd.DataFrame(),
@@ -253,7 +265,7 @@ def shared_capital_backtest(
                     for k, p in positions.items()
                     if not prepared[k].loc[pd.to_datetime(prepared[k]["date"]) < d].empty
                 )
-                risk_budget = max(float(prior_equity), 0.0) * 0.005
+                risk_budget = max(float(prior_equity), 0.0) * risk_fraction
                 shares_by_risk = int(risk_budget / max(open_px - stop, 0.01))
                 shares_by_cash = int(cash / (open_px * (1.0 + fee_rate)))
                 shares_by_alloc = int(allocation / (open_px * (1.0 + fee_rate)))
