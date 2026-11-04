@@ -122,11 +122,19 @@ with st.spinner("讀取歷史行情…"):
         d=getdata(s,period)
         if d.empty: continue
         d=ind(d); d["obvp"]=d.obv.shift(5); data[s]=d; r=d.iloc[-1]
-        score=20*(r.close>r.ema21 and r.up)+10*(r.close>r.ema50)+10*(r.close>r.ema200)+10*(r.r20>0)+5*(r.r60>0)+10*(50<=r.rsi<=70)+10*(r.macd>r.sig)+10*(pd.notna(r.v20) and r.volume>1.5*r.v20 and r.close>r.h20)+5*(r.obv>r.obvp if pd.notna(r.obvp) else False)
-        rows.append({"代號":s,"名稱":W[s],"規則分數":int(score),"訊號":"觀察候選" if score>=70 else "等待" if score>=50 else "不進場","RSI14":round(r.rsi,1) if pd.notna(r.rsi) else None,"20日報酬":r.r20,"60日報酬":r.r60,"日線日期":r.date.strftime("%Y-%m-%d")})
+        inst=inst_data.get(s); net=inst.get("三大法人買賣超股數") if inst else None
+        base=20*(r.close>r.ema21 and r.up)+10*(r.close>r.ema50)+10*(r.close>r.ema200)+10*(r.r20>0)+5*(r.r60>0)+10*(50<=r.rsi<=70)+10*(r.macd>r.sig)+10*(pd.notna(r.v20) and r.volume>1.5*r.v20 and r.close>r.h20)+5*(r.obv>r.obvp if pd.notna(r.obvp) else False)
+        score=base+(10 if net is not None and net>0 else 0)
+        prob,metric=train_ml(d); price,qt,age=get_quote(s)
+        quotes.append({"代號":s,"名稱":W[s],"盤中參考價":price,"報價時間":qt,"資料約幾分鐘前":age})
+        rows.append({"代號":s,"名稱":W[s],"規則分數":int(score),"訊號":"觀察候選" if score>=70 else "等待" if score>=50 else "不進場","AI五日上漲機率":round(prob,3) if prob is not None else None,"模型測試平衡準確率":round(metric,3) if metric is not None else None,"三大法人買賣超(股)":net,"法人資料日期":inst.get("資料日期") if inst else None,"RSI14":round(r.rsi,1) if pd.notna(r.rsi) else None,"20日報酬":r.r20,"60日報酬":r.r60,"日線日期":r.date.strftime("%Y-%m-%d")})
 if not data: st.error("目前無法取得歷史行情，請稍後重試。"); st.stop()
 t1,t2,t3=st.tabs(["行情監控","歷史回測","資料限制"])
 with t1:
+    st.subheader("盤中參考行情（可能延遲）")
+    st.dataframe(pd.DataFrame(quotes),use_container_width=True,hide_index=True)
+    st.caption("盤中價取自 Yahoo Finance 1 分鐘資料，可能延遲或缺漏；請留意報價時間與分鐘差。")
+    st.subheader("技術面、AI 與法人觀察")
     st.dataframe(pd.DataFrame(rows).sort_values("規則分數",ascending=False),use_container_width=True,hide_index=True)
     st.caption("規則評分為技術面初版，不是經訓練驗證的機器學習模型；未納入法人與融資融券。")
     s=st.selectbox("查看個股",list(data),format_func=lambda z:z+" "+W[z]); d=data[s]
@@ -156,5 +164,7 @@ with t2:
         f=go.Figure(go.Scatter(x=[z["日期"] for z in curve],y=[z["資產"] for z in curve])); f.add_hline(y=capital,line_dash="dash"); st.plotly_chart(f,use_container_width=True)
     st.dataframe(pd.DataFrame(trades).drop(columns=["投入前現金"],errors="ignore"),use_container_width=True)
 with t3:
-    st.markdown("歷史日線使用 Yahoo Finance 自動調整資料，逐檔可用期間可能不同。此版本尚未接入法人、融資融券、分點籌碼及交易所認證即時行情。沒有持久化紙上帳本或推播。不連接券商、不會下單。回測成本假設：手續費 0.1425%、一般股票賣出稅 0.3%、滑價 0.1%。")
+    st.markdown("歷史日線使用 Yahoo Finance 自動調整資料。盤中參考價可能延遲，非交易所認證即時行情。三大法人數據使用證交所 T86 日報，取最近可取得交易日；API 不可用時顯示空值。尚未接入法人歷史序列、融資融券與分點籌碼。")
+    st.markdown("AI 欄位使用隨機森林，以歷史技術特徵預測未來 5 個交易日報酬是否超過 1.5%，按時間順序切分訓練與測試資料。平衡準確率是歷史測試指標，不代表未來勝率或獲利保證。")
+    st.markdown("回測成本假設：手續費 0.1425%、一般股票賣出稅 0.3%、滑價 0.1%。尚未完整處理除權息、停牌、漲跌停、流動性與下市股偏誤。不連接券商、不會下單。")
     st.write("台北時間：",datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"))
