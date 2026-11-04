@@ -11,8 +11,8 @@ def sample_frame(n=620, drift=0.0008, phase=0.0):
     t = np.arange(n, dtype=float)
     close = 50 * np.exp(drift * t + 0.015 * np.sin(t / 9 + phase))
     open_ = close * (1 - 0.001 * np.sin(t / 5))
-    high = np.maximum(open_, close) * 1.012
-    low = np.minimum(open_, close) * 0.988
+    high = np.maximum(open_, close) * 1.001
+    low = np.minimum(open_, close) * 0.999
     volume = 2_000_000 + (t % 17) * 15_000
     frame = pd.DataFrame({
         "date": dates, "open": open_, "high": high, "low": low,
@@ -55,6 +55,9 @@ class ResearchEngineTests(unittest.TestCase):
         self.assertGreaterEqual(result["metrics"]["期末資產"], 0)
         if not result["trades"].empty:
             self.assertTrue((result["trades"]["股數"] > 0).all())
+            signal_dates = pd.to_datetime(result["trades"]["訊號日"])
+            entry_dates = pd.to_datetime(result["trades"]["進場日"])
+            self.assertTrue((signal_dates < entry_dates).all())
 
     def test_no_data_returns_empty_result(self):
         result = shared_capital_backtest({}, STRATEGIES[0])
