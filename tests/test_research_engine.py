@@ -70,6 +70,32 @@ class ResearchEngineTests(unittest.TestCase):
         self.assertEqual(result["coverage"]["symbols_used"], 0)
         self.assertTrue(result["equity"].empty)
 
+    def test_first_report_day_includes_initial_capital_in_drawdown(self):
+        frame = sample_frame(25)
+        frame["symbol"] = "ENTRY"
+        frame["open"] = frame["close"] * 1.01
+        frame["high"] = frame["open"] * 1.002
+        frame["low"] = frame["close"] * 0.998
+
+        def controlled_signals(z):
+            entry = pd.Series(False, index=z.index)
+            entry.iloc[0] = True
+            return {STRATEGIES[0]: (entry, pd.Series(False, index=z.index))}
+
+        with patch("research_engine._signals", side_effect=controlled_signals):
+            result = shared_capital_backtest(
+                {"ENTRY": frame}, STRATEGIES[0],
+                initial_capital=1_000_000, max_positions=1, warmup=0,
+                report_start_date=frame["date"].iloc[1],
+            )
+
+        first_equity = float(result["equity"]["資產"].iloc[0])
+        self.assertLess(first_equity, 1_000_000)
+        self.assertLessEqual(
+            result["metrics"]["最大回撤"],
+            first_equity / 1_000_000 - 1 + 1e-9,
+        )
+
     def test_symbol_is_liquidated_on_its_own_last_available_date(self):
         short = sample_frame(25)
         long = sample_frame(28, phase=0.4)
