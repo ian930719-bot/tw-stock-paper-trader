@@ -392,11 +392,11 @@ with t5:
     current_single_config=(bs,float(initial),period)
     if st.session_state.get("single_master_config")==current_single_config:
         result_df=st.session_state["single_master_results"]
-        st.dataframe(result_df[["策略","期末資產","總報酬","年化報酬","最大回撤","年化波動率","Sharpe","Sortino","Calmar","交易筆數","勝率","Profit Factor","期望值","平均持有日數"]].style.format({
+        st.dataframe(result_df[["策略","期末資產","總報酬","年化報酬","最大回撤","年化波動率","Sharpe","Sortino","Calmar","平均曝險","交易筆數","勝率","平均獲利","平均虧損","Profit Factor","期望值","平均持有日數"]].style.format({
             "期末資產":"{:,.0f}","總報酬":"{:.1%}","年化報酬":"{:.1%}",
             "最大回撤":"{:.1%}","年化波動率":"{:.1%}","Sharpe":"{:.2f}",
-            "Sortino":"{:.2f}","Calmar":"{:.2f}","勝率":"{:.1%}",
-            "Profit Factor":lambda x:"∞" if np.isinf(x) else f"{x:.2f}",
+            "Sortino":"{:.2f}","Calmar":"{:.2f}","平均曝險":"{:.1%}","勝率":"{:.1%}",
+            "平均獲利":"{:,.0f}","平均虧損":"{:,.0f}","Profit Factor":lambda x:"∞" if np.isinf(x) else f"{x:.2f}",
             "期望值":"{:,.0f}","平均持有日數":"{:.1f}",
         }),use_container_width=True,hide_index=True)
         fig=go.Figure()
