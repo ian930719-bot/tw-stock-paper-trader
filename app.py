@@ -202,7 +202,7 @@ with t2:
     a.metric("期末資產",f"NTD {cash:,.0f}")
     b.metric("交易筆數",len(trades))
     c.metric("勝率",f"{simple_trade['勝率']:.1%}" if trades else "無交易")
-    dcol.metric("最大回撤",f"{simple_risk['年化波動率']:.1%}" if False else f"{(simple_equity['資產'].div(pd.concat([pd.Series([float(capital)]),simple_equity['資產'].reset_index(drop=True)]).cummax().iloc[1:].to_numpy())-1).min():.1%}")
+    dcol.metric("最大回撤",f"{simple_risk['最大回撤']:.1%}")
     ecol.metric("Profit Factor","∞" if np.isinf(simple_trade["Profit Factor"]) else f"{simple_trade['Profit Factor']:.2f}")
     st.warning("簡化回測：收盤產生訊號、次日開盤成交，含估算手續費、證交稅及滑價；未完整處理除權息、停牌、漲跌停、流動性與下市股偏誤。")
     if curve:
