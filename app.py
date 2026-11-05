@@ -617,6 +617,7 @@ with t6:
                         "Sortino":risk_stats["Sortino"],"Calmar":risk_stats["Calmar"],
                         "平均曝險":risk_stats["平均曝險"],
                         "交易筆數":trade_stats["交易筆數"],"勝率":trade_stats["勝率"],
+                        "平均獲利":trade_stats["平均獲利"],"平均虧損":trade_stats["平均虧損"],
                         "Profit Factor":trade_stats["Profit Factor"],
                         "期望值":trade_stats["期望值"],
                         "平均持有日數":trade_stats["平均持有日數"],
