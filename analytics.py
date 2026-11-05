@@ -6,7 +6,7 @@ import pandas as pd
 def equity_risk_metrics(equity: pd.DataFrame, initial_capital: float) -> dict:
     """Calculate risk statistics from a marked-to-market equity curve."""
     if equity is None or equity.empty or "資產" not in equity:
-        return {"年化波動率": 0.0, "Sortino": 0.0, "Calmar": 0.0, "平均曝險": 0.0}
+        return {"年化波動率": 0.0, "Sortino": 0.0, "Calmar": 0.0, "最大回撤": 0.0, "平均曝險": 0.0}
     values = pd.to_numeric(equity["資產"], errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
     if values.empty or not np.isfinite(float(initial_capital)) or initial_capital <= 0:
         return {"年化波動率": 0.0, "Sortino": 0.0, "Calmar": 0.0, "平均曝險": 0.0}
@@ -34,6 +34,7 @@ def equity_risk_metrics(equity: pd.DataFrame, initial_capital: float) -> dict:
         "年化波動率": float(annual_vol),
         "Sortino": float(sortino),
         "Calmar": float(calmar),
+        "最大回撤": float(max_dd),
         "平均曝險": float(exposure),
     }
 
