@@ -4,6 +4,7 @@ import yfinance as yf
 import requests
 from datetime import timedelta
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.dummy import DummyClassifier
 from sklearn.metrics import balanced_accuracy_score
 import pandas as pd
 import numpy as np
@@ -13,6 +14,7 @@ from research_engine import STRATEGIES, daily_strategy_returns, performance, fun
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from market_data import quote_freshness
+from analytics import equity_risk_metrics, trade_statistics
 TZ=ZoneInfo("Asia/Taipei")
 W={"2330":"台積電","2454":"聯發科","2308":"台達電","2317":"鴻海","2382":"廣達","3231":"緯創","3017":"奇鋐","2603":"長榮","2881":"富邦金","2891":"中信金"}
 st.set_page_config(page_title="台股模擬交易",layout="wide")
@@ -112,13 +114,13 @@ def train_ml(d):
     z.loc[z.index[-5:], "target"] = np.nan
     z = z.replace([np.inf,-np.inf], np.nan).dropna(subset=features+["target"])
     if len(z) < 300 or z.target.nunique() < 2:
-        return None, None
+        return None, None, None
     split = int(len(z)*0.8)
     # Purge the final five training labels: their five-day outcome window
     # overlaps the first test observations and would leak future prices.
     train, test = z.iloc[:max(0, split-5)], z.iloc[split:]
     if len(train) < 100 or train.target.nunique() < 2 or test.target.nunique() < 2:
-        return None, None
+        return None, None, None
     params=dict(n_estimators=250,max_depth=6,min_samples_leaf=8,
                 class_weight="balanced",random_state=42,n_jobs=-1)
     evaluation_model = RandomForestClassifier(**params)
@@ -126,14 +128,19 @@ def train_ml(d):
     metric = balanced_accuracy_score(
         test.target.astype(int), evaluation_model.predict(test[features])
     )
+    baseline_model = DummyClassifier(strategy="most_frequent")
+    baseline_model.fit(train[features], train.target.astype(int))
+    baseline_metric = balanced_accuracy_score(
+        test.target.astype(int), baseline_model.predict(test[features])
+    )
     last = d.iloc[[-1]][features].replace([np.inf,-np.inf], np.nan)
     if last.isna().any(axis=None):
-        return None, metric
+        return None, metric, baseline_metric
     # Refit a separate production model on every fully labelled observation.
     forecast_model = RandomForestClassifier(**params)
     forecast_model.fit(z[features], z.target.astype(int))
     prob = float(forecast_model.predict_proba(last)[0][list(forecast_model.classes_).index(1)])
-    return prob, metric
+    return prob, metric, baseline_metric
 
 inst_data=get_institutional()
 data={}; rows=[]; quotes=[]
@@ -145,11 +152,11 @@ with st.spinner("讀取歷史行情…"):
         inst=inst_data.get(s); net=inst.get("三大法人買賣超股數") if inst else None
         base=20*(r.close>r.ema21 and r.up)+10*(r.close>r.ema50)+10*(r.close>r.ema200)+10*(r.r20>0)+5*(r.r60>0)+10*(50<=r.rsi<=70)+10*(r.macd>r.sig)+10*(pd.notna(r.v20) and r.volume>1.5*r.v20 and r.close>r.h20)+5*(r.obv>r.obvp if pd.notna(r.obvp) else False)
         score=base+(10 if net is not None and net>0 else 0)
-        prob,metric=train_ml(d); price,qt,age=get_quote(s)
+        prob,metric,baseline_metric=train_ml(d); price,qt,age=get_quote(s)
         quote_status, quote_age = quote_freshness(qt)
         quotes.append({"代號":s,"名稱":W.get(s,s),"盤中參考價":price,"報價時間":qt,
                        "報價狀態":quote_status,"資料約幾分鐘前":quote_age})
-        rows.append({"代號":s,"名稱":W.get(s,s),"規則分數":int(score),"訊號":("多因子觀察" if score>=70 and prob is not None and prob>=0.55 else "技術候選（AI資料不足）" if score>=70 and prob is None else "AI未確認" if score>=70 else "等待" if score>=50 else "不進場"),"AI五日上漲機率":round(prob,3) if prob is not None else None,"模型測試平衡準確率":round(metric,3) if metric is not None else None,"三大法人買賣超(股)":net,"法人資料日期":inst.get("資料日期") if inst else None,"RSI14":round(r.rsi,1) if pd.notna(r.rsi) else None,"20日報酬":r.r20,"60日報酬":r.r60,"日線日期":r.date.strftime("%Y-%m-%d")})
+        rows.append({"代號":s,"名稱":W.get(s,s),"規則分數":int(score),"訊號":("多因子觀察" if score>=70 and prob is not None and prob>=0.55 else "技術候選（AI資料不足）" if score>=70 and prob is None else "AI未確認" if score>=70 else "等待" if score>=50 else "不進場"),"AI五日上漲機率":round(prob,3) if prob is not None else None,"模型測試平衡準確率":round(metric,3) if metric is not None else None,"多數類基準平衡準確率":round(baseline_metric,3) if baseline_metric is not None else None,"三大法人買賣超(股)":net,"法人資料日期":inst.get("資料日期") if inst else None,"RSI14":round(r.rsi,1) if pd.notna(r.rsi) else None,"20日報酬":r.r20,"60日報酬":r.r60,"日線日期":r.date.strftime("%Y-%m-%d")})
 if not data: st.error("目前無法取得歷史行情，請稍後重試。"); st.stop()
 t1,t2,t3,t4,t5,t6=st.tabs(["行情監控","歷史回測","模擬帳本","資料限制","大師策略回測","整合研究中心"])
 with t1:
@@ -165,7 +172,7 @@ with t1:
     st.caption("盤中參考價取自 Yahoo Finance 1 分鐘資料；更新狀態依台灣一般交易時段及報價時間估算，仍可能受休市日、來源延遲與資料缺漏影響。")
     st.subheader("技術面、AI 與法人觀察")
     st.dataframe(pd.DataFrame(rows).sort_values("規則分數",ascending=False),use_container_width=True,hide_index=True)
-    st.caption("規則分數已加入最新可取得的三大法人買賣超加分；AI 機率由隨機森林模型提供。法人歷史序列、融資融券與分點籌碼尚未接入。")
+    st.caption("AI 測試平衡準確率同時列出多數類基準；若模型未明顯勝過基準，不應視為有預測優勢。機率尚未校準，不代表實際上漲機率保證。法人歷史序列、融資融券與分點籌碼尚未接入。")
     s=st.selectbox("查看個股",list(data),format_func=lambda z:z+" "+W.get(z,z)); d=data[s]
     f=go.Figure(); f.add_trace(go.Scatter(x=d.date,y=d.close,name="還原收盤")); f.add_trace(go.Scatter(x=d.date,y=d.ema21,name="EMA21")); f.add_trace(go.Scatter(x=d.date,y=d.ema50,name="EMA50")); st.plotly_chart(f,use_container_width=True)
     st.download_button("下載行情指標 CSV",pd.concat([v.assign(代號=k) for k,v in data.items()]).to_csv(index=False).encode("utf-8-sig"),"tw_stock.csv","text/csv")
@@ -353,8 +360,8 @@ with t5:
             metrics=result["metrics"].copy()
             trades=result["trades"]
             metrics["策略"]=strategy
-            metrics["交易筆數"]=len(trades)
-            metrics["勝率"]=float((trades["損益"]>0).mean()) if not trades.empty else 0.0
+            metrics.update(equity_risk_metrics(result["equity"],float(initial)))
+            metrics.update(trade_statistics(trades))
             results.append(metrics)
             curves[strategy]=result["equity"]
             trade_tables[strategy]=trades
@@ -365,9 +372,12 @@ with t5:
     current_single_config=(bs,float(initial),period)
     if st.session_state.get("single_master_config")==current_single_config:
         result_df=st.session_state["single_master_results"]
-        st.dataframe(result_df[["策略","期末資產","總報酬","年化報酬","最大回撤","Sharpe","交易筆數","勝率"]].style.format({
+        st.dataframe(result_df[["策略","期末資產","總報酬","年化報酬","最大回撤","年化波動率","Sharpe","Sortino","Calmar","交易筆數","勝率","Profit Factor","期望值","平均持有日數"]].style.format({
             "期末資產":"{:,.0f}","總報酬":"{:.1%}","年化報酬":"{:.1%}",
-            "最大回撤":"{:.1%}","Sharpe":"{:.2f}","勝率":"{:.1%}",
+            "最大回撤":"{:.1%}","年化波動率":"{:.1%}","Sharpe":"{:.2f}",
+            "Sortino":"{:.2f}","Calmar":"{:.2f}","勝率":"{:.1%}",
+            "Profit Factor":lambda x:"∞" if np.isinf(x) else f"{x:.2f}",
+            "期望值":"{:,.0f}","平均持有日數":"{:.1f}",
         }),use_container_width=True,hide_index=True)
         fig=go.Figure()
         for strategy,equity in st.session_state["single_master_curves"].items():
@@ -577,11 +587,19 @@ with t6:
                         periods[label]=result
                 for label,result in periods.items():
                     m=result["metrics"]
+                    risk_stats=equity_risk_metrics(result["equity"],float(pc))
+                    trade_stats=trade_statistics(result["trades"])
                     summaries.append({
                         "策略":strategy,"期間":label,"期末資產":m["期末資產"],
                         "總報酬":m["總報酬"],"年化報酬":m["年化報酬"],
                         "最大回撤":m["最大回撤"],"Sharpe":m["Sharpe"],
-                        "交易筆數":len(result["trades"]),
+                        "年化波動率":risk_stats["年化波動率"],
+                        "Sortino":risk_stats["Sortino"],"Calmar":risk_stats["Calmar"],
+                        "平均曝險":risk_stats["平均曝險"],
+                        "交易筆數":trade_stats["交易筆數"],"勝率":trade_stats["勝率"],
+                        "Profit Factor":trade_stats["Profit Factor"],
+                        "期望值":trade_stats["期望值"],
+                        "平均持有日數":trade_stats["平均持有日數"],
                         "有效股票數":result["coverage"]["symbols_used"],
                     })
                     curve_map[(strategy,label)]=result["equity"]
@@ -595,7 +613,10 @@ with t6:
             summary=st.session_state["portfolio_summary"]
             st.dataframe(summary.style.format({
                 "期末資產":"{:,.0f}","總報酬":"{:.1%}","年化報酬":"{:.1%}",
-                "最大回撤":"{:.1%}","Sharpe":"{:.2f}",
+                "最大回撤":"{:.1%}","年化波動率":"{:.1%}","Sharpe":"{:.2f}",
+                "Sortino":"{:.2f}","Calmar":"{:.2f}","平均曝險":"{:.1%}",
+                "勝率":"{:.1%}","Profit Factor":lambda x:"∞" if np.isinf(x) else f"{x:.2f}",
+                "期望值":"{:,.0f}","平均持有日數":"{:.1f}",
             }),use_container_width=True,hide_index=True)
             strategy_pick=st.selectbox("查看策略資產曲線",STRATEGIES,key="portfolio_curve_strategy")
             period_pick=st.selectbox("查看驗證區段",["訓練","驗證","樣本外"],index=2,key="portfolio_curve_period")
