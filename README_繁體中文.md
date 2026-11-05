@@ -16,9 +16,12 @@ streamlit run app.py
 
 - 預設 10 檔台股觀察清單，可自行輸入額外代號；單次最多載入 30 檔，支援 1、2、3、5 年日線資料。
 - EMA、RSI、MACD、OBV、ATR、20／60 日報酬與量價突破指標。
-- 隨機森林預測未來 5 個交易日報酬是否超過 1.5%；採時間順序測試，並對五日標籤重疊做 purge，另以全部已標記資料訓練最新預測模型。
+- 隨機森林預測未來 5 個交易日報酬是否超過 1.5%；採時間順序測試，對五日標籤重疊做 purge，並與多數類基準模型比較平衡準確率。最新預測模型使用全部已標記資料重新訓練；輸出機率尚未校準。
 - 三種技術策略代理：Minervini 趨勢模板、O’Neil CAN SLIM 技術代理、Livermore 順勢突破。
 - 多股票共享現金回測：持倉上限、動能排序、可調單筆風險預算、ATR 停損與成本估算；各標的若資料提早終止，會在該標的最後可用收盤日平倉。
+- 回測風險指標：年化波動率、Sharpe、Sortino、Calmar、最大回撤與平均曝險。
+- 成交統計：勝率、平均獲利、平均虧損、Profit Factor、單筆期望值與平均持有日數。
+- 模擬帳本顯示持倉資產占比，單一持倉達總資產 50% 時提示集中風險。
 - 訓練／驗證／樣本外切分：使用共同交易日期，保留區段前資料暖機，績效只從區段起始日計算。
 - 市場基準比較：以 0050 還原價格及加權指數價格指數，對齊完整歷史或樣本外區間。
 - 成本敏感度：固定手續費與一般股票賣出稅，測試單邊滑價 0.1%、0.2%、0.3% 對策略結果的影響。
@@ -45,6 +48,6 @@ streamlit run app.py
 ## 自動測試
 
 ```bash
-python -m py_compile app.py research_engine.py market_data.py tests/test_research_engine.py tests/test_market_data.py
+python -m py_compile app.py research_engine.py market_data.py analytics.py tests/test_research_engine.py tests/test_market_data.py tests/test_analytics.py
 python -m unittest discover -s tests -v
 ```
