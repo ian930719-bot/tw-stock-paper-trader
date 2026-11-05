@@ -195,8 +195,15 @@ with t2:
     if qty:
         px=float(x.iloc[-1].close)*.999; cash+=qty*px*(1-.001425-.003); trades[-1]["損益"]=cash-trades[-1]["投入前現金"]; trades[-1]["備註"]="期末平倉"
         curve[-1]["資產"]=cash
-    a,b,c=st.columns(3); a.metric("期末資產",f"NTD {cash:,.0f}"); b.metric("交易筆數",len(trades))
-    c.metric("勝率",f"{sum(z.get('損益',0)>0 for z in trades)/len(trades):.1%}" if trades else "無交易")
+    simple_equity=pd.DataFrame(curve)
+    simple_risk=equity_risk_metrics(simple_equity,float(capital))
+    simple_trade=trade_statistics(pd.DataFrame(trades))
+    a,b,c,dcol,ecol=st.columns(5)
+    a.metric("期末資產",f"NTD {cash:,.0f}")
+    b.metric("交易筆數",len(trades))
+    c.metric("勝率",f"{simple_trade['勝率']:.1%}" if trades else "無交易")
+    dcol.metric("最大回撤",f"{simple_risk['年化波動率']:.1%}" if False else f"{(simple_equity['資產'].div(pd.concat([pd.Series([float(capital)]),simple_equity['資產'].reset_index(drop=True)]).cummax().iloc[1:].to_numpy())-1).min():.1%}")
+    ecol.metric("Profit Factor","∞" if np.isinf(simple_trade["Profit Factor"]) else f"{simple_trade['Profit Factor']:.2f}")
     st.warning("簡化回測：收盤產生訊號、次日開盤成交，含估算手續費、證交稅及滑價；未完整處理除權息、停牌、漲跌停、流動性與下市股偏誤。")
     if curve:
         f=go.Figure(go.Scatter(x=[z["日期"] for z in curve],y=[z["資產"] for z in curve])); f.add_hline(y=capital,line_dash="dash"); st.plotly_chart(f,use_container_width=True)
@@ -245,13 +252,21 @@ with t3:
         total+=value
         if q:
             holdings.append({"代號":code,"名稱":W.get(code,code),"股數":q,"參考收盤價":px,"市值":value})
+    if total > 0:
+        for holding in holdings:
+            if isinstance(holding.get("市值"), (int, float, np.integer, np.floating)):
+                holding["資產占比"] = holding["市值"] / total
     if missing_position_data:
         st.warning("以下持倉未在目前觀察清單載入，帳戶總資產暫未計入其市值："+", ".join(missing_position_data))
     a,b=st.columns(2)
     a.metric("模擬可用現金",f"NTD {st.session_state.paper_cash:,.0f}")
     b.metric("帳戶總資產",f"NTD {total:,.0f}")
     st.subheader("目前持倉")
-    st.dataframe(pd.DataFrame(holdings),use_container_width=True,hide_index=True)
+    st.dataframe(pd.DataFrame(holdings).style.format({"資產占比":"{:.1%}","市值":"{:,.0f}","參考收盤價":"{:,.2f}"}),use_container_width=True,hide_index=True)
+    if holdings:
+        loaded_weights=[h.get("資產占比",0.0) for h in holdings if isinstance(h.get("資產占比"),(int,float,np.integer,np.floating))]
+        if loaded_weights and max(loaded_weights)>=0.5:
+            st.warning("單一持倉占帳戶總資產達 50% 以上，集中風險偏高。")
     st.subheader("模擬成交紀錄")
     st.dataframe(pd.DataFrame(st.session_state.paper_trades),use_container_width=True,hide_index=True)
     if st.session_state.paper_trades:
