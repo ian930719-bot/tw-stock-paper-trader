@@ -52,7 +52,12 @@ def trade_statistics(trades: pd.DataFrame) -> dict:
     wins, losses = pnl[pnl > 0], pnl[pnl < 0]
     gross_profit, gross_loss = float(wins.sum()), float(abs(losses.sum()))
     pf = gross_profit / gross_loss if gross_loss else (float("inf") if gross_profit else 0.0)
-    holding = pd.to_numeric(trades.get("持有交易日", pd.Series(dtype=float)), errors="coerce").dropna()
+    if "持有交易日" in trades:
+        holding = pd.to_numeric(trades["持有交易日"], errors="coerce").dropna()
+    elif {"進場日", "出場日"}.issubset(trades.columns):
+        holding = (pd.to_datetime(trades["出場日"], errors="coerce") - pd.to_datetime(trades["進場日"], errors="coerce")).dt.days.dropna()
+    else:
+        holding = pd.Series(dtype=float)
     return {
         "勝率": float((pnl > 0).mean()),
         "平均獲利": float(wins.mean()) if not wins.empty else 0.0,
