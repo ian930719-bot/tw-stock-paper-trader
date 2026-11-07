@@ -15,6 +15,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from market_data import quote_freshness
 from analytics import equity_risk_metrics, trade_statistics
+st.set_page_config(page_title="台股模擬交易",layout="wide")
 TZ=ZoneInfo("Asia/Taipei")
 from stock_universe import fetch_stock_universe, universe_summary, StockUniverseError
 
@@ -50,7 +51,6 @@ universe_stats = universe_summary(stock_master) if universe_error is None else {
     "總數": len(stock_master), "上市": len(stock_master), "上櫃": 0,
     "資料日期": None, "更新時間": datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
 }
-st.set_page_config(page_title="台股模擬交易",layout="wide")
 st.title("台股模擬交易研究系統")
 st.caption("研究用途；行情可能延遲，非交易所認證即時行情。不連接券商、不會送出真實委託。")
 with st.sidebar:
@@ -59,7 +59,7 @@ with st.sidebar:
     defaults = [code for code in popular if code in W]
     ss=st.multiselect("觀察股票（可輸入代號或名稱搜尋）",list(W),default=defaults,format_func=lambda x:x+" "+W.get(x,x))
     custom_codes=st.text_input("額外股票代號（逗號分隔）",placeholder="例如 0050, 006208")
-    extra_codes=[x.strip() for x in custom_codes.replace("，",",").split(",") if x.strip().isdigit() and 4<=len(x.strip())<=6]
+    extra_codes=[x.strip() for x in custom_codes.replace("，",",").split(",") if x.strip().isalnum() and 4<=len(x.strip())<=8]
     ss=list(dict.fromkeys(ss+extra_codes))
     if len(ss)>30:
         st.warning("單次行情分析最多載入 30 檔；完整上市櫃名單仍可在「上市櫃股票庫」分頁搜尋及下載。")
@@ -230,7 +230,7 @@ with t0:
     st.dataframe(directory,use_container_width=True,hide_index=True,height=560)
     st.download_button("下載完整上市櫃證券主檔 CSV",stock_master.to_csv(index=False).encode("utf-8-sig"),
                        "taiwan_listed_otc_stock_master.csv","text/csv")
-    st.caption("目前主檔涵蓋現行上市與上櫃股票／ETF 等數字代號證券；不含興櫃、權證及歷史下市證券。這是每日更新的現行名冊，不等於歷史成分股資料庫。")
+    st.caption("目前主檔涵蓋現行上市與上櫃股票／ETF 等證券；不含興櫃、權證及歷史下市證券。這是每日更新的現行名冊，不等於歷史成分股資料庫。")
 with t1:
     st.subheader("盤中參考行情（可能延遲）")
     quote_frame=pd.DataFrame(quotes)
