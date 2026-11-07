@@ -7,7 +7,6 @@ per stock_id before filtering to twse/tpex.
 from __future__ import annotations
 
 import os
-import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
