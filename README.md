@@ -4,8 +4,10 @@
 
 ## 功能
 
-- 台股觀察清單歷史日線與技術指標
-- 隨機森林五個交易日方向分類；提供時間序列測試平衡準確率
+- FinMind TaiwanStockInfo 全市場現行上市／上櫃證券主檔，依同一代號最新市場別記錄處理轉板；支援市場／產業／名稱／代號搜尋與 CSV 匯出
+- 從完整主檔選取觀察清單，單次最多載入 30 檔歷史日線以控制行情來源限流
+- 隨機森林五個交易日方向分類；提供時間序列測試平衡準確率與多數類基準比較
+- 回測風險指標（年化波動率、Sharpe、Sortino、Calmar、最大回撤）及交易品質統計
 - 三種技術策略代理：Minervini 趨勢模板、O’Neil CAN SLIM 技術代理、Livermore 順勢突破
 - 多股票共享現金組合回測，含持倉上限、ATR 停損、風險預算與估算交易成本
 - 訓練／驗證／樣本外期間切分，依共同交易日期切分並保留指標暖機資料
@@ -35,13 +37,14 @@ pip install streamlit yfinance pandas numpy plotly requests scikit-learn
 - 停損以日線 OHLC 近似；同一根 K 棒內若同時觸及停損與其他條件，無法重建真實成交順序。
 - 歷史資料來自 Yahoo Finance，可能延遲、修訂、缺漏，並非交易所認證資料。
 - 基本面頁面是最新快照，不是 point-in-time 歷史財報。巴菲特／林區篩選僅為目前快照的簡化條件，不可當作歷史回測或完整複製其投資方法。
-- 目前預設觀察清單只有十檔股票，不代表全台上市櫃股票；未處理完整歷史成分股、下市股、除權息再投資、停牌、漲跌停排隊及完整流動性衝擊。
+- 現行上市／上櫃主檔由 FinMind TaiwanStockInfo 提供，依最新 date 判斷轉板後市場別；不含興櫃、權證與歷史下市證券，也不等於歷史成分股資料庫。若 API 失敗，程式會明確警告並顯示內建備援清單，不會冒充完整資料庫。
+- 主檔在應用程式快取 6 小時；歷史日線仍由 Yahoo Finance 依選取標的逐檔取得，並非預先下載全市場歷史價格。未處理完整歷史成分股、下市股、除權息再投資、停牌、漲跌停排隊及完整流動性衝擊。
 - 樣本外區段應保留作最終檢驗，不得依其結果反覆調參。樣本外表現不保證未來獲利。
 - JSON 備份可跨裝置手動還原，但目前沒有雲端自動同步；匯入會覆蓋當前帳本。
 
 ## 自動測試
 
 ```bash
-python -m py_compile app.py research_engine.py tests/test_research_engine.py
+python -m py_compile app.py research_engine.py market_data.py analytics.py stock_universe.py tests/test_research_engine.py tests/test_market_data.py tests/test_analytics.py tests/test_stock_universe.py
 python -m unittest discover -s tests -v
 ```
