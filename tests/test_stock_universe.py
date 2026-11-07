@@ -28,9 +28,10 @@ class StockUniverseTests(unittest.TestCase):
             {"stock_id": "TAIEX", "stock_name": "加權指數", "industry_category": "Index", "type": "twse", "date": "2026-11-06"},
             {"stock_id": "123", "stock_name": "短代號", "industry_category": "電子", "type": "twse", "date": "2026-11-06"},
             {"stock_id": "006208", "stock_name": "富邦台50", "industry_category": "ETF", "type": "twse", "date": "2026-11-06"},
+            {"stock_id": "00679B", "stock_name": "元大美債20年", "industry_category": "ETF", "type": "twse", "date": "2026-11-06"},
         ]
         result = normalize_stock_universe(records)
-        self.assertEqual(result["代號"].tolist(), ["006208"])
+        self.assertEqual(result["代號"].tolist(), ["006208", "00679B"])
 
     def test_market_summary_counts(self):
         df = pd.DataFrame([
