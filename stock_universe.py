@@ -41,7 +41,7 @@ def normalize_stock_universe(records) -> pd.DataFrame:
     raw["type"] = raw["type"].astype(str).str.strip().str.lower()
     raw["date"] = pd.to_datetime(raw["date"], errors="coerce")
     raw = raw.dropna(subset=["date"])
-    raw = raw[raw["stock_id"].str.fullmatch(r"\d{4,6}", na=False)]
+    raw = raw[raw["stock_id"].str.fullmatch(r"[A-Z0-9]{4,8}", na=False)]
     raw = raw[raw["stock_name"].ne("") & raw["stock_name"].ne("nan")]
     if raw.empty:
         raise StockUniverseError("股票主檔沒有可用的證券代號")
