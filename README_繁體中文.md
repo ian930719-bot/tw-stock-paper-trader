@@ -14,7 +14,9 @@ streamlit run app.py
 
 ## 目前功能
 
-- 預設 10 檔台股觀察清單，可自行輸入額外代號；單次最多載入 30 檔，支援 1、2、3、5 年日線資料。
+- 全市場上市／上櫃證券主檔：透過 FinMind TaiwanStockInfo 每日更新資料，保留每個代號最新市場別，涵蓋上市、上櫃股票及 ETF 等數字／英數代號證券；支援市場、產業、代號與名稱搜尋及完整 CSV 匯出。
+- 觀察清單可直接從完整主檔搜尋選取；為控制行情來源限流，單次技術行情載入上限 30 檔，預設載入常用觀察標的。
+- 主檔 API 失敗時會明確標示並切換內建備援名單，不會把備援清單冒充完整資料庫。
 - EMA、RSI、MACD、OBV、ATR、20／60 日報酬與量價突破指標。
 - 隨機森林預測未來 5 個交易日報酬是否超過 1.5%；採時間順序測試，對五日標籤重疊做 purge，並與多數類基準模型比較平衡準確率。最新預測模型使用全部已標記資料重新訓練；輸出機率尚未校準。
 - 三種技術策略代理：Minervini 趨勢模板、O’Neil CAN SLIM 技術代理、Livermore 順勢突破。
@@ -36,7 +38,8 @@ streamlit run app.py
 - 歷史日線與盤中參考行情使用 Yahoo Finance，可能延遲、修訂或缺漏，並非交易所認證資料。
 - 三種技術策略是依公開理念建立的量化代理，不代表完整複製投資大師的方法。
 - 巴菲特／林區目前只有最新財務快照的簡化條件檢查，並非 point-in-time 歷史財報，也不可用來宣稱歷史回測績效。
-- 觀察清單目前只有預設十檔，不代表全台上市櫃股票；尚未納入完整歷史成分股、下市股與存活者偏誤修正。
+- 現行上市／上櫃主檔由 FinMind TaiwanStockInfo 提供，依同一代號最新 date 判斷轉板後的現行市場別；不包含興櫃、權證、歷史下市證券，也不等於歷史成分股資料庫。資料服務中斷時會顯示內建備援名單並警告，不會宣稱全市場完整。
+- 全市場主檔每 6 小時於應用程式快取更新；行情載入仍限制 30 檔，避免一次對所有股票逐檔呼叫行情服務。
 - 回測成交以訊號日收盤後的資訊，於下一交易日開盤執行。日線無法精確還原盤中成交先後。
 - 基準比較使用 Yahoo Finance 的 0050 還原價格與加權指數價格指數；基準曲線未扣成本，指數不含股息，0050 仍有追蹤誤差與 ETF 費用。
 - 成本估算為手續費 0.1425%、一般股票賣出證交稅 0.3%、單邊滑價 0.1%；敏感度測試將單邊滑價提高至 0.2% 與 0.3%，仍未涵蓋個別券商折扣、最低手續費、ETF 稅率及市場衝擊。
@@ -48,6 +51,6 @@ streamlit run app.py
 ## 自動測試
 
 ```bash
-python -m py_compile app.py research_engine.py market_data.py analytics.py tests/test_research_engine.py tests/test_market_data.py tests/test_analytics.py
+python -m py_compile app.py research_engine.py market_data.py analytics.py stock_universe.py tests/test_research_engine.py tests/test_market_data.py tests/test_analytics.py tests/test_stock_universe.py
 python -m unittest discover -s tests -v
 ```
