@@ -165,6 +165,19 @@ class PaperAccountTests(unittest.TestCase):
         self.assertAlmostEqual(report["cash_difference"], 0.0, places=2)
         self.assertEqual(report["actual_positions"], {"2330": 1000})
 
+    def test_integrity_report_reconciles_round_trip_buy_and_sell(self):
+        self.order(Side.BUY, 1000, "integrity-roundtrip-buy")
+        self.quote(9)
+        self.engine.submit(
+            OrderIntent("2330", Side.SELL, 1000, 11, "exit", "integrity-roundtrip-sell"),
+            cash=80000, positions={"2330": 1000}, equity=100000, now=NOW
+        )
+        self.quote(12)
+        report = self.account.integrity_report()
+        self.assertTrue(report["ok"], report["issues"])
+        self.assertEqual(report["actual_positions"], {})
+        self.assertEqual(report["expected_positions"], {})
+
     def test_integrity_report_detects_manual_cash_corruption(self):
         self.order(Side.BUY, 1000, "integrity-corrupt")
         self.quote(9)
