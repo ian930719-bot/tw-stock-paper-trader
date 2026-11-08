@@ -1000,7 +1000,11 @@ with t7:
             or (pd.notna(latest.macd) and pd.notna(latest.sig) and float(latest.macd) < float(latest.sig))
         )
         if held > 0 and exit_signal:
-            sell_qty = floor_board_lot(min(held, int(limits.max_order_notional / float(price))))
+            sell_qty_raw = min(held, int(limits.max_order_notional / float(price)))
+            sell_qty = floor_board_lot(sell_qty_raw)
+            sell_is_odd = sell_qty == 0 and 0 < sell_qty_raw < 1000
+            if sell_is_odd:
+                sell_qty = sell_qty_raw
             if sell_qty > 0:
                 auto_candidates.append({
                     "方向":"賣出","代號":code,"名稱":row["名稱"],
@@ -1008,6 +1012,7 @@ with t7:
                     "估算金額":round(sell_qty*float(price),2),
                     "策略依據":"跌破 EMA21／RSI 過熱／MACD 轉弱",
                     "報價時間":quote.get("報價時間"),
+                    "零股":sell_is_odd,
                 })
         elif row.get("訊號") == "多因子觀察":
             atr_value = float(latest.atr) if pd.notna(latest.atr) else float(price)*0.04
@@ -1025,6 +1030,7 @@ with t7:
                     "策略依據":"AI 多因子觀察＋ATR 風險預算控量",
                     "AI五日分數":row.get("AI五日上漲機率"),
                     "報價時間":quote.get("報價時間"),
+                    "零股":False,
                 })
     st.write("符合自動策略條件的候選委託：",len(auto_candidates))
     if auto_candidates:
@@ -1061,6 +1067,7 @@ with t7:
                 reason=candidate["策略依據"],
                 idempotency_key=f"auto-{side.value.lower()}-{candidate['代號']}-{today_text}-{signal_row['日線日期']}",
                 instrument_type="etf" if candidate["代號"] in etf_codes else "stock",
+                odd_lot=bool(candidate.get("零股", False)),
             )
             result = engine.submit(
                 intent, cash=cash_available, positions=positions,
