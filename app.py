@@ -960,7 +960,7 @@ with t7:
     manual_is_odd = manual_mode.startswith("盤中")
     manual_qty = st.number_input("委託股數", min_value=1, max_value=999 if manual_is_odd else 1000000, value=100 if manual_is_odd else 1000, step=1 if manual_is_odd else 1000, key="manual_paper_qty")
     manual_price = st.number_input("限價（元）", min_value=0.01, value=100.0, step=0.05, format="%.2f", key="manual_paper_price")
-    if st.button("送出手動模擬委託", key="submit_manual_paper"):
+    if st.button("送出手動模擬委託", key="submit_manual_paper", disabled=not session_open):
         snap = paper_account.snapshot()
         positions_now = {p["symbol"]: int(p["quantity"]) for p in snap["positions"]}
         value_now = float(snap["cash"]) + sum(int(p["quantity"]) * float(p["average_cost"]) for p in snap["positions"])
