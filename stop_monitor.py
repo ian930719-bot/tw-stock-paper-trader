@@ -36,8 +36,12 @@ class StopMonitor:
             conn.execute("""CREATE TABLE IF NOT EXISTS paper_stop_state (
                 symbol TEXT PRIMARY KEY,
                 high_water REAL NOT NULL,
+                position_version INTEGER NOT NULL DEFAULT 1,
                 updated_at TEXT NOT NULL
             )""")
+            state_columns = {row[1] for row in conn.execute("PRAGMA table_info(paper_stop_state)")}
+            if "position_version" not in state_columns:
+                conn.execute("ALTER TABLE paper_stop_state ADD COLUMN position_version INTEGER NOT NULL DEFAULT 1")
             conn.execute("""CREATE TABLE IF NOT EXISTS paper_stop_events (
                 event_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 symbol TEXT NOT NULL,
@@ -79,21 +83,24 @@ class StopMonitor:
             conn.execute("BEGIN IMMEDIATE")
             try:
                 pos = conn.execute(
-                    "SELECT quantity,average_cost FROM paper_positions WHERE symbol=?",
+                    "SELECT quantity,average_cost,position_version FROM paper_positions WHERE symbol=?",
                     (symbol,),
                 ).fetchone()
                 if not pos or int(pos[0]) <= 0 or float(pos[1]) <= 0:
+                    # A flat account must not retain a trailing high-water mark.
+                    conn.execute("DELETE FROM paper_stop_state WHERE symbol=?", (symbol,))
                     conn.execute("COMMIT")
                     return None
-                quantity, avg_cost = int(pos[0]), float(pos[1])
+                quantity, avg_cost, position_version = int(pos[0]), float(pos[1]), int(pos[2])
                 state = conn.execute(
-                    "SELECT high_water FROM paper_stop_state WHERE symbol=?", (symbol,)
+                    "SELECT high_water,position_version FROM paper_stop_state WHERE symbol=?", (symbol,)
                 ).fetchone()
-                high_water = max(float(state[0]), float(price)) if state else max(avg_cost, float(price))
+                same_position = state is not None and int(state[1]) == position_version
+                high_water = max(float(state[0]), float(price)) if same_position else max(avg_cost, float(price))
                 conn.execute(
-                    "INSERT INTO paper_stop_state(symbol,high_water,updated_at) VALUES(?,?,?) "
-                    "ON CONFLICT(symbol) DO UPDATE SET high_water=excluded.high_water,updated_at=excluded.updated_at",
-                    (symbol, high_water, current.isoformat()),
+                    "INSERT INTO paper_stop_state(symbol,high_water,position_version,updated_at) VALUES(?,?,?,?) "
+                    "ON CONFLICT(symbol) DO UPDATE SET high_water=excluded.high_water,position_version=excluded.position_version,updated_at=excluded.updated_at",
+                    (symbol, high_water, position_version, current.isoformat()),
                 )
                 stop_loss = avg_cost * (1 - self.stop_loss_pct)
                 trailing_stop = high_water * (1 - self.trailing_stop_pct)
