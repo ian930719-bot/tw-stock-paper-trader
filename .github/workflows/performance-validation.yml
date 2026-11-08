@@ -8,6 +8,7 @@ on:
       - ".github/workflows/performance-validation.yml"
       - "research_engine.py"
       - "walk_forward.py"
+      - "continuous_walk_forward.py"
       - "strategy_evolution.py"
       - "corporate_actions.py"
       - "analytics.py"
