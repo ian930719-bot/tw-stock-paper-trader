@@ -98,4 +98,6 @@ python -m unittest discover -s tests -v
 
 ## Paper ledger integrity checks
 
-The paper-account dashboard runs SQLite `integrity_check` and reconciles cash and per-symbol positions against the fill ledger. It also verifies filled-order/fill-row consistency and checks that fill price multiplied by quantity matches gross notional. Any discrepancy is surfaced as a warning; stop creating new paper orders and export a backup before attempting recovery. Each fill performs one fresh official price-band verification before account mutation to avoid redundant exchange API requests.
+The paper-account dashboard runs SQLite `integrity_check` and reconciles cash and per-symbol positions against the fill ledger. It also verifies filled-order/fill-row consistency and checks that fill price multiplied by quantity matches gross notional. Any discrepancy locks new orders, dynamic exits, and paper matching in the dashboard; the standalone worker also stops all trading. Export a full SQLite backup and investigate before attempting recovery. Each fill performs one fresh official price-band verification before account mutation to avoid redundant exchange API requests.
+
+The paper-account area also offers a consistent SQLite snapshot download containing cash, positions, orders, fills, and worker records. Store it offline regularly. This is an export-only backup; it does not sync to cloud storage or perform an unsafe online overwrite restore.
