@@ -164,6 +164,7 @@ def rolling_walk_forward(
                 max_positions=max_positions, risk_fraction=risk_fraction,
                 exit_profile=exit_profile, warmup=warmup_bars,
                 fee=fee, sell_tax=sell_tax, slippage=slippage,
+                corporate_actions=corporate_actions,
             )
             selection = local_selection_cache.get(cache_key)
             if selection is not None:
