@@ -63,12 +63,20 @@ class PaperAccount:
                 share_multiplier REAL NOT NULL,
                 cash_per_share REAL NOT NULL,
                 reference_price REAL,
+                price_adjustment_factor REAL,
                 entitled_quantity INTEGER NOT NULL DEFAULT 0,
                 cash_amount REAL NOT NULL DEFAULT 0,
                 cash_in_lieu REAL NOT NULL DEFAULT 0,
                 applied_at TEXT NOT NULL,
                 paid_at TEXT
             )""")
+            action_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(paper_corporate_actions)")
+            }
+            if "price_adjustment_factor" not in action_columns:
+                conn.execute(
+                    "ALTER TABLE paper_corporate_actions ADD COLUMN price_adjustment_factor REAL"
+                )
             conn.execute(
                 "INSERT OR IGNORE INTO paper_account(id,initial_cash,cash,created_at) VALUES(1,?,?,?)",
                 (float(initial_cash), float(initial_cash), datetime.now(TZ).isoformat()),
@@ -106,7 +114,7 @@ class PaperAccount:
             ).fetchall()
             actions = conn.execute(
                 "SELECT event_id,symbol,action_type,effective_date,payment_date,entitled_quantity,"
-                "cash_amount,cash_in_lieu,applied_at,paid_at FROM paper_corporate_actions "
+                "cash_amount,cash_in_lieu,applied_at,paid_at,price_adjustment_factor FROM paper_corporate_actions "
                 "ORDER BY effective_date DESC,event_id"
             ).fetchall()
         fields = ["fill_id","order_id","symbol","side","quantity","price","gross","fees","tax","realized_pnl","quote_source","quote_time","filled_at"]
@@ -119,7 +127,7 @@ class PaperAccount:
             "fills": [dict(zip(fields, row)) for row in fills],
             "corporate_actions": [
                 dict(zip(["event_id","symbol","action_type","effective_date","payment_date",
-                          "entitled_quantity","cash_amount","cash_in_lieu","applied_at","paid_at"], row))
+                          "entitled_quantity","cash_amount","cash_in_lieu","applied_at","paid_at","price_adjustment_factor"], row))
                 for row in actions
             ],
         }
@@ -175,109 +183,164 @@ class PaperAccount:
         return opened_at
 
     def apply_corporate_actions(self, events, as_of: datetime | str) -> dict:
-        """Apply ex-date actions exactly once and settle dividend receivables.
-
-        This method only applies actions effective on the supplied Taiwan date.
-        An unapplied older event is reported as missed; it is never silently
-        applied late because current holdings may have changed since ex-date.
-        """
+        """Apply all same-day actions as one atomic per-symbol adjustment."""
         current = as_of if isinstance(as_of, datetime) else datetime.fromisoformat(str(as_of))
         action_day = current.date().isoformat()
         frame = validate_action_frame(
-            events if isinstance(events, pd.DataFrame) else pd.DataFrame(events),
-            "",
+            events if isinstance(events, pd.DataFrame) else pd.DataFrame(events), ""
         )
         applied, paid, missed = [], [], []
         stamp = datetime.now(TZ).isoformat()
+        total_paid = 0.0
         with closing(sqlite3.connect(self.db_path, timeout=20)) as conn:
             conn.execute("PRAGMA busy_timeout=20000")
-            # A missed ex-date must be reconciled manually; do not infer old entitlements.
-            for event in frame.itertuples(index=False):
-                effective = event.effective_date.date().isoformat()
-                exists = conn.execute(
-                    "SELECT 1 FROM paper_corporate_actions WHERE event_id=?",
-                    (str(event.event_id),),
-                ).fetchone()
-                if exists:
-                    continue
-                if effective < action_day:
-                    missed.append(str(event.event_id))
-                    continue
-                if effective > action_day:
-                    continue
+            pending_ids = {
+                row[0] for row in conn.execute(
+                    "SELECT event_id FROM paper_corporate_actions"
+                )
+            }
+            due_frame = frame.loc[
+                ~frame["event_id"].astype(str).isin(pending_ids)
+            ].copy()
+            for _, event in due_frame.loc[
+                due_frame["effective_date"].dt.date < current.date()
+            ].iterrows():
+                missed.append(str(event["event_id"]))
+            today_frame = due_frame.loc[
+                due_frame["effective_date"].dt.date == current.date()
+            ]
+            for (symbol, effective_date), group in today_frame.groupby(
+                ["symbol", "effective_date"], sort=True
+            ):
                 pending = conn.execute(
                     "SELECT COUNT(*) FROM paper_orders WHERE symbol=? AND status=?",
-                    (str(event.symbol), OrderStatus.ACCEPTED.value),
+                    (str(symbol), OrderStatus.ACCEPTED.value),
                 ).fetchone()[0]
                 if pending:
                     raise ValueError(
-                        f"{event.symbol} 除權息日仍有未成交委託；請先取消委託再處理公司行動"
+                        f"{symbol} 除權息日仍有未成交委託；請先取消委託再處理公司行動"
                     )
                 position = conn.execute(
                     "SELECT quantity,average_cost FROM paper_positions WHERE symbol=?",
-                    (str(event.symbol),),
+                    (str(symbol),),
                 ).fetchone()
                 quantity = int(position[0]) if position else 0
                 average_cost = float(position[1]) if position else 0.0
-                cash_amount = 0.0
+                cash_events = group.loc[group["action_type"] == "cash_dividend"]
+                share_events = group.loc[group["action_type"].isin({
+                    "stock_dividend", "stock_split", "capital_reduction", "par_value_change"
+                })]
+                cash_by_id = {
+                    str(row["event_id"]): quantity * float(row["cash_per_share"])
+                    for _, row in cash_events.iterrows()
+                }
+                total_multiplier = (
+                    float(share_events["share_multiplier"].prod())
+                    if not share_events.empty else 1.0
+                )
                 cash_in_lieu = 0.0
                 new_quantity = quantity
-                if event.action_type == "cash_dividend":
-                    cash_amount = quantity * float(event.cash_per_share)
-                elif quantity > 0:
-                    multiplier = float(event.share_multiplier)
-                    exact = quantity * multiplier
-                    new_quantity = int(math.floor(exact + 1e-9))
-                    fractional = max(0.0, exact - new_quantity)
+                if quantity > 0 and total_multiplier != 1.0:
+                    exact_quantity = quantity * total_multiplier
+                    new_quantity = int(math.floor(exact_quantity + 1e-9))
+                    fractional = max(0.0, exact_quantity - new_quantity)
                     if fractional > 1e-8:
-                        reference = event.reference_price
-                        if reference is None or not math.isfinite(float(reference)) or float(reference) <= 0:
+                        references = pd.to_numeric(
+                            share_events["reference_price"], errors="coerce"
+                        ).dropna()
+                        if references.empty or float(references.iloc[-1]) <= 0:
                             raise ValueError(
-                                f"{event.symbol} 公司行動產生零股權利，但缺少可用參考價；停止自動調整"
+                                f"{symbol} 公司行動產生零股權利，但缺少可用官方參考價；停止自動調整"
                             )
-                        cash_in_lieu = fractional * float(reference)
-                    if position:
-                        conn.execute(
-                            "UPDATE paper_positions SET quantity=?,average_cost=?,position_version=position_version+1 WHERE symbol=?",
-                            (new_quantity, average_cost / multiplier, str(event.symbol)),
-                        )
-                        tables = {
-                            row[0] for row in conn.execute(
-                                "SELECT name FROM sqlite_master WHERE type='table'"
-                            )
-                        }
-                        if "adaptive_exit_state" in tables:
-                            conn.execute("""
-                                UPDATE adaptive_exit_state SET
-                                    quantity=?, position_version=position_version+1,
-                                    entry_price=entry_price/?,
-                                    initial_risk=initial_risk/?,
-                                    high_water=high_water/?,
-                                    atr=atr/?,
-                                    stop_price=stop_price/?,
-                                    updated_at=?
-                                WHERE symbol=?
-                            """, (
-                                new_quantity, multiplier, multiplier, multiplier,
-                                multiplier, multiplier, stamp, str(event.symbol),
-                            ))
+                        cash_in_lieu = fractional * float(references.iloc[-1])
+
+                official_factors = sorted({
+                    float(value) for value in pd.to_numeric(
+                        group["price_adjustment_factor"], errors="coerce"
+                    ).dropna()
+                    if math.isfinite(float(value)) and float(value) > 0
+                })
+                price_factor = (
+                    float(math.prod(official_factors))
+                    if official_factors else (1.0 / total_multiplier)
+                )
+                has_share_action = not share_events.empty and quantity > 0
+                if has_share_action:
+                    conn.execute(
+                        "UPDATE paper_positions SET quantity=?,average_cost=?,position_version=position_version+1 WHERE symbol=?",
+                        (new_quantity, average_cost / total_multiplier, str(symbol)),
+                    )
+                tables = {
+                    row[0] for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'"
+                    )
+                }
+                if "adaptive_exit_state" in tables and quantity > 0 and (
+                    has_share_action or bool(official_factors)
+                ):
+                    if has_share_action:
+                        conn.execute("""
+                            UPDATE adaptive_exit_state SET
+                                quantity=?, position_version=position_version+1,
+                                entry_price=entry_price*?,
+                                initial_risk=initial_risk*?,
+                                high_water=high_water*?,
+                                atr=atr*?,
+                                stop_price=stop_price*?,
+                                updated_at=?
+                            WHERE symbol=?
+                        """, (
+                            new_quantity, price_factor, price_factor, price_factor,
+                            price_factor, stamp, str(symbol),
+                        ))
+                    else:
+                        conn.execute("""
+                            UPDATE adaptive_exit_state SET
+                                entry_price=entry_price*?,
+                                initial_risk=initial_risk*?,
+                                high_water=high_water*?,
+                                atr=atr*?,
+                                stop_price=stop_price*?,
+                                updated_at=?
+                            WHERE symbol=?
+                        """, (
+                            price_factor, price_factor, price_factor, price_factor,
+                            price_factor, stamp, str(symbol),
+                        ))
                 if cash_in_lieu:
                     conn.execute(
                         "UPDATE paper_account SET cash=cash+? WHERE id=1",
                         (cash_in_lieu,),
                     )
-                conn.execute("""INSERT INTO paper_corporate_actions(
-                    event_id,symbol,action_type,effective_date,payment_date,
-                    share_multiplier,cash_per_share,reference_price,entitled_quantity,
-                    cash_amount,cash_in_lieu,applied_at,paid_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
-                    str(event.event_id), str(event.symbol), str(event.action_type),
-                    effective, event.payment_date.date().isoformat() if not pd.isna(event.payment_date) else None,
-                    float(event.share_multiplier), float(event.cash_per_share),
-                    float(event.reference_price) if event.reference_price is not None and math.isfinite(float(event.reference_price)) else None,
-                    quantity, cash_amount, cash_in_lieu, stamp, None,
-                ))
-                applied.append(str(event.event_id))
+                share_event_ids = set(share_events["event_id"].astype(str))
+                for _, event in group.iterrows():
+                    event_id = str(event["event_id"])
+                    payment_value = pd.to_datetime(event["payment_date"], errors="coerce")
+                    reference = pd.to_numeric(
+                        pd.Series([event["reference_price"]]), errors="coerce"
+                    ).iloc[0]
+                    event_cash_in_lieu = (
+                        cash_in_lieu
+                        if event_id in share_event_ids and event_id == str(share_events.iloc[-1]["event_id"])
+                        else 0.0
+                    )
+                    conn.execute("""INSERT INTO paper_corporate_actions(
+                        event_id,symbol,action_type,effective_date,payment_date,
+                        share_multiplier,cash_per_share,reference_price,
+                        price_adjustment_factor,entitled_quantity,cash_amount,
+                        cash_in_lieu,applied_at,paid_at
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                        event_id, str(symbol), str(event["action_type"]),
+                        effective_date.date().isoformat(),
+                        payment_value.date().isoformat() if pd.notna(payment_value) else None,
+                        float(event["share_multiplier"]), float(event["cash_per_share"]),
+                        float(reference) if pd.notna(reference) and math.isfinite(float(reference)) else None,
+                        float(event["price_adjustment_factor"])
+                        if pd.notna(event["price_adjustment_factor"]) else None,
+                        quantity, float(cash_by_id.get(event_id, 0.0)),
+                        event_cash_in_lieu, stamp, None,
+                    ))
+                    applied.append(event_id)
 
             due = conn.execute(
                 "SELECT event_id,cash_amount,payment_date FROM paper_corporate_actions "
