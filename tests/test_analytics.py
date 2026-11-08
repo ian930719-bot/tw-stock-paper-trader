@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 
 from analytics import equity_risk_metrics, trade_statistics, strategy_decay_report
+from performance_validation import benchmark_metrics_from_close
 
 
 class AnalyticsTests(unittest.TestCase):
@@ -20,15 +21,27 @@ class AnalyticsTests(unittest.TestCase):
 
     def test_cagr_uses_actual_elapsed_calendar_time_when_dates_exist(self):
         equity = pd.DataFrame({
-            "日期": pd.to_datetime(["2020-01-01", "2021-01-01"]),
-            "資產": [100.0, 121.0],
-            "持倉市值": [100.0, 121.0],
+            "日期": pd.to_datetime(["2020-01-01", "2020-07-01", "2021-01-01"]),
+            "資產": [100.0, 105.0, 121.0],
+            "持倉市值": [100.0, 105.0, 121.0],
         })
         result = equity_risk_metrics(equity, 100.0)
         expected = 1.21 ** (365.25 / 366.0) - 1.0
-        self.assertAlmostEqual(result["年化波動率"], result["年化波動率"])
-        self.assertAlmostEqual(result["Calmar"], expected / abs(result["最大回撤"]) if result["最大回撤"] < 0 else 0.0)
-        self.assertAlmostEqual(result["平均曝險"], 1.0)
+        self.assertAlmostEqual(result["CAGR"], expected)
+        self.assertAlmostEqual(result["Calmar"], expected / abs(result["最大回撤"]))
+
+    def test_0050_benchmark_deducts_same_buy_and_sell_costs(self):
+        prices = pd.Series(
+            [100.0, 120.0],
+            index=pd.to_datetime(["2020-01-02", "2021-01-04"]),
+        )
+        result = benchmark_metrics_from_close(prices, 100000.0, 0.001425, 0.003, 0.001)
+        expected_shares = 100000.0 / (100.0 * (1.0 + 0.001425 + 0.001))
+        expected_end = expected_shares * 120.0 * (1.0 - 0.001425 - 0.003 - 0.001)
+        self.assertAlmostEqual(result["期末資產_NT"], expected_end)
+        self.assertEqual(result["買入手續費"], 0.001425)
+        self.assertEqual(result["賣出證交稅"], 0.003)
+        self.assertEqual(result["單邊滑價"], 0.001)
 
     def test_strategy_decay_report_flags_recent_reversal(self):
         dates = pd.bdate_range("2024-01-02", periods=140)
