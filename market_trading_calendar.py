@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import date, datetime
 import re
 import time
+from io import StringIO
 
 import pandas as pd
 import requests
@@ -22,7 +23,7 @@ def _closure_text(text: str) -> bool:
 def parse_tpex_holiday_html(html: str, year: int) -> tuple[frozenset[str], str]:
     if not html or not str(html).strip():
         raise ValueError("TPEx 官方休市頁面內容為空")
-    tables = pd.read_html(html)
+    tables = pd.read_html(StringIO(html))
     closures = set()
     found_year = False
     for table in tables:
