@@ -379,6 +379,8 @@ def shared_capital_backtest(
                 "進場成本": p["entry_cost"], "出場收入": proceeds,
                 "損益": pnl, "報酬率": pnl / p["entry_cost"] if p["entry_cost"] else 0.0,
                 "出場原因": "該標的資料期末平倉",
+                "曾觸發獲利檢視": bool(p.get("profit_review_triggered", False)),
+                "最高風險倍數": round((p.get("high_water", p["entry_price"]) - p["entry_price"]) / max(p.get("initial_risk", 0.01), 0.01), 2),
             })
             cash += proceeds
             del positions[code]
