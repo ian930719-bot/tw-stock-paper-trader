@@ -27,6 +27,7 @@ from paper_account import PaperAccount
 from adaptive_exit_monitor import AdaptiveExitMonitor
 from paper_worker import PaperWorker, read_worker_status
 from strategy_exits import PROFILES, initial_stop, risk_position_size
+from collections import OrderedDict
 from walk_forward import rolling_walk_forward, regime_performance, parameter_sensitivity
 from taiwan_market_rules import floor_board_lot
 from taiwan_trading_calendar import trading_day_status
@@ -35,6 +36,9 @@ from market_trading_calendar import market_trading_day_status
 from trading_config import TradingConfig
 from trading_mode import StagedTradingController
 st.set_page_config(page_title="台股模擬交易",layout="wide")
+
+# Bounded in-process cache keyed by exact training data and research assumptions.
+_WALK_FORWARD_SELECTION_CACHE = OrderedDict()
 @st.cache_data(ttl=21600, max_entries=8, show_spinner=False)
 def cached_rolling_walk_forward(
     frames, strategy, initial_capital, max_positions, risk_fraction,
@@ -1278,6 +1282,8 @@ with t6:
                float(st.session_state.get("wf_risk_percent",0.5))/100,
                tuple(sorted(data.keys())),period)
     if st.button("執行滾動式樣本外測試",key="run_rolling_wf"):
+        wf_progress = st.progress(0.0, text="準備 Walk-forward…")
+        wf_progress_text = st.empty()
         with st.spinner("逐段執行獨立樣本外回測…"):
             result=rolling_walk_forward(
                 data,wf_strategy,
@@ -1285,7 +1291,13 @@ with t6:
                 risk_fraction=wf_config[6],lookback_days=wf_lookback,
                 test_days=wf_test,step_days=wf_test,warmup_bars=200,
                 exit_profile=wf_exit[0],
+                selection_cache=_WALK_FORWARD_SELECTION_CACHE,
+                progress_callback=lambda done, total, message: (
+                    wf_progress.progress(min(done / max(total, 1), 1.0)),
+                    wf_progress_text.caption(message),
+                ),
             )
+        wf_progress.progress(1.0, text="Walk-forward 完成")
         st.session_state["rolling_wf_result"]=result
         st.session_state["rolling_wf_config"]=wf_config
     if st.session_state.get("rolling_wf_config")==wf_config:
