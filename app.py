@@ -54,6 +54,11 @@ except Exception as exc:
     ])
     universe_source = "內建備援清單（非完整資料庫）"
 W = dict(zip(stock_master["代號"], stock_master["名稱"]))
+etf_mask = (
+    stock_master["產業"].astype(str).str.contains("ETF|指數股票型基金", case=False, na=False)
+    | stock_master["名稱"].astype(str).str.contains("ETF", case=False, na=False)
+)
+etf_codes = set(stock_master.loc[etf_mask, "代號"].astype(str))
 universe_stats = universe_summary(stock_master) if universe_error is None else {
     "總數": len(stock_master), "上市": len(stock_master), "上櫃": 0,
     "資料日期": None, "更新時間": datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
@@ -1020,6 +1025,7 @@ with t7:
                 quantity=int(candidate["股數"]), limit_price=float(candidate["參考價"]),
                 reason=candidate["策略依據"],
                 idempotency_key=f"auto-{side.value.lower()}-{candidate['代號']}-{today_text}-{signal_row['日線日期']}",
+                instrument_type="etf" if candidate["代號"] in etf_codes else "stock",
             )
             result = engine.submit(
                 intent, cash=cash_available, positions=positions,
@@ -1111,7 +1117,8 @@ with t7:
             intent = OrderIntent(
                 symbol=signal["symbol"], side=Side.SELL, quantity=qty,
                 limit_price=float(signal["price"]), reason=signal["reason"],
-                idempotency_key=f"stop-{signal['symbol']}-{signal['reason']}-{today_for_risk}-{signal['quote_time']}")
+                idempotency_key=f"stop-{signal['symbol']}-{signal['reason']}-{today_for_risk}-{signal['quote_time']}",
+                instrument_type="etf" if signal["symbol"] in etf_codes else "stock")
             result = engine.submit(
                 intent, cash=float(account_snapshot["cash"]),
                 positions=account_positions, equity=current_equity,
