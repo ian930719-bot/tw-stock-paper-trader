@@ -73,15 +73,15 @@ class ExecutionEngineTests(unittest.TestCase):
         order = self.engine.submit(self.intent(), cash=100000, positions={},
                                    equity=100000, now=OPEN)
         with self.assertRaisesRegex(ValueError, "尚未觸及"):
-            self.engine.match_limit(order.order_id, 101, now=OPEN)
-        filled = self.engine.match_limit(order.order_id, 99, now=OPEN)
+            self.engine.match_limit(order.order_id, 11, now=OPEN)
+        filled = self.engine.match_limit(order.order_id, 9, now=OPEN)
         self.assertEqual(filled.status, "FILLED")
         self.assertEqual(filled.filled_quantity, 10)
-        self.assertEqual(filled.average_fill_price, 99)
+        self.assertEqual(filled.average_fill_price, 10)
 
     def test_reject_order_notional_cap(self):
         with self.assertRaisesRegex(ValueError, "單筆"):
-            validate_order(self.intent(quantity=600), cash=100000,
+            validate_order(self.intent(quantity=6000, limit_price=10), cash=100000,
                            positions={}, equity=100000, daily_realized_pnl=0,
                            open_order_count=0, daily_order_count=0,
                            limits=self.engine.limits, now=OPEN)
