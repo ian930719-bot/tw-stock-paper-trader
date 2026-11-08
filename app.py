@@ -18,7 +18,7 @@ from analytics import equity_risk_metrics, trade_statistics
 from historical_store import get_incremental_history, price_cache_summary
 from execution_engine import PaperExecutionEngine, OrderIntent, RiskLimits, Side, taiwan_regular_session, realized_pnl_from_trades
 from paper_account import PaperAccount
-from stop_monitor import StopMonitor
+from adaptive_exit_monitor import AdaptiveExitMonitor
 from strategy_exits import PROFILES, initial_stop, risk_position_size
 from walk_forward import rolling_walk_forward, regime_performance, parameter_sensitivity
 from taiwan_market_rules import floor_board_lot
@@ -947,7 +947,9 @@ with t7:
         calendar_provider=market_trading_day_status,
     )
     paper_account = PaperAccount(engine.db_path, initial_cash=staged_config.initial_capital)
-    stop_monitor = StopMonitor(engine.db_path, stop_loss_pct=0.05, take_profit_pct=0.10, trailing_stop_pct=0.05)
+    adaptive_monitor = AdaptiveExitMonitor(
+        engine.db_path, max_age_seconds=staged_config.max_quote_age_seconds
+    )
     account_snapshot = paper_account.snapshot()
     account_positions = {p["symbol"]: int(p["quantity"]) for p in account_snapshot["positions"]}
     account_costs = {p["symbol"]: float(p["average_cost"]) for p in account_snapshot["positions"]}
@@ -1166,62 +1168,161 @@ with t7:
             st.error(str(exc))
     st.caption("股數僅按帳戶風險預算與每股停損距離計算；尚未扣除現金、曝險、交易單位、費稅及流動性限制。候選參數未經台股樣本外驗證，不構成交易建議。")
     st.divider()
-    st.subheader("舊版固定百分比退出（實驗功能，預設停用）")
-    st.warning("固定 5% 停損／10% 停利／5% 移動停利沒有完成台股樣本外驗證，不應作為正式策略。只有明確勾選後才可手動掃描；仍只建立模擬限價單。")
-    if st.checkbox("我了解限制，暫時啟用舊版固定百分比實驗規則", value=False, key="enable_experimental_fixed") and st.button("掃描持倉並建立實驗性模擬退出委託", disabled=not session_open):
+    st.subheader("世界級操盤策略｜動態停損與獲利管理")
+    adaptive_profile = st.selectbox(
+        "持倉出場策略",
+        ["atr_dynamic", "oneil_growth", "minervini_sepa"],
+        format_func=lambda key: {
+            "atr_dynamic": "ATR 動態停損（預設）",
+            "oneil_growth": "O'Neil 成長股（獲利奔跑）",
+            "minervini_sepa": "Minervini SEPA（結構失效＋R 倍數）",
+        }[key],
+        key="adaptive_exit_profile",
+    )
+    adaptive_atr_multiple = st.selectbox(
+        "ATR 移動停損倍數（研究候選）", [1.5, 2.0, 2.5, 3.0],
+        index=1, key="adaptive_exit_atr_multiple"
+    )
+    st.caption(
+        "不再把固定 5% 停損／10% 停利當成預設操盤規則。"
+        "ATR 策略以波動度移動保護停損；O'Neil 20% 僅進入獲利檢視，不強制賣出；"
+        "Minervini 依結構失效價，達 2R 移至成本保護、達 3R 啟動 ATR 追蹤。"
+        "所有 ATR／R 倍數均為待樣本外驗證的候選參數。"
+    )
+    if st.button("依最新已完成日線同步持倉停損", key="sync_adaptive_stops"):
+        configured, skipped = [], []
+        for position in account_snapshot["positions"]:
+            symbol = position["symbol"]
+            frame = data.get(symbol)
+            if frame is None or len(frame) < 16:
+                skipped.append(f"{symbol}：歷史日線不足")
+                continue
+            completed = frame.copy().sort_values("date").reset_index(drop=True)
+            last_date = pd.to_datetime(completed["date"].iloc[-1]).date()
+            # Never use today's unfinished daily bar to calculate ATR or structure.
+            if last_date == session_now.date():
+                completed = completed.iloc[:-1].copy()
+            if len(completed) < 15:
+                skipped.append(f"{symbol}：缺少足夠的已完成日線")
+                continue
+            previous_close = completed["close"].shift(1)
+            true_range = pd.concat([
+                completed["high"] - completed["low"],
+                (completed["high"] - previous_close).abs(),
+                (completed["low"] - previous_close).abs(),
+            ], axis=1).max(axis=1)
+            atr_series = true_range.ewm(alpha=1/14, adjust=False, min_periods=14).mean()
+            atr_value = float(atr_series.iloc[-1])
+            if not np.isfinite(atr_value) or atr_value <= 0:
+                skipped.append(f"{symbol}：ATR 無效")
+                continue
+            technical_invalidation = None
+            if adaptive_profile == "minervini_sepa":
+                technical_invalidation = float(completed["low"].tail(10).min())
+                if technical_invalidation >= float(position["average_cost"]):
+                    skipped.append(f"{symbol}：找不到低於成本的結構失效價")
+                    continue
+            try:
+                state = adaptive_monitor.configure_position(
+                    symbol, int(position["quantity"]), float(position["average_cost"]),
+                    atr_value, position_version=int(position["position_version"]),
+                    profile=adaptive_profile, atr_multiple=float(adaptive_atr_multiple),
+                    technical_invalidation=technical_invalidation, now=session_now,
+                )
+                configured.append({
+                    "代號": symbol, "策略": state["profile"],
+                    "初始／目前保護價": round(state["stop_price"], 2),
+                    "ATR": round(atr_value, 2),
+                })
+            except ValueError as exc:
+                skipped.append(f"{symbol}：{exc}")
+        if configured:
+            st.dataframe(pd.DataFrame(configured), use_container_width=True, hide_index=True)
+        if skipped:
+            st.warning("未同步項目：" + "；".join(skipped))
+        if not configured and not skipped:
+            st.info("目前沒有持倉需要設定動態停損。")
+    if st.button(
+        "掃描新鮮報價並建立動態退出模擬委託",
+        key="scan_adaptive_exit_orders",
+        disabled=not session_open,
+    ):
         stop_created = []
         current_orders = engine.list_orders()
-        pending_sell_symbols = {o["symbol"] for o in current_orders
-                                if o["status"] == "ACCEPTED" and o["side"] == "SELL"}
+        pending_sell_symbols = {
+            o["symbol"] for o in current_orders
+            if o["status"] == "ACCEPTED" and o["side"] == "SELL"
+        }
         pending_count = sum(1 for o in current_orders if o["status"] == "ACCEPTED")
-        today_count = sum(1 for o in current_orders
-                          if str(o["created_at"]).startswith(today_for_risk))
+        today_count = sum(
+            1 for o in current_orders
+            if str(o["created_at"]).startswith(today_for_risk)
+        )
         current_equity = float(account_snapshot["cash"]) + sum(
-            int(p["quantity"]) * float(quote_lookup.get(p["symbol"], {}).get("盤中參考價") or p["average_cost"])
-            for p in account_snapshot["positions"])
-        for q in quotes:
-            if q.get("報價狀態") != "盤中更新" or q.get("盤中參考價") is None:
+            int(p["quantity"]) * float(
+                quote_lookup.get(p["symbol"], {}).get("盤中參考價") or p["average_cost"]
+            ) for p in account_snapshot["positions"]
+        )
+        for quote in quotes:
+            if quote.get("報價狀態") != "盤中更新" or quote.get("盤中參考價") is None:
                 continue
             try:
-                signal = stop_monitor.evaluate_quote(
-                    q["代號"], float(q["盤中參考價"]), str(q.get("報價時間") or ""),
-                    "Yahoo Finance 1-minute", now=session_now)
+                signal = adaptive_monitor.evaluate_quote(
+                    quote["代號"], float(quote["盤中參考價"]),
+                    str(quote.get("報價時間") or ""),
+                    "Yahoo Finance 1-minute", now=session_now,
+                )
             except ValueError:
                 continue
             if not signal or signal["symbol"] in pending_sell_symbols:
                 continue
             held = int(account_positions.get(signal["symbol"], 0))
-            qty = floor_board_lot(min(held, signal["quantity"],
-                      int(limits.max_order_notional / signal["price"])))
+            raw_qty = min(
+                held, int(signal["quantity"]),
+                int(limits.max_order_notional / signal["price"]),
+            )
+            if raw_qty >= 1000:
+                qty, odd_lot = floor_board_lot(raw_qty), False
+            else:
+                qty, odd_lot = raw_qty, True
             if qty <= 0:
                 continue
             intent = OrderIntent(
                 symbol=signal["symbol"], side=Side.SELL, quantity=qty,
                 limit_price=float(signal["price"]), reason=signal["reason"],
-                idempotency_key=f"stop-{signal['symbol']}-{signal['reason']}-{today_for_risk}-{signal['quote_time']}",
+                idempotency_key=(
+                    f"adaptive-stop-{signal['symbol']}-{today_for_risk}-"
+                    f"{signal['quote_time']}-{signal['trigger_price']}"
+                ),
                 instrument_type="etf" if signal["symbol"] in etf_codes else "stock",
-                market=market_by_symbol.get(str(signal["symbol"]), "上市"))
+                odd_lot=odd_lot,
+                market=market_by_symbol.get(str(signal["symbol"]), "上市"),
+            )
             result = engine.submit(
                 intent, cash=float(account_snapshot["cash"]),
                 positions=account_positions, equity=current_equity,
                 daily_realized_pnl=daily_pnl, open_order_count=pending_count,
-                daily_order_count=today_count, now=session_now)
+                daily_order_count=today_count, now=session_now,
+            )
             if result.status == "ACCEPTED":
                 pending_sell_symbols.add(signal["symbol"])
                 pending_count += 1
                 today_count += 1
-                stop_created.append({"代號":signal["symbol"],"觸發":signal["reason"],
-                                     "觸發價":signal["trigger_price"],"參考價":signal["price"],
-                                     "委託股數":qty,"委託狀態":result.status})
+                stop_created.append({
+                    "代號": signal["symbol"], "觸發原因": signal["reason"],
+                    "保護停損價": signal["trigger_price"],
+                    "最新參考價": signal["price"], "委託股數": qty,
+                    "零股": odd_lot, "委託狀態": result.status,
+                })
         if stop_created:
-            st.success(f"已建立 {len(stop_created)} 筆停損／停利模擬限價委託。")
-            st.dataframe(pd.DataFrame(stop_created),use_container_width=True,hide_index=True)
+            st.success(f"已建立 {len(stop_created)} 筆動態退出模擬委託。")
+            st.dataframe(pd.DataFrame(stop_created), use_container_width=True, hide_index=True)
         else:
-            st.info("本輪沒有觸發條件，或沒有可建立的合規退出委託。")
+            st.info("本輪沒有觸發動態停損，或沒有可建立的合規退出委託。")
         st.rerun()
-    stop_events = stop_monitor.events()
-    if stop_events:
-        st.dataframe(pd.DataFrame(stop_events),use_container_width=True,hide_index=True)
+    adaptive_events = adaptive_monitor.events()
+    if adaptive_events:
+        st.dataframe(pd.DataFrame(adaptive_events), use_container_width=True, hide_index=True)
     st.subheader("用盤中報價自動撮合")
     st.caption("只處理 Yahoo Finance 1 分鐘資料觸及限價的委託；以委託限價作保守模擬成交，不代表真實排隊成交或可成交深度。支援整股及 1–999 股盤中零股委託，並依台股升降單位檢查。")
     if st.button("使用目前新鮮盤中報價撮合等待委託", disabled=not session_open):
