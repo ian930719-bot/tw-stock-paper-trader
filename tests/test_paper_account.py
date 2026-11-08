@@ -29,7 +29,7 @@ class PaperAccountTests(unittest.TestCase):
             cash=100000, positions={"2330": 1000 if side == Side.SELL else 0},
             equity=100000, now=NOW)
 
-    def quote(self, price=99, at=NOW, source="test-feed"):
+    def quote(self, price=9, at=NOW, source="test-feed"):
         return self.account.process_quote(
             "2330", price, at.isoformat(), source, now=NOW)
 
@@ -80,7 +80,7 @@ class PaperAccountTests(unittest.TestCase):
 
     def test_idempotent_fill_processing(self):
         order = self.order(Side.BUY, 1000, "once-only")
-        self.quote(99)
+        self.quote(9)
         self.assertEqual(self.quote(99), [])
         self.assertEqual(len(self.account.snapshot()["fills"]), 1)
         self.assertEqual(self.engine.get_order(order.order_id).status, "FILLED")
