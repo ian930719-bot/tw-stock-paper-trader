@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 
 from research_engine import STRATEGIES
-from walk_forward import rolling_walk_forward
+from walk_forward import rolling_walk_forward, classify_market_regime, regime_performance, parameter_sensitivity
 
 
 def sample_frame(n=820):
@@ -71,6 +71,52 @@ class RollingWalkForwardTests(unittest.TestCase):
         result = rolling_walk_forward({}, STRATEGIES[0])
         self.assertTrue(result["windows"].empty)
         self.assertEqual(result["coverage"], 0)
+
+
+    def test_market_regime_classification_and_regime_report(self):
+        dates = pd.bdate_range("2020-01-01", periods=280)
+        close = np.r_[np.linspace(80, 140, 220), np.linspace(140, 90, 60)]
+        benchmark = pd.DataFrame({"date": dates, "close": close})
+        labels = classify_market_regime(benchmark, ema_window=30, slope_window=5)
+        self.assertIn("多頭", set(labels))
+        self.assertIn("空頭", set(labels))
+
+        equity = pd.DataFrame({
+            "日期": dates[-40:],
+            "資產": np.linspace(1_000_000, 1_040_000, 40),
+            "區段": [1] * 40,
+            "區段資產": np.linspace(1_000_000, 1_040_000, 40),
+        })
+        report = regime_performance(
+            equity, benchmark, initial_capital=1_000_000,
+            ema_window=30, slope_window=5,
+        )
+        self.assertGreater(len(report), 0)
+        self.assertTrue(set(report["盤勢"]).issubset({"多頭", "空頭", "盤整／轉換"}))
+
+    def test_parameter_sensitivity_runs_predeclared_grid(self):
+        from unittest.mock import patch
+        fake = {
+            "windows": pd.DataFrame([{"區段": 1}]),
+            "trades": pd.DataFrame([{"損益": 10}]),
+            "metrics": {"總報酬（鏈結）": 0.1, "最大回撤（鏈結）": -0.05, "Sharpe（鏈結）": 1.2},
+        }
+        with patch("walk_forward.rolling_walk_forward", return_value=fake) as runner:
+            result = parameter_sensitivity(
+                {"A": sample_frame(500)}, STRATEGIES[0],
+                risk_fractions=(0.0025, 0.005), exit_profiles=("baseline_atr2", "atr_3"),
+                lookback_days=300, test_days=100, warmup_bars=200,
+            )
+        self.assertEqual(len(result), 4)
+        self.assertEqual(runner.call_count, 4)
+        self.assertEqual(set(result["出場規則"]), {"baseline_atr2", "atr_3"})
+
+    def test_parameter_sensitivity_rejects_invalid_risk(self):
+        with self.assertRaisesRegex(ValueError, "風險比例"):
+            parameter_sensitivity(
+                {}, STRATEGIES[0], risk_fractions=(0.5,),
+                exit_profiles=("baseline_atr2",),
+            )
 
 
 if __name__ == "__main__":
