@@ -243,3 +243,63 @@ def validate_action_frame(actions: pd.DataFrame | None, symbol: str) -> pd.DataF
             for row in frame.itertuples()
         ]
     return frame.reindex(columns=columns)
+
+
+def point_in_time_recalculate(frame: pd.DataFrame, actions: pd.DataFrame | None, builder):
+    """Recalculate indicators as each corporate action becomes effective.
+
+    For an ex-date at row i, only rows before i are adjusted into the new
+    share/price basis. The recalculated values replace rows i onward only.
+    Therefore an event never changes a signal dated before its effective date.
+    The builder must be causal (rolling/expanding/EMA features using no future
+    rows) and return a DataFrame with the same row count and index.
+    """
+    z = frame.copy().sort_values("date").reset_index(drop=True)
+    output = builder(z).copy().reset_index(drop=True)
+    if len(output) != len(z):
+        raise ValueError("point-in-time builder 必須回傳相同列數")
+    events = validate_action_frame(actions, "")
+    if events.empty or z.empty:
+        return output
+
+    dates = pd.to_datetime(z["date"], errors="coerce").dt.normalize()
+    adjusted = z.copy()
+    for effective_date, group in events.groupby(events["effective_date"].dt.normalize(), sort=True):
+        idx = int(dates.searchsorted(pd.Timestamp(effective_date).normalize(), side="left"))
+        if idx <= 0 or idx >= len(adjusted):
+            continue
+        previous_close = float(adjusted.loc[idx - 1, "close"])
+        if not math.isfinite(previous_close) or previous_close <= 0:
+            continue
+        price_factor = 1.0
+        volume_factor = 1.0
+        for event in group.itertuples(index=False):
+            if event.action_type == "cash_dividend":
+                cash = float(event.cash_per_share)
+                if cash >= previous_close:
+                    continue
+                price_factor *= (previous_close - cash) / previous_close
+            elif event.action_type in {
+                "stock_dividend", "stock_split", "capital_reduction", "par_value_change"
+            }:
+                multiplier = float(event.share_multiplier)
+                price_factor /= multiplier
+                volume_factor *= multiplier
+        if not math.isfinite(price_factor) or price_factor <= 0:
+            continue
+        before = adjusted.index < idx
+        for column in ("open", "high", "low", "close"):
+            if column in adjusted:
+                adjusted.loc[before, column] = pd.to_numeric(
+                    adjusted.loc[before, column], errors="coerce"
+                ) * price_factor
+        if "volume" in adjusted and volume_factor != 1.0:
+            adjusted.loc[before, "volume"] = pd.to_numeric(
+                adjusted.loc[before, "volume"], errors="coerce"
+            ) * volume_factor
+
+        recalculated = builder(adjusted).copy().reset_index(drop=True)
+        if len(recalculated) != len(z):
+            raise ValueError("point-in-time builder 必須回傳相同列數")
+        output.iloc[idx:, :] = recalculated.iloc[idx:, :].to_numpy()
+    return output
