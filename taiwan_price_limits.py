@@ -113,7 +113,8 @@ def _parse_rows(rows, symbol, expected_date, market):
         return {
             "symbol": str(symbol).upper(),
             "market": market,
-            "date": row_date or expected_date.isoformat(),
+            "date": expected_date.isoformat(),
+            "source_date": row_date,
             "reference_price": ref,
             "upper_limit": None if no_limit else upper,
             "lower_limit": None if no_limit else lower,
