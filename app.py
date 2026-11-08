@@ -21,6 +21,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from market_data import quote_freshness
 from analytics import equity_risk_metrics, trade_statistics
+from portfolio_risk import portfolio_risk_report
 from historical_store import get_incremental_history, price_cache_summary
 from execution_engine import PaperExecutionEngine, OrderIntent, RiskLimits, Side, taiwan_regular_session, realized_pnl_from_trades
 from paper_account import PaperAccount
@@ -1257,6 +1258,34 @@ with t6:
                     "portfolio_trades.csv","text/csv"
                 )
             st.caption("切分依觀察清單共同交易日期進行；各股票僅使用該日以前資料暖機，績效只從各區段起始日計算。觀察清單仍不代表全台上市櫃股票。")
+            st.divider()
+            st.markdown("**股票相關性與風險平價配置研究**")
+            st.caption("這是截至最新共同交易日的風險快照，只供研究，不回填歷史樣本外，也不會自動送出委託。")
+            if st.button("計算股票相關性與動態配置", key="run_portfolio_risk"):
+                snapshot = portfolio_risk_report(data, min_history=60, max_weight=0.30,
+                                                 target_exposure=0.90, shrinkage=0.20)
+                st.session_state["portfolio_risk_snapshot"] = snapshot
+                st.session_state["portfolio_risk_symbols"] = tuple(sorted(data.keys()))
+            if (st.session_state.get("portfolio_risk_symbols") == tuple(sorted(data.keys()))
+                    and st.session_state.get("portfolio_risk_snapshot")):
+                snapshot = st.session_state["portfolio_risk_snapshot"]
+                if snapshot["status"] != "ok":
+                    st.warning("共同有效歷史交易日不足 60 日，暫不產生配置。")
+                else:
+                    st.caption(f"資料截至 {snapshot['as_of']}｜共同樣本 {snapshot['observations']} 日｜"
+                               f"預估年化波動 {snapshot['estimated_annual_volatility']:.1%}｜"
+                               f"保留現金 {snapshot['cash_weight']:.1%}")
+                    allocation = pd.DataFrame({
+                        "建議配置權重": snapshot["weights"],
+                        "年化波動率": snapshot["volatility"],
+                        "風險貢獻": snapshot["risk_contributions"],
+                    }).rename_axis("股票代號")
+                    st.dataframe(allocation.style.format({
+                        "建議配置權重":"{:.1%}", "年化波動率":"{:.1%}", "風險貢獻":"{:.1%}",
+                    }), use_container_width=True)
+                    st.subheader("股票報酬相關性矩陣")
+                    st.dataframe(snapshot["correlation"].style.format("{:.2f}"), use_container_width=True)
+                    st.caption(snapshot["method"] + "。權重上限 30%，總曝險上限 90%；不代表預期報酬或獲利保證。")
         elif "portfolio_summary" in st.session_state:
             st.info("回測參數或觀察清單已變更；請重新執行，避免沿用舊結果。")
             st.warning("這是歷史研究，不是投資建議。仍未完整納入股息再投資、除權息、漲跌停排隊、停牌、流動性衝擊、下市股及歷史成分股偏誤；樣本外結果不能回頭用於調參。")
