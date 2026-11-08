@@ -509,7 +509,7 @@ with t5:
     elif "single_master_results" in st.session_state:
         st.info("標的、期間或本金已變更；請重新執行策略比較。")
     st.markdown("**同一進場策略的出場規則比較**")
-    st.caption("固定同一標的、進場訊號、初始本金、持倉上限與交易成本，只改變初始停損規則。Minervini 以最近 10 根已完成日 K 最低價作結構失效代理；O’Neil 以 8% 參考值呈現。此處尚未加入移動停利或 20–25% 強勢股延長持有判斷。")
+    st.caption("固定同一標的、進場訊號、初始本金、持倉上限、風險股數基準與交易成本，只改變初始停損及後續管理。ATR 依前一交易日收盤資料更新移動停損，下一交易日生效；O’Neil 達 +20% 只標記獲利檢視並採較寬 3 ATR 追蹤，不硬性停利；Minervini 達 2R 將停損推至成本價、達 3R 啟動 2.5 ATR 追蹤。這些是待驗證的代理規則，並非完整複製大師策略。")
     exit_entry_strategy=st.selectbox("固定進場策略",STRATEGIES,key="exit_compare_entry")
     exit_profiles=[
         ("baseline_atr2","原始 ATR × 2"),
