@@ -694,6 +694,7 @@ class PaperWorker:
 
         quotes: dict[str, dict] = {}
         for symbol, market in market_map.items():
+            self.renew_lease()
             try:
                 quote = self.quote_fetcher(symbol, market)
                 quote_now = parse_timestamp(self.now_provider())
@@ -742,6 +743,7 @@ class PaperWorker:
 
         frames = {}
         for symbol, market in market_map.items():
+            self.renew_lease()
             try:
                 frame, status = self.history_loader(symbol, market, current)
                 if frame is not None and not frame.empty:
