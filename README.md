@@ -86,3 +86,9 @@ pip install streamlit yfinance pandas numpy plotly requests scikit-learn
 python -m py_compile app.py research_engine.py walk_forward.py market_data.py analytics.py stock_universe.py historical_store.py execution_engine.py paper_account.py stop_monitor.py strategy_exits.py taiwan_market_rules.py taiwan_trading_calendar.py market_trading_calendar.py taiwan_price_limits.py
 python -m unittest discover -s tests -v
 ```
+
+## Portfolio risk and multi-strategy research
+
+- Five distinct daily-OHLCV strategy families are available, including long-term trend structure, volume breakout, momentum continuation, trend-filtered mean reversion, and volatility-squeeze breakout. Signals are evaluated at the close and simulated no earlier than the next session.
+- Current cross-sectional risk snapshots use common-date close-to-close returns, covariance shrinkage, capped long-only risk-parity weights, and explicit cash reserve. These weights are not retroactively injected into historical OOS results.
+- The optional strategy ensemble combines each fixed strategy's OOS equity curve using rolling risk estimates. Rebalance weights for each date use only returns observed before that date; the first 60 sessions use equal weights. It is a separate research curve, not the paper account ledger.
