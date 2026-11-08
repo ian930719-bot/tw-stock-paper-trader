@@ -1,4 +1,4 @@
-"""Persistent adaptive exit monitor inspired by O'Neil, Minervini and ATR risk control.
+"""Persistent adaptive exit monitor using configurable, generic volatility and structure risk controls.
 
 The monitor emits paper exit signals only; it never submits orders. Stops use
 completed-session ATR/structure supplied by the caller and fresh intraday quotes.
@@ -77,7 +77,7 @@ class AdaptiveExitMonitor:
         if isinstance(position_version, bool) or int(position_version) <= 0:
             raise ValueError("持倉版本必須大於零")
         if profile not in PROFILES:
-            raise ValueError("未知的大師出場策略")
+            raise ValueError("未知出場設定")
         entry, volatility, multiple = float(entry_price), float(atr), float(atr_multiple)
         if not all(math.isfinite(x) and x > 0 for x in (entry, volatility, multiple)):
             raise ValueError("進場價、ATR 與 ATR 倍數必須是有限正數")
