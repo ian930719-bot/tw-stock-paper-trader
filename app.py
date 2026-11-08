@@ -833,6 +833,10 @@ with t7:
                 created_count += 1
                 pending_count += 1
                 daily_count += 1
+                # Reserve cash and exposure for subsequent candidates in this batch.
+                reserved = candidate["股數"] * candidate["參考價"] * 1.001425
+                cash_available = max(0.0, cash_available - reserved)
+                positions[candidate["代號"]] = positions.get(candidate["代號"], 0) + candidate["股數"]
         st.success(f"本輪建立 {created_count} 筆模擬委託。重複訊號會由識別碼阻擋。")
     st.subheader("模擬委託佇列與成交狀態")
     order_rows = engine.list_orders()
