@@ -202,13 +202,16 @@ class PaperAccount:
             due_frame = frame.loc[
                 ~frame["event_id"].astype(str).isin(pending_ids)
             ].copy()
-            for _, event in due_frame.loc[
-                due_frame["effective_date"].dt.date < current.date()
-            ].iterrows():
-                missed.append(str(event["event_id"]))
-            today_frame = due_frame.loc[
-                due_frame["effective_date"].dt.date == current.date()
-            ]
+            if due_frame.empty:
+                today_frame = due_frame
+            else:
+                for _, event in due_frame.loc[
+                    due_frame["effective_date"].dt.date < current.date()
+                ].iterrows():
+                    missed.append(str(event["event_id"]))
+                today_frame = due_frame.loc[
+                    due_frame["effective_date"].dt.date == current.date()
+                ]
             if missed:
                 # Do not partially apply today's actions when an earlier entitlement
                 # is missing; require reconciliation before any account mutation.
@@ -295,7 +298,7 @@ class PaperAccount:
                             WHERE symbol=?
                         """, (
                             new_quantity, price_factor, price_factor, price_factor,
-                            price_factor, stamp, str(symbol),
+                            price_factor, price_factor, stamp, str(symbol),
                         ))
                     else:
                         conn.execute("""
