@@ -22,6 +22,7 @@ from stop_monitor import StopMonitor
 from strategy_exits import PROFILES, initial_stop, risk_position_size
 from walk_forward import rolling_walk_forward, regime_performance, parameter_sensitivity
 from taiwan_market_rules import floor_board_lot
+from taiwan_trading_calendar import trading_day_status
 st.set_page_config(page_title="台股模擬交易",layout="wide")
 TZ=ZoneInfo("Asia/Taipei")
 from stock_universe import fetch_stock_universe, universe_summary, StockUniverseError
@@ -938,8 +939,13 @@ with t7:
     account_costs = {p["symbol"]: float(p["average_cost"]) for p in account_snapshot["positions"]}
     session_now = datetime.now(TZ)
     expired_orders = engine.expire_day_orders(session_now)
-    session_open = taiwan_regular_session(session_now)
+    market_day_open, market_day_note = trading_day_status(session_now.date())
+    session_open = taiwan_regular_session(session_now) and market_day_open
     st.write("交易時段：", "台股一般盤中" if session_open else "非台股一般盤中時段")
+    if not market_day_open:
+        st.warning(market_day_note)
+    else:
+        st.caption(market_day_note + "；一般盤中時間仍依 09:00–13:25 判斷。官方年度日曆每 6 小時快取；未能驗證時會停止建立委託。")
     l1,l2,l3,l4=st.columns(4)
     l1.metric("單筆委託上限",f"NTD {limits.max_order_notional:,.0f}")
     l2.metric("單一標的曝險上限",f"NTD {limits.max_symbol_exposure:,.0f}")
