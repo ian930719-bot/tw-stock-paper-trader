@@ -70,6 +70,43 @@ class OrderResult:
     created_at: str = ""
 
 
+def realized_pnl_from_trades(trades: list[dict], trading_date: str) -> float | None:
+    """FIFO realized P&L from the complete paper trade history.
+
+    Returns None if sells cannot be matched to recorded buys (for example,
+    imported starting positions without cost basis); callers must fail closed.
+    """
+    lots: dict[str, list[list[float]]] = {}
+    realized = 0.0
+    for trade in sorted(trades, key=lambda item: str(item.get("時間", ""))):
+        symbol = str(trade.get("代號", "")).upper()
+        side = trade.get("方向")
+        quantity = int(trade.get("股數", 0))
+        amount = float(trade.get("估算金額", 0))
+        if not symbol or quantity <= 0 or amount < 0:
+            return None
+        if side == "買進":
+            lots.setdefault(symbol, []).append([float(quantity), amount / quantity])
+        elif side == "賣出":
+            remaining = float(quantity)
+            cost = 0.0
+            inventory = lots.setdefault(symbol, [])
+            while remaining > 0 and inventory:
+                take = min(remaining, inventory[0][0])
+                cost += take * inventory[0][1]
+                inventory[0][0] -= take
+                remaining -= take
+                if inventory[0][0] <= 1e-9:
+                    inventory.pop(0)
+            if remaining > 1e-9:
+                return None
+            if str(trade.get("時間", "")).startswith(trading_date):
+                realized += amount - cost
+        else:
+            return None
+    return realized
+
+
 def taiwan_regular_session(now: datetime | None = None) -> bool:
     current = now or datetime.now(TZ)
     if current.tzinfo is None:
@@ -107,6 +144,8 @@ def validate_order(intent: OrderIntent, *, cash: float, positions: dict[str, int
         raise ValueError("未完成委託數已達上限")
     if daily_order_count >= limits.max_order_count_per_day:
         raise ValueError("今日委託次數已達上限")
+    if daily_realized_pnl is None or not float(daily_realized_pnl) == float(daily_realized_pnl):
+        raise ValueError("每日已實現損益無法核對，為安全起見停止自動委託")
     if daily_realized_pnl <= -abs(limits.max_daily_loss):
         raise ValueError("已觸及每日虧損停手機制")
     if limits.require_regular_session and not taiwan_regular_session(now):
