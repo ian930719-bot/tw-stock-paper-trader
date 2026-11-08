@@ -241,6 +241,26 @@ class PaperAccount:
                             "UPDATE paper_positions SET quantity=?,average_cost=?,position_version=position_version+1 WHERE symbol=?",
                             (new_quantity, average_cost / multiplier, str(event.symbol)),
                         )
+                        tables = {
+                            row[0] for row in conn.execute(
+                                "SELECT name FROM sqlite_master WHERE type='table'"
+                            )
+                        }
+                        if "adaptive_exit_state" in tables:
+                            conn.execute("""
+                                UPDATE adaptive_exit_state SET
+                                    quantity=?, position_version=position_version+1,
+                                    entry_price=entry_price/?,
+                                    initial_risk=initial_risk/?,
+                                    high_water=high_water/?,
+                                    atr=atr/?,
+                                    stop_price=stop_price/?,
+                                    updated_at=?
+                                WHERE symbol=?
+                            """, (
+                                new_quantity, multiplier, multiplier, multiplier,
+                                multiplier, multiplier, stamp, str(event.symbol),
+                            ))
                 if cash_in_lieu:
                     conn.execute(
                         "UPDATE paper_account SET cash=cash+? WHERE id=1",
