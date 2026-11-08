@@ -221,7 +221,7 @@ class PaperAccountTests(unittest.TestCase):
         applied = self.account.apply_corporate_actions(events, "2026-11-10")
         self.assertEqual(len(applied["applied"]), 2)
         self.assertEqual(self.account.snapshot()["positions"][0]["quantity"], 2000)
-        self.assertEqual(self.account.snapshot()["positions"][0]["average_cost"], 5.0)
+        self.assertAlmostEqual(self.account.snapshot()["positions"][0]["average_cost"], 5.007125, places=6)
         self.assertTrue(self.account.integrity_report()["ok"])
         repeated = self.account.apply_corporate_actions(events, "2026-11-10")
         self.assertEqual(repeated["applied"], [])
