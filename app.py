@@ -25,6 +25,8 @@ from taiwan_market_rules import floor_board_lot
 from taiwan_trading_calendar import trading_day_status
 from taiwan_price_limits import get_official_price_limit
 from market_trading_calendar import market_trading_day_status
+from trading_config import TradingConfig
+from trading_mode import StagedTradingController
 st.set_page_config(page_title="台股模擬交易",layout="wide")
 TZ=ZoneInfo("Asia/Taipei")
 from stock_universe import fetch_stock_universe, universe_summary, StockUniverseError
@@ -82,7 +84,7 @@ with st.sidebar:
         ss=ss[:30]
     st.caption(f"目前載入 {len(ss)} / 最多 30 檔；股票主檔共 {len(stock_master):,} 檔")
     period=st.selectbox("歷史期間",["5y","3y","2y","1y"])
-    capital=st.number_input("模擬本金",100000,10000000,1000000,100000)
+    capital=st.number_input("模擬本金",100000,10000000,100000,100000)
     risk=st.number_input("單筆風險上限",500,50000,5000,500)
     if st.button("重新抓取"): st.cache_data.clear()
 if not ss: st.stop()
@@ -931,9 +933,12 @@ with t6:
 
 with t7:
     st.subheader("自動交易引擎｜模擬模式")
-    st.warning("目前只建立與撮合模擬委託，不會連接券商或送出真實委託。實盤交易開關尚未實作，預設不存在。")
+    st.warning("目前為 staged 模式：使用 NT$100,000 起始模擬資金；券商尚未指定，實盤 API 未接通且被安全鎖定，不會送出真實委託。")
+    st.caption("券商介接採 BrokerGateway 可替換架構；必須完成券商選定、API Adapter、帳戶核對、模擬驗證及人工啟用後，才可評估開放實盤。")
     st.markdown("**自動策略條件**：買進採用「多因子觀察」訊號，要求 AI 測試優於多數類基準至少 2 個百分點、五日預測分數至少 55%；賣出則檢查 EMA21、RSI 與 MACD 退出條件。買賣都必須取得盤中更新的參考報價。")
-    limits = RiskLimits()
+    staged_config = TradingConfig(initial_capital=float(capital))
+    limits = staged_config.risk_limits()
+    staged_controller = StagedTradingController()
     engine = PaperExecutionEngine(
         limits=limits,
         price_limit_provider=lambda symbol, market: get_official_price_limit(
@@ -941,7 +946,7 @@ with t7:
         ),
         calendar_provider=market_trading_day_status,
     )
-    paper_account = PaperAccount(engine.db_path, initial_cash=float(capital))
+    paper_account = PaperAccount(engine.db_path, initial_cash=staged_config.initial_capital)
     stop_monitor = StopMonitor(engine.db_path, stop_loss_pct=0.05, take_profit_pct=0.10, trailing_stop_pct=0.05)
     account_snapshot = paper_account.snapshot()
     account_positions = {p["symbol"]: int(p["quantity"]) for p in account_snapshot["positions"]}
