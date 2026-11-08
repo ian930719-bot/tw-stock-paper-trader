@@ -15,6 +15,7 @@ import plotly.graph_objects as go
 # Keep this import synchronized with research_engine.py in the same deployed revision.
 from strategy_evolution import evolve_strategy
 from fundamental_factors import score_fundamental_snapshot
+from taiwan_factor_data import load_symbol_history, next_start_date, enrich_industry_comparison
 from research_engine import STRATEGIES, daily_strategy_returns, performance, fundamental_snapshot, shared_capital_backtest
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -1014,6 +1015,71 @@ with t6:
             use_container_width=True,hide_index=True
         )
         st.caption("基本面分數依目前觀察清單內可取得欄位做橫向百分位排名；缺值不當作零分，並顯示資料完整度。不同股票池的分數不可直接跨池比較。")
+        industry_rank = enrich_industry_comparison(fund, stock_master)
+        if not industry_rank.empty:
+            st.markdown("**產業同業比較（最新快照）**")
+            st.dataframe(industry_rank, use_container_width=True, hide_index=True)
+            st.caption("產業排名僅比較本次已載入且有分數的同業樣本；不是完整產業全體排名，也不回填歷史回測。")
+
+    st.markdown("**歷史月營收與籌碼資料**")
+    st.caption("按需向 FinMind API 讀取個股歷史月營收、三大法人、融資融券及借券資料；每次最多 10 檔，避免免費 API 額度被大量請求耗盡。")
+    chip_symbols = list(data.keys())[:10]
+    if st.button("載入前 10 檔歷史月營收／籌碼", key="load_historical_chip_data", disabled=not chip_symbols):
+        loaded, failed = {}, {}
+        with st.spinner("讀取歷史月營收、法人、融資融券與借券資料…"):
+            for symbol in chip_symbols:
+                result = load_symbol_history(symbol, next_start_date(5), finmind_token)
+                loaded[symbol] = result
+                if result["errors"]:
+                    failed[symbol] = result["errors"]
+        st.session_state["historical_chip_data"] = loaded
+        st.session_state["historical_chip_errors"] = failed
+    if "historical_chip_data" in st.session_state:
+        loaded = st.session_state["historical_chip_data"]
+        st.caption(f"資料來源：FinMind API v4；載入時間：{datetime.now(TZ).strftime('%Y-%m-%d %H:%M:%S %Z')}；股票數：{len(loaded)}")
+        chip_rows, margin_rows, revenue_rows = [], [], []
+        for symbol, result in loaded.items():
+            inst = result["data"].get("institutional", pd.DataFrame())
+            if not inst.empty:
+                inst2 = inst.copy()
+                inst2["買賣超"] = pd.to_numeric(inst2["buy"], errors="coerce") - pd.to_numeric(inst2["sell"], errors="coerce")
+                inst2["法人"] = inst2["name"].astype(str)
+                latest = inst2.sort_values("date").groupby("法人").tail(1)
+                for _, row in latest.iterrows():
+                    chip_rows.append({"代號": symbol, "日期": row["date"], "法人": row["法人"], "買賣超（股）": row["買賣超"]})
+            margin = result["data"].get("margin_short", pd.DataFrame())
+            if not margin.empty:
+                row = margin.sort_values("date").iloc[-1].to_dict()
+                row["代號"] = symbol
+                margin_rows.append(row)
+            revenue = result["data"].get("monthly_revenue", pd.DataFrame())
+            if not revenue.empty:
+                revenue = revenue.copy()
+                revenue["代號"] = symbol
+                revenue_rows.append(revenue)
+        if chip_rows:
+            st.markdown("**三大法人歷史買賣超（最近可取得日）**")
+            st.dataframe(pd.DataFrame(chip_rows), use_container_width=True, hide_index=True)
+        else:
+            st.info("目前未取得三大法人歷史資料。")
+        if margin_rows:
+            st.markdown("**融資融券最新資料**")
+            st.dataframe(pd.DataFrame(margin_rows), use_container_width=True, hide_index=True)
+        else:
+            st.info("目前未取得融資融券資料。")
+        if revenue_rows:
+            revenue_all = pd.concat(revenue_rows, ignore_index=True)
+            st.markdown("**歷史月營收**")
+            st.dataframe(revenue_all.sort_values(["代號", "date"], ascending=[True, False]), use_container_width=True, hide_index=True)
+            st.caption("FinMind create_time 自 2026-04-21 起才記錄，且只是資料庫寫入日近似值、不是官方公告日；更早月份仍可看歷史數字，但不可當成當時已知資料做回測。")
+        else:
+            st.info("目前未取得月營收資料。")
+        errors = st.session_state.get("historical_chip_errors", {})
+        if errors:
+            with st.expander("資料來源／額度錯誤明細"):
+                st.json(errors)
+        st.caption("三大法人、融資融券與借券日資料以交易日後一個日曆日作保守可得日；這是研究假設，不代表精確公告時間。借券資料若 API 方案或資料集不可用，會明確顯示錯誤，不會補零。")
+
 
     st.divider()
     st.markdown("**多股票共享資金池：訓練／驗證／樣本外**")
