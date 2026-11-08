@@ -121,8 +121,10 @@ def validate_order(intent: OrderIntent, *, cash: float, positions: dict[str, int
         projected = Decimal(str(held)) * price + notional
         if projected > Decimal(str(limits.max_symbol_exposure)):
             raise ValueError("單一標的曝險超過上限")
-        current_exposure = sum(max(0, int(q)) for q in positions.values()) * price
-        if current_exposure + notional > Decimal(str(limits.max_portfolio_exposure)):
+        # Equity minus cash is a conservative proxy for existing invested
+        # exposure; avoid valuing every holding at the new order's price.
+        current_exposure = max(0.0, float(equity) - max(0.0, float(cash)))
+        if Decimal(str(current_exposure)) + notional > Decimal(str(limits.max_portfolio_exposure)):
             raise ValueError("投資組合曝險超過上限")
     if not intent.idempotency_key or len(intent.idempotency_key) > 128:
         raise ValueError("缺少有效的防重複委託識別碼")
