@@ -50,7 +50,7 @@ def _event(symbol, effective_date, action_type, *, share_multiplier=1.0,
             reference = ref
     except (TypeError, ValueError):
         pass
-    identity = "|".join((str(symbol), effective, action_type, str(ratio), str(cash), payment))
+    identity = "|".join((str(symbol), effective, action_type, str(ratio), str(cash), payment or ""))
     return {
         "symbol": str(symbol),
         "effective_date": effective,
