@@ -11,9 +11,9 @@ import pandas as pd
 import yfinance as yf
 
 STRATEGIES = [
-    "Minervini 趨勢模板",
-    "O’Neil CAN SLIM 技術代理",
-    "Livermore 順勢突破",
+    "趨勢結構延續",
+    "量價突破",
+    "動能趨勢突破",
 ]
 
 
