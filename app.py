@@ -760,7 +760,7 @@ with t6:
 with t7:
     st.subheader("自動交易引擎｜模擬模式")
     st.warning("目前只建立與撮合模擬委託，不會連接券商或送出真實委託。實盤交易開關尚未實作，預設不存在。")
-    st.markdown("**自動策略條件**：只採用「多因子觀察」訊號，要求 AI 測試優於多數類基準至少 2 個百分點、五日預測分數至少 55%，且必須取得盤中更新的參考報價。")
+    st.markdown("**自動策略條件**：買進採用「多因子觀察」訊號，要求 AI 測試優於多數類基準至少 2 個百分點、五日預測分數至少 55%；賣出則檢查 EMA21、RSI 與 MACD 退出條件。買賣都必須取得盤中更新的參考報價。")
     limits = RiskLimits()
     engine = PaperExecutionEngine(limits=limits)
     session_now = datetime.now(TZ)
@@ -824,7 +824,7 @@ with t7:
         st.info("目前沒有同時符合 AI 條件與新鮮盤中報價的標的；不會使用舊收盤價代替盤中價格建立自動委託。")
     enable_paper_auto = st.checkbox("啟用本輪自動模擬委託（不是真實下單）",value=False)
     if st.button("依策略訊號建立模擬委託",disabled=(not enable_paper_auto or not session_open or not auto_candidates)):
-        positions = st.session_state.get("paper_positions", {})
+        positions = dict(st.session_state.get("paper_positions", {}))
         cash_available = float(st.session_state.get("paper_cash", capital))
         market_value = sum(
             int(qty)*float(data[code].iloc[-1]["close"])
