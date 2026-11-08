@@ -20,7 +20,7 @@ from execution_engine import PaperExecutionEngine, OrderIntent, RiskLimits, Side
 from paper_account import PaperAccount
 from stop_monitor import StopMonitor
 from strategy_exits import PROFILES, initial_stop, risk_position_size
-from walk_forward import rolling_walk_forward
+from walk_forward import rolling_walk_forward, regime_performance, parameter_sensitivity
 st.set_page_config(page_title="台股模擬交易",layout="wide")
 TZ=ZoneInfo("Asia/Taipei")
 from stock_universe import fetch_stock_universe, universe_summary, StockUniverseError
@@ -856,6 +856,26 @@ with t6:
             st.subheader("跨區段鏈結績效")
             st.json(result["metrics"])
             if not result["equity"].empty:
+                benchmark_default = "0050" if "0050" in data else sorted(data.keys())[0]
+                benchmark_code = st.selectbox(
+                    "盤勢分類基準（使用所選股票作市場代理）",
+                    sorted(data.keys()), index=sorted(data.keys()).index(benchmark_default),
+                    format_func=lambda x: x + " " + W.get(x, x), key="wf_regime_benchmark"
+                )
+                regime_table = regime_performance(
+                    result["equity"], data[benchmark_code],
+                    initial_capital=wf_config[4], ema_window=200, slope_window=20
+                )
+                st.subheader("不同盤勢下的樣本外表現")
+                if regime_table.empty:
+                    st.info("基準資料不足以計算 200 日趨勢盤勢分類，請增加歷史資料。")
+                else:
+                    st.dataframe(regime_table.style.format({
+                        "累積報酬":"{:.1%}", "年化波動率":"{:.1%}",
+                        "Sharpe":"{:.2f}", "上漲日比例":"{:.1%}",
+                    }), use_container_width=True, hide_index=True)
+                st.caption("盤勢以基準股收盤價相對 200 日 EMA、以及 EMA 相對 20 日前的方向分類；這是盤勢代理，不等於加權指數。各區段首日報酬以該區段重設本金計算，避免跨區段空窗產生虛假日報酬。")
+            if not result["equity"].empty:
                 wf_fig=go.Figure()
                 wf_fig.add_trace(go.Scatter(x=result["equity"]["日期"],y=result["equity"]["資產"],name="鏈結 OOS 資產"))
                 wf_fig.add_hline(y=wf_config[4],line_dash="dash")
@@ -870,6 +890,33 @@ with t6:
             st.caption(result["note"]+" 每段均採相同成本假設；樣本外區段仍可能受現行股票清單及歷史下市股缺漏影響。")
     elif "rolling_wf_config" in st.session_state:
         st.info("滾動測試設定或股票清單已變更；請重新執行。")
+
+    st.divider()
+    st.markdown("**參數敏感度／穩健性矩陣**")
+    st.caption("預先指定 3 種單筆風險預算 × 3 種出場規則，共 9 組滾動樣本外測試；這是穩健性檢查，不會自動挑選最佳組合，也不應依最終 OOS 結果反覆調參。")
+    if st.button("執行 9 組參數穩健性測試", key="run_wf_sensitivity"):
+        with st.spinner("執行 9 組滾動樣本外穩健性測試…"):
+            sensitivity = parameter_sensitivity(
+                data, wf_strategy,
+                risk_fractions=(0.0025, 0.005, 0.01),
+                exit_profiles=("baseline_atr2", "atr_1_5", "atr_3"),
+                initial_capital=wf_config[4], max_positions=wf_config[5],
+                lookback_days=wf_lookback, test_days=wf_test,
+                step_days=wf_test, warmup_bars=200,
+            )
+        st.session_state["wf_sensitivity"] = sensitivity
+        st.session_state["wf_sensitivity_config"] = wf_config
+    if st.session_state.get("wf_sensitivity_config") == wf_config:
+        sensitivity = st.session_state["wf_sensitivity"]
+        st.dataframe(sensitivity.style.format({
+            "單筆風險預算":"{:.2%}", "鏈結總報酬":"{:.1%}",
+            "鏈結最大回撤":"{:.1%}", "鏈結 Sharpe":"{:.2f}",
+        }), use_container_width=True, hide_index=True)
+        st.download_button(
+            "下載參數穩健性矩陣 CSV",
+            sensitivity.to_csv(index=False).encode("utf-8-sig"),
+            "walk_forward_sensitivity.csv", "text/csv"
+        )
 
 
 with t7:
