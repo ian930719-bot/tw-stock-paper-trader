@@ -72,8 +72,9 @@ def _records(values):
     return list(values)
 
 
-def normalize_corporate_actions(symbol: str, *, dividends=None, splits=None,
-                                capital_reductions=None, par_value_changes=None) -> pd.DataFrame:
+def normalize_corporate_actions(symbol: str, *, dividends=None, dividend_results=None,
+                                splits=None, capital_reductions=None,
+                                par_value_changes=None) -> pd.DataFrame:
     """Normalize FinMind corporate-action datasets into idempotent events.
 
     Dividend stock distributions are quoted in NTD per NTD 10 par value, so
@@ -81,6 +82,11 @@ def normalize_corporate_actions(symbol: str, *, dividends=None, splits=None,
     as receivables from ex-dividend date and paid on the published payment date.
     """
     events = []
+    result_prices = {}
+    for result in _records(dividend_results):
+        key = _day(result.get("date"))
+        if key:
+            result_prices[key] = _number(result, "reference_price", "after_price")
     for row in _records(dividends):
         stock_rate = (
             _number(row, "StockEarningsDistribution")
@@ -96,7 +102,7 @@ def normalize_corporate_actions(symbol: str, *, dividends=None, splits=None,
             item = _event(
                 symbol, stock_date, "stock_dividend",
                 share_multiplier=1.0 + stock_rate,
-                reference_price=row.get("reference_price"),
+                reference_price=result_prices.get(stock_date) or row.get("reference_price"),
                 source="TaiwanStockDividend",
             )
             if item:
@@ -186,13 +192,14 @@ def fetch_symbol_corporate_actions(symbol: str, start_date: str, end_date: str |
     cannot be retrieved. This function intentionally does not invent zero events.
     """
     dividends = _fetch_dataset("TaiwanStockDividend", start_date, end_date, token, symbol, timeout)
+    dividend_results = _fetch_dataset("TaiwanStockDividendResult", start_date, end_date, token, symbol, timeout)
     splits = _fetch_dataset("TaiwanStockSplitPrice", start_date, end_date, token, None, timeout)
     reductions = _fetch_dataset("TaiwanStockCapitalReductionReferencePrice", start_date, end_date, token, None, timeout)
     par_changes = _fetch_dataset("TaiwanStockParValueChange", start_date, end_date, token, None, timeout)
     def only(rows):
         return [row for row in rows if str(row.get("stock_id", "")) == str(symbol)]
     return normalize_corporate_actions(
-        symbol, dividends=dividends,
+        symbol, dividends=dividends, dividend_results=dividend_results,
         splits=only(splits), capital_reductions=only(reductions),
         par_value_changes=only(par_changes),
     )
