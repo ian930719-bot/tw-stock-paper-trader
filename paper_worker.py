@@ -682,6 +682,16 @@ class PaperWorker:
             "fresh_quotes": 0, "fills": 0, "entries": 0, "exits": 0,
             "auto_entries_enabled": self.auto_entries,
         }
+        ledger_check = self.account.integrity_report()
+        if not ledger_check["ok"]:
+            summary["status"] = "帳本完整性異常，已停止交易"
+            summary["ledger_integrity"] = ledger_check
+            self._event(
+                "error", "帳本完整性檢查失敗，停止所有模擬交易",
+                issues=ledger_check["issues"],
+            )
+            self._set_status("blocked", summary)
+            return summary
         if not self.watchlist:
             summary["status"] = "等待設定 PAPER_WATCHLIST"
             self._set_status("idle", summary)
