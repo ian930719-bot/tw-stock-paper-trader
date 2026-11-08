@@ -60,6 +60,12 @@ pip install streamlit yfinance pandas numpy plotly requests scikit-learn
 - 樣本外區段應保留作最終檢驗，不得依其結果反覆調參。樣本外表現不保證未來獲利。
 - JSON 備份可跨裝置手動還原，但目前沒有雲端自動同步；匯入會覆蓋當前帳本。
 
+## 官方交易日曆
+
+模擬委託介面會讀取臺灣證券交易所官方「有價證券集中交易市場開（休）市日期」JSON 日曆，辨識平日休市／僅結算交割日期；週末直接視為休市。官方日曆快取 6 小時。若日曆無法取得或格式不正確，介面會採取 fail-closed：停用手動、策略及停損模擬委託與撮合操作，不以星期一至星期五直接推定可交易。此日曆不保證即時涵蓋臨時颱風停市或公告後的突發變更，仍需核對交易所最新公告。
+
+資料來源：臺灣證券交易所 OpenAPI `https://openapi.twse.com.tw/v1/holidaySchedule/holidaySchedule`；網頁查詢 `https://www.twse.com.tw/zh/trading/holiday.html`。
+
 ## 資料庫持久化設定
 
 可設定 `MARKET_DB_PATH`（歷史行情快取）與 `EXECUTION_DB_PATH`（模擬委託及帳本）指向持久化磁碟上的 SQLite 檔案。若未設定，預設使用系統暫存目錄。Streamlit Community Cloud 的本機檔案不保證跨重啟／重新部署保存；正式長期使用應連接外部持久化資料庫或定期下載備份。
