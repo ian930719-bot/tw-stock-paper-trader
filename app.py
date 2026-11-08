@@ -775,14 +775,33 @@ with t7:
     auto_candidates = []
     quote_lookup = {q["代號"]: q for q in quotes}
     row_lookup = {r["代號"]: r for r in rows}
+    paper_positions = st.session_state.get("paper_positions", {})
     for code, row in row_lookup.items():
         quote = quote_lookup.get(code, {})
         price = quote.get("盤中參考價")
-        if (row.get("訊號") == "多因子觀察"
-                and quote.get("報價狀態") == "盤中更新"
-                and price is not None and np.isfinite(price) and price > 0):
-            frame = data[code]
-            atr_value = float(frame.iloc[-1]["atr"]) if pd.notna(frame.iloc[-1]["atr"]) else float(price)*0.04
+        if (quote.get("報價狀態") != "盤中更新"
+                or price is None or not np.isfinite(price) or price <= 0):
+            continue
+        frame = data[code]
+        latest = frame.iloc[-1]
+        held = int(paper_positions.get(code, 0))
+        exit_signal = (
+            float(latest.close) < float(latest.ema21)
+            or (pd.notna(latest.rsi) and float(latest.rsi) > 75)
+            or (pd.notna(latest.macd) and pd.notna(latest.sig) and float(latest.macd) < float(latest.sig))
+        )
+        if held > 0 and exit_signal:
+            sell_qty = min(held, int(limits.max_order_notional / float(price)))
+            if sell_qty > 0:
+                auto_candidates.append({
+                    "方向":"賣出","代號":code,"名稱":row["名稱"],
+                    "參考價":round(float(price),2),"股數":sell_qty,
+                    "估算金額":round(sell_qty*float(price),2),
+                    "策略依據":"跌破 EMA21／RSI 過熱／MACD 轉弱",
+                    "報價時間":quote.get("報價時間"),
+                })
+        elif row.get("訊號") == "多因子觀察":
+            atr_value = float(latest.atr) if pd.notna(latest.atr) else float(price)*0.04
             stop_distance = max(2.0*atr_value, float(price)*0.01)
             risk_qty = int(float(risk) / stop_distance)
             notional_qty = int(limits.max_order_notional / float(price))
@@ -791,9 +810,11 @@ with t7:
             quantity = min(risk_qty, notional_qty, cash_qty)
             if quantity > 0:
                 auto_candidates.append({
-                    "代號":code,"名稱":row["名稱"],"參考價":round(float(price),2),
-                    "股數":quantity,"估算金額":round(quantity*float(price),2),
-                    "風險預算":float(risk),"AI五日分數":row.get("AI五日上漲機率"),
+                    "方向":"買進","代號":code,"名稱":row["名稱"],
+                    "參考價":round(float(price),2),"股數":quantity,
+                    "估算金額":round(quantity*float(price),2),
+                    "策略依據":"AI 多因子觀察＋ATR 風險預算控量",
+                    "AI五日分數":row.get("AI五日上漲機率"),
                     "報價時間":quote.get("報價時間"),
                 })
     st.write("符合自動策略條件的候選委託：",len(auto_candidates))
@@ -817,11 +838,12 @@ with t7:
         created_count = 0
         for candidate in auto_candidates:
             signal_row = row_lookup[candidate["代號"]]
+            side = Side.BUY if candidate["方向"] == "買進" else Side.SELL
             intent = OrderIntent(
-                symbol=candidate["代號"], side=Side.BUY,
+                symbol=candidate["代號"], side=side,
                 quantity=int(candidate["股數"]), limit_price=float(candidate["參考價"]),
-                reason="AI多因子觀察；ATR風險預算控量",
-                idempotency_key=f"auto-buy-{candidate['代號']}-{today_text}-{signal_row['日線日期']}",
+                reason=candidate["策略依據"],
+                idempotency_key=f"auto-{side.value.lower()}-{candidate['代號']}-{today_text}-{signal_row['日線日期']}",
             )
             result = engine.submit(
                 intent, cash=cash_available, positions=positions,
@@ -836,7 +858,10 @@ with t7:
                 # Reserve cash and exposure for subsequent candidates in this batch.
                 reserved = candidate["股數"] * candidate["參考價"] * 1.001425
                 cash_available = max(0.0, cash_available - reserved)
-                positions[candidate["代號"]] = positions.get(candidate["代號"], 0) + candidate["股數"]
+                if side == Side.BUY:
+                    positions[candidate["代號"]] = positions.get(candidate["代號"], 0) + candidate["股數"]
+                else:
+                    positions[candidate["代號"]] = max(0, positions.get(candidate["代號"], 0) - candidate["股數"])
         st.success(f"本輪建立 {created_count} 筆模擬委託。重複訊號會由識別碼阻擋。")
     st.subheader("模擬委託佇列與成交狀態")
     order_rows = engine.list_orders()
@@ -847,4 +872,4 @@ with t7:
             pd.DataFrame(order_rows).to_csv(index=False).encode("utf-8-sig"),
             "paper_order_log.csv","text/csv"
         )
-    st.caption("目前模擬委託引擎會建立限價委託並記錄狀態；成交撮合需以市場價格觸及限價才會觸發。SQLite 仍是執行環境本機檔案，雲端重啟可能清除。自動策略目前只產生模擬買進委託，尚未接入券商、即時成交回報、停損監控與自動賣出。")
+    st.caption("目前自動策略可產生模擬買進與賣出委託：買進依 AI 多因子訊號與 ATR 風險距離控量；賣出依 EMA21、RSI、MACD 退出條件。尚未實作成交後帳本同步、即時停損監控、撤單重送或券商真實成交回報；不得視為已具備實盤自動交易能力。")
