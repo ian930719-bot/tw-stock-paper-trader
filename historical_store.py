@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from contextlib import closing
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -115,7 +116,7 @@ def upsert_daily_bars(symbol: str, frame: pd.DataFrame, source: str,
          float(row.close), float(row.volume), str(source), fetched_at)
         for row in clean.itertuples(index=False)
     ]
-    with _connect(path) as conn:
+    with closing(_connect(path)) as conn:
         conn.executemany("""
             INSERT INTO daily_bars(symbol,date,open,high,low,close,volume,source,fetched_at)
             VALUES(?,?,?,?,?,?,?,?,?)
@@ -124,12 +125,13 @@ def upsert_daily_bars(symbol: str, frame: pd.DataFrame, source: str,
               close=excluded.close, volume=excluded.volume,
               source=excluded.source, fetched_at=excluded.fetched_at
         """, values)
+        conn.commit()
     return len(values)
 
 
 def read_daily_bars(symbol: str, start_date: str | None = None,
                     path: str | None = None) -> pd.DataFrame:
-    with _connect(path) as conn:
+    with closing(_connect(path)) as conn:
         if start_date:
             rows = conn.execute(
                 "SELECT date,open,high,low,close,volume FROM daily_bars WHERE symbol=? AND date>=? ORDER BY date",
@@ -147,7 +149,7 @@ def read_daily_bars(symbol: str, start_date: str | None = None,
 
 
 def price_cache_summary(path: str | None = None) -> dict:
-    with _connect(path) as conn:
+    with closing(_connect(path)) as conn:
         count, symbols, latest = conn.execute(
             "SELECT COUNT(*), COUNT(DISTINCT symbol), MAX(date) FROM daily_bars"
         ).fetchone()
