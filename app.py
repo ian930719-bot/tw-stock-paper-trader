@@ -711,7 +711,7 @@ with t2:
                 st.download_button("下載組合每日資產 CSV", result["equity"].to_csv(index=False).encode("utf-8-sig"), "multi_stock_backtest_equity.csv", "text/csv")
         elif "historical_multi_result" in st.session_state:
             st.info("回測條件已變更；請重新執行，避免沿用舊結果。")
-        st.warning("回測限制：採日線訊號、次日開盤成交及估算手續費／證交稅／滑價；仍未完整涵蓋歷史下市股、歷史成分股、除權息現金流、停牌與漲跌停排隊。結果不是未來獲利保證。")
+        st.warning("回測限制：主要組合回測已按除權息生效日調整指標序列、股數及股利應收；仍未完整涵蓋歷史下市股、歷史成分股、停牌、漲跌停排隊、部分成交及市場衝擊。公司行動資料缺漏會另行警告。結果不是未來獲利保證。")
     else:
         s = st.selectbox("回測標的", list(data), key="bt")
         x = data[s].copy().reset_index(drop=True)
@@ -756,7 +756,7 @@ with t2:
         c.metric("勝率", f"{simple_trade['勝率']:.1%}" if trades else "無交易")
         dcol.metric("最大回撤", f"{simple_risk['最大回撤']:.1%}")
         ecol.metric("Profit Factor", "∞" if np.isinf(simple_trade["Profit Factor"]) else f"{simple_trade['Profit Factor']:.2f}")
-        st.warning("簡化回測：收盤產生訊號、次日開盤成交，含估算手續費、證交稅及滑價；未完整處理除權息、停牌、漲跌停、流動性與下市股偏誤。")
+        st.warning("單股簡化示範回測：收盤產生訊號、次日開盤成交，含估算手續費、證交稅及滑價；此簡化頁面尚未納入公司行動帳務，請以主要共享資金組合回測作為正式研究結果。")
         fig = go.Figure(go.Scatter(x=[item["日期"] for item in curve], y=[item["資產"] for item in curve]))
         fig.add_hline(y=capital, line_dash="dash")
         st.plotly_chart(fig, use_container_width=True)
@@ -902,7 +902,7 @@ with t4:
     st.warning("重要：SQLite 目前是 Streamlit 執行環境的本機快取。Streamlit Community Cloud 重新部署或重啟可能清除檔案；尚未連接永久外部資料庫，因此不能宣稱為永久全市場歷史資料庫。") 
     st.markdown("盤中參考價可能延遲，非交易所認證即時行情。三大法人數據使用證交所 T86 日報，取最近可取得交易日；API 不可用時顯示空值。尚未接入法人歷史序列、融資融券與分點籌碼。")
     st.markdown("AI 欄位使用隨機森林，以歷史技術特徵預測未來 5 個交易日報酬是否超過 1.5%，按時間順序切分訓練與測試資料。平衡準確率是歷史測試指標，不代表未來勝率或獲利保證。")
-    st.markdown("回測成本假設：手續費 0.1425%、一般股票賣出稅 0.3%、滑價 0.1%。尚未完整處理除權息、停牌、漲跌停、流動性與下市股偏誤。不連接券商、不會下單。")
+    st.markdown("回測成本假設：手續費 0.1425%、一般股票賣出稅 0.3%、滑價 0.1%。主要組合回測會載入公司行動並以生效日調整歷史訊號；仍未完整處理歷史下市股、歷史成分股、停牌、漲跌停排隊及流動性衝擊。不連接券商、不會下單。")
     st.subheader("觀察清單資料品質")
     quality=[]
     today=pd.Timestamp(datetime.now(TZ).date())
