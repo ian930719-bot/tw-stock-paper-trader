@@ -193,34 +193,31 @@ def evolve_strategy(
         code: frame[pd.to_datetime(frame["date"]) < split_date].copy()
         for code, frame in clean.items()
     }
-    rows = []
-    best = None
-    best_score = -np.inf
-    for params in candidate_grid():
-        overrides = _prepare_overrides(train_frames, params)
-        result = shared_capital_backtest(
-            train_frames, "AI 演化候選",
-            initial_capital=initial_capital,
-            max_positions=max_positions,
-            risk_fraction=risk_fraction,
-            warmup=warmup,
-            exit_profile=exit_profile,
-            signal_overrides=overrides,
-        )
-        score = _score(result)
-        stats = trade_statistics(result["trades"])
-        row = {
-            **params,
-            "訓練年化報酬": result["metrics"].get("年化報酬", 0.0),
-            "訓練最大回撤": result["metrics"].get("最大回撤", 0.0),
-            "訓練Profit Factor": stats.get("Profit Factor", 0.0),
-            "訓練交易筆數": stats.get("交易筆數", len(result["trades"])),
-            "研究分數": score,
+    selection = select_candidate(
+        train_frames,
+        initial_capital=initial_capital,
+        max_positions=max_positions,
+        risk_fraction=risk_fraction,
+        exit_profile=exit_profile,
+        warmup=warmup,
+    )
+    if selection.get("status") != "ok":
+        return {
+            "status": selection.get("status", "no_robust_candidate"),
+            "split_date": split_date,
+            "available_sessions": len(common_dates),
+            "required_sessions": warmup + 100,
+            "candidates": selection.get("ranking", pd.DataFrame()),
         }
-        rows.append(row)
-        if score > best_score:
-            best_score, best = score, params
-
+    best = selection["selected_params"]
+    best_score = selection["selection_score"]
+    candidate_rows = selection["ranking"].copy()
+    candidate_rows = candidate_rows.rename(columns={
+        "驗證年化報酬": "訓練年化報酬",
+        "驗證最大回撤": "訓練最大回撤",
+        "驗證Profit Factor": "訓練Profit Factor",
+        "驗證交易筆數": "訓練交易筆數",
+    })
     # One untouched chronological holdout. No holdout metric influences selection.
     holdout_overrides = _prepare_overrides(clean, best)
     holdout = shared_capital_backtest(
@@ -263,13 +260,14 @@ def evolve_strategy(
         "status": "ok",
         "selected_params": dict(best),
         "selection_score": float(best_score),
+        "selection_method": "前70%歷史中的內部時間序列驗證；最後30%完全保留",
         "split_date": split_date,
-        "train_rows": pd.DataFrame(rows).sort_values("研究分數", ascending=False),
+        "train_rows": candidate_rows.sort_values("研究分數", ascending=False),
         "holdout": holdout,
         "holdout_stats": holdout_stats,
         "annual_performance": annual_performance,
         "annual_100pct_years": int(annual_performance["100%目標達成"].sum()) if not annual_performance.empty else 0,
         "complete_years": int(annual_performance["期間完整"].sum()) if not annual_performance.empty else 0,
-        "search_count": len(rows),
+        "search_count": len(candidate_rows),
         "symbols": len(clean),
     }
