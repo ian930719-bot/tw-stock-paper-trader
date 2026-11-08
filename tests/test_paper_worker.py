@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+import sqlite3
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -82,6 +83,67 @@ class PaperWorkerTests(unittest.TestCase):
             "close": np.arange(20) + 11.0,
         })
         self.assertGreater(calculate_atr(frame), 0)
+
+    def test_worker_applies_current_day_corporate_action_before_matching(self):
+        from unittest.mock import patch
+        worker = PaperWorker(
+            db_path=self.db, market_db_path=self.market_db,
+            watchlist={"2330":"上市"}, auto_entries=False,
+            now_provider=lambda: self.now,
+        )
+        with sqlite3.connect(self.db) as conn:
+            conn.execute(
+                "INSERT INTO paper_positions(symbol,quantity,average_cost,position_version) VALUES(?,?,?,?)",
+                ("2330",1000,10.0,1),
+            )
+            conn.execute(
+                "INSERT INTO paper_fills(fill_id,order_id,symbol,side,quantity,price,gross,fees,tax,realized_pnl,quote_source,quote_time,filled_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                ("f1","o1","2330","BUY",1000,10.0,10000.0,14.25,0.0,0.0,
+                 "test",self.now.isoformat(),self.now.isoformat()),
+            )
+            conn.execute("UPDATE paper_account SET cash=89985.75 WHERE id=1")
+        events = pd.DataFrame([{
+            "symbol":"2330","effective_date":self.now.date().isoformat(),
+            "action_type":"stock_split","share_multiplier":2.0,
+            "cash_per_share":0.0,"payment_date":None,
+            "reference_price":5.0,"event_id":"worker-split",
+        }])
+        with patch.object(worker, "_load_corporate_actions", return_value=events):
+            result = worker._process_corporate_actions(self.now)
+        self.assertEqual(result["applied"], ["worker-split"])
+        self.assertEqual(worker.account.snapshot()["positions"][0]["quantity"], 2000)
+        self.assertTrue(worker.account.integrity_report()["ok"])
+
+    def test_worker_blocks_when_past_corporate_action_was_missed(self):
+        from unittest.mock import patch
+        worker = PaperWorker(
+            db_path=self.db, market_db_path=self.market_db,
+            watchlist={"2330":"上市"}, auto_entries=False,
+            now_provider=lambda: self.now,
+        )
+        with sqlite3.connect(self.db) as conn:
+            conn.execute(
+                "INSERT INTO paper_positions(symbol,quantity,average_cost,position_version) VALUES(?,?,?,?)",
+                ("2330",1000,10.0,1),
+            )
+            conn.execute(
+                "INSERT INTO paper_fills(fill_id,order_id,symbol,side,quantity,price,gross,fees,tax,realized_pnl,quote_source,quote_time,filled_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                ("f1","o1","2330","BUY",1000,10.0,10000.0,14.25,0.0,0.0,
+                 "test",self.now.isoformat(),self.now.isoformat()),
+            )
+            conn.execute("UPDATE paper_account SET cash=89985.75 WHERE id=1")
+        events = pd.DataFrame([{
+            "symbol":"2330","effective_date":"2026-11-08",
+            "action_type":"stock_split","share_multiplier":2.0,
+            "cash_per_share":0.0,"payment_date":None,
+            "reference_price":5.0,"event_id":"worker-missed",
+        }])
+        with patch.object(worker, "_load_corporate_actions", return_value=events):
+            with self.assertRaisesRegex(RuntimeError, "未處理的過去除權息事件"):
+                worker._process_corporate_actions(self.now)
+        self.assertEqual(worker.account.snapshot()["positions"][0]["quantity"], 1000)
 
     def test_worker_lease_prevents_two_processes(self):
         worker_a = PaperWorker(
