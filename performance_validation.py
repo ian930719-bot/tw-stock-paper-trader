@@ -125,7 +125,7 @@ def fetch_history(ticker: str, symbol: str):
     raise RuntimeError(f"{symbol} 歷史資料下載失敗：{last_error}")
 
 
-def summarize_result(name: str, result: dict):
+def summarize_result(name: str, result: dict, risk_fraction: float):
     equity = result["equity"].copy()
     trades = result["trades"].copy()
     if equity.empty:
@@ -140,9 +140,15 @@ def summarize_result(name: str, result: dict):
     cagr = float(metric_values.get("年化報酬", 0.0))
     sharpe = float(metric_values.get("Sharpe", 0.0))
     stats = trade_statistics(trades)
+    windows = result["windows"].copy()
+    positive_window_rate = (
+        float((pd.to_numeric(windows["總報酬"], errors="coerce") > 0).mean())
+        if not windows.empty and "總報酬" in windows else 0.0
+    )
     return {
         "策略": name,
-        "樣本外區段": int(len(result["windows"])),
+        "樣本外區段": int(len(windows)),
+        "正報酬樣本外區段比例": positive_window_rate,
         "樣本外交易日": int(len(values)),
         "交易筆數": int(stats["交易筆數"]),
         "勝率": float(stats["勝率"]),
@@ -158,7 +164,7 @@ def summarize_result(name: str, result: dict):
         "賣出證交稅": SELL_TAX,
         "單邊滑價": SLIPPAGE,
         "持倉上限": MAX_POSITIONS,
-        "單筆風險預算": RISK_FRACTION,
+        "單筆風險預算": float(risk_fraction),
         "資料參與率上限": 0.01,
         "選擇快取命中": int(result.get("cache_hits", 0)),
         "選擇快取未命中": int(result.get("cache_misses", 0)),
@@ -268,7 +274,7 @@ def main():
         )
         if len(result["windows"]) < 4:
             raise RuntimeError(f"{strategy} 僅完成 {len(result['windows'])} 個樣本外區段")
-        summaries.append(summarize_result(strategy, result))
+        summaries.append(summarize_result(strategy, result, 0.025 if is_aggressive else RISK_FRACTION))
         if not result["windows"].empty:
             part = result["windows"].copy()
             part.insert(0, "策略", strategy)
