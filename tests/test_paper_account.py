@@ -64,7 +64,11 @@ class PaperAccountTests(unittest.TestCase):
             OrderIntent("2330", Side.BUY, 37, 10, "odd lot", "odd-late", odd_lot=True),
             cash=100000, positions={}, equity=100000, now=NOW)
         late = datetime(2026, 11, 9, 13, 29, tzinfo=TZ)
-        result = self.account.process_quote("2330", 9, late.isoformat(), "test-feed", now=late)
+        with patch("taiwan_price_limits.get_official_price_limit", return_value={
+            "no_price_limit": False, "lower_limit": 9, "upper_limit": 11,
+            "reference_price": 10, "date": late.date().isoformat()
+        }):
+            result = self.account.process_quote("2330", 9, late.isoformat(), "test-feed", now=late)
         self.assertEqual(len(result), 1)
 
     def test_buy_fill_updates_cash_and_average_cost(self):
@@ -120,7 +124,7 @@ class PaperAccountTests(unittest.TestCase):
     def test_order_outside_refreshed_official_band_is_rejected_before_fill(self):
         order = self.order(Side.BUY, 1000, "changed-band")
         with patch("taiwan_price_limits.get_official_price_limit", return_value={
-            "no_price_limit": False, "lower_limit": 10, "upper_limit": 12,
+            "no_price_limit": False, "lower_limit": 10.5, "upper_limit": 12,
             "reference_price": 11, "date": NOW.date().isoformat()
         }):
             result = self.account.process_quote("2330", 9, NOW.isoformat(), "test-feed", now=NOW)
