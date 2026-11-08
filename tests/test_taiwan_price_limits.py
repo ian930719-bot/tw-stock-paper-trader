@@ -35,7 +35,7 @@ class TaiwanPriceLimitTests(unittest.TestCase):
     def test_tpex_no_limit_sentinel(self):
         rows = [{
             "SecuritiesCompanyCode": "00679B",
-            "Date": "1151109",
+            "Date": "1151106",
             "NextDayReferencePrice": "26.9",
             "NextDayLimitUpPrice": "9999.95",
             "NextDayLimitDownPrice": "0.01",
@@ -70,7 +70,7 @@ class TaiwanPriceLimitTests(unittest.TestCase):
             "本日漲停價": "1650",
             "本日開盤競價基準": "1500",
             "本日跌停價": "1350",
-            "最近成交日": "2026/11/06",
+            "資料日期": "2026/11/06",
         }]
         with self.assertRaises(PriceLimitUnavailable):
             _parse_rows(rows, "2330", date(2026, 11, 9), "上市")
