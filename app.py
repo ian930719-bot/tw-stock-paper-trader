@@ -419,6 +419,20 @@ with t2:
                     h6.metric("樣本外勝率", f"{hs.get('勝率', 0):.1%}")
                     h7.metric("樣本外 Profit Factor", "∞" if np.isinf(hs.get("Profit Factor", 0)) else f"{hs.get('Profit Factor', 0):.2f}")
                     h8.metric("樣本外 Sharpe", f"{hm.get('Sharpe', 0):.2f}")
+                    annual = evolution["annual_performance"]
+                    if annual.empty:
+                        st.info("樣本外期間不足以形成完整年度報酬統計。")
+                    else:
+                        achieved = evolution["annual_100pct_years"]
+                        st.write(f"每年 +100% 目標：{achieved} / {len(annual)} 個樣本外年度達成")
+                        st.dataframe(
+                            annual.style.format({
+                                "年初資產（樣本外首日）": "NTD {:,.0f}",
+                                "年底資產": "NTD {:,.0f}",
+                                "年度報酬": "{:.1%}",
+                            }),
+                            use_container_width=True, hide_index=True,
+                        )
                     st.line_chart(holdout["equity"].set_index("日期")["資產"])
                     st.dataframe(holdout["trades"], use_container_width=True, hide_index=True)
                     st.download_button(
