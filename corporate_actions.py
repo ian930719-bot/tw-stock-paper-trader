@@ -64,6 +64,14 @@ def _event(symbol, effective_date, action_type, *, share_multiplier=1.0,
     }
 
 
+def _records(values):
+    if values is None:
+        return []
+    if isinstance(values, pd.DataFrame):
+        return values.to_dict("records")
+    return list(values)
+
+
 def normalize_corporate_actions(symbol: str, *, dividends=None, splits=None,
                                 capital_reductions=None, par_value_changes=None) -> pd.DataFrame:
     """Normalize FinMind corporate-action datasets into idempotent events.
@@ -73,7 +81,7 @@ def normalize_corporate_actions(symbol: str, *, dividends=None, splits=None,
     as receivables from ex-dividend date and paid on the published payment date.
     """
     events = []
-    for row in (dividends or []):
+    for row in _records(dividends):
         stock_rate = (
             _number(row, "StockEarningsDistribution")
             + _number(row, "StockStatutorySurplus")
@@ -103,7 +111,7 @@ def normalize_corporate_actions(symbol: str, *, dividends=None, splits=None,
             if item:
                 events.append(item)
 
-    for row in (splits or []):
+    for row in _records(splits):
         before = _number(row, "before_price")
         after = _number(row, "after_price")
         if before > 0 and after > 0:
@@ -116,7 +124,7 @@ def normalize_corporate_actions(symbol: str, *, dividends=None, splits=None,
             if item:
                 events.append(item)
 
-    for row in (capital_reductions or []):
+    for row in _records(capital_reductions):
         before = _number(row, "ClosingPriceonTheLastTradingDay")
         after = _number(row, "PostReductionReferencePrice")
         if before > 0 and after > 0:
@@ -129,7 +137,7 @@ def normalize_corporate_actions(symbol: str, *, dividends=None, splits=None,
             if item:
                 events.append(item)
 
-    for row in (par_value_changes or []):
+    for row in _records(par_value_changes):
         before = _number(row, "before_close")
         after = _number(row, "after_ref_close")
         if before > 0 and after > 0:
