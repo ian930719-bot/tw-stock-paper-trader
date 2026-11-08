@@ -178,7 +178,7 @@ class PaperAccount:
                         "UPDATE paper_orders SET status=?,message=?,filled_quantity=?,average_fill_price=?,fees=?,updated_at=? "
                         "WHERE order_id=? AND status=?",
                         (OrderStatus.FILLED.value, "報價觸及限價後，以委託限價保守模擬成交；非實際成交回報",
-                         int(quantity), float(price), fees + tax, stamp, order_id, OrderStatus.ACCEPTED.value),
+                         int(quantity), fill_price, fees + tax, stamp, order_id, OrderStatus.ACCEPTED.value),
                     )
                     completed.append({"order_id": order_id, "symbol": symbol.upper(),
                                       "side": side, "quantity": int(quantity), "price": fill_price,
