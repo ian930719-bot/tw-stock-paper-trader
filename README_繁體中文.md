@@ -35,11 +35,11 @@ streamlit run app.py
 
 ## 重要資料與模型限制
 
-- 歷史日線與盤中參考行情使用 Yahoo Finance，可能延遲、修訂或缺漏，並非交易所認證資料。
+- 歷史日線優先使用 FinMind TaiwanStockPriceAdj，透過 SQLite 對已選取標的做增量更新（重疊最近 10 個日曆日以接收修訂）；首次無 FinMind 資料時才使用 Yahoo Finance 自動還原日線備援。盤中參考行情仍使用 Yahoo Finance，可能延遲、修訂或缺漏，並非交易所認證資料。
 - 三種技術策略是依公開理念建立的量化代理，不代表完整複製投資大師的方法。
 - 巴菲特／林區目前只有最新財務快照的簡化條件檢查，並非 point-in-time 歷史財報，也不可用來宣稱歷史回測績效。
 - 現行上市／上櫃主檔由 FinMind TaiwanStockInfo 提供，依同一代號最新 date 判斷轉板後的現行市場別；不包含興櫃、權證、歷史下市證券，也不等於歷史成分股資料庫。資料服務中斷時會顯示內建備援名單並警告，不會宣稱全市場完整。
-- 全市場主檔每 6 小時於應用程式快取更新；行情載入仍限制 30 檔，避免一次對所有股票逐檔呼叫行情服務。
+- 全市場主檔每 6 小時於應用程式快取更新；行情載入仍限制 30 檔，避免一次對所有股票逐檔呼叫行情服務。FinMind 免費 API 有每小時請求上限，故不會對 2,712 檔全市場同時逐檔抓取。SQLite 僅快取使用者選取的標的，預設存放執行環境暫存目錄；Streamlit Community Cloud 重啟／重新部署可能清除，並非永久資料庫。可透過 `MARKET_DB_PATH` 指定本機資料庫路徑；若要雲端永久保存，仍需外部資料庫及連線憑證。
 - 回測成交以訊號日收盤後的資訊，於下一交易日開盤執行。日線無法精確還原盤中成交先後。
 - 基準比較使用 Yahoo Finance 的 0050 還原價格與加權指數價格指數；基準曲線未扣成本，指數不含股息，0050 仍有追蹤誤差與 ETF 費用。
 - 成本估算為手續費 0.1425%、一般股票賣出證交稅 0.3%、單邊滑價 0.1%；敏感度測試將單邊滑價提高至 0.2% 與 0.3%，仍未涵蓋個別券商折扣、最低手續費、ETF 稅率及市場衝擊。
@@ -51,6 +51,6 @@ streamlit run app.py
 ## 自動測試
 
 ```bash
-python -m py_compile app.py research_engine.py market_data.py analytics.py stock_universe.py tests/test_research_engine.py tests/test_market_data.py tests/test_analytics.py tests/test_stock_universe.py
+python -m py_compile app.py research_engine.py market_data.py analytics.py stock_universe.py historical_store.py tests/test_research_engine.py tests/test_market_data.py tests/test_analytics.py tests/test_stock_universe.py tests/test_historical_store.py
 python -m unittest discover -s tests -v
 ```
