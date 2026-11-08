@@ -20,6 +20,7 @@ from execution_engine import PaperExecutionEngine, OrderIntent, RiskLimits, Side
 from paper_account import PaperAccount
 from stop_monitor import StopMonitor
 from strategy_exits import PROFILES, initial_stop, risk_position_size
+from walk_forward import rolling_walk_forward
 st.set_page_config(page_title="台股模擬交易",layout="wide")
 TZ=ZoneInfo("Asia/Taipei")
 from stock_universe import fetch_stock_universe, universe_summary, StockUniverseError
@@ -809,6 +810,66 @@ with t6:
         elif "portfolio_summary" in st.session_state:
             st.info("回測參數或觀察清單已變更；請重新執行，避免沿用舊結果。")
             st.warning("這是歷史研究，不是投資建議。仍未完整納入股息再投資、除權息、漲跌停排隊、停牌、流動性衝擊、下市股及歷史成分股偏誤；樣本外結果不能回頭用於調參。")
+
+
+    st.divider()
+    st.markdown("**滾動式樣本外測試（Rolling Walk-Forward）**")
+    st.caption("將歷史資料切成連續且不重疊的測試區段；每段只用測試開始前的資料暖機指標，測試期間才允許交易。每段獨立重設本金與持倉，鏈結績效只用來觀察多個 OOS 區段的報酬序列，不代表同一帳戶連續持倉。此功能不會自動挑選最佳參數。")
+    wf_strategy=st.selectbox("滾動測試策略",STRATEGIES,key="rolling_wf_strategy")
+    wf_lookback=st.slider("每段回看資料（日）",260,1000,756,20,key="rolling_wf_lookback")
+    wf_test=st.slider("每段樣本外長度（交易日）",40,252,126,10,key="rolling_wf_test")
+    wf_exit=st.selectbox("滾動測試出場規則",[
+        ("baseline_atr2","原始 ATR × 2"),
+        ("oneil_8pct","O’Neil 8% 參考停損"),
+        ("minervini_structure","Minervini 結構低點代理"),
+        ("atr_1_5","ATR × 1.5"),
+        ("atr_2_5","ATR × 2.5"),
+        ("atr_3","ATR × 3"),
+    ],format_func=lambda x:x[1],key="rolling_wf_exit")
+    wf_config=(wf_strategy,int(wf_lookback),int(wf_test),wf_exit[0],
+               float(st.session_state.get("wf_capital",capital)),
+               int(st.session_state.get("wf_max_positions",5)),
+               float(st.session_state.get("wf_risk_percent",0.5))/100,
+               tuple(sorted(data.keys())),period)
+    if st.button("執行滾動式樣本外測試",key="run_rolling_wf"):
+        with st.spinner("逐段執行獨立樣本外回測…"):
+            result=rolling_walk_forward(
+                data,wf_strategy,
+                initial_capital=wf_config[4],max_positions=wf_config[5],
+                risk_fraction=wf_config[6],lookback_days=wf_lookback,
+                test_days=wf_test,step_days=wf_test,warmup_bars=200,
+                exit_profile=wf_exit[0],
+            )
+        st.session_state["rolling_wf_result"]=result
+        st.session_state["rolling_wf_config"]=wf_config
+    if st.session_state.get("rolling_wf_config")==wf_config:
+        result=st.session_state["rolling_wf_result"]
+        if result["windows"].empty:
+            st.warning("目前資料長度不足以形成至少一段有效樣本外區間；請增加歷史期間或縮短回看／測試區間。")
+        else:
+            st.subheader("各段樣本外績效")
+            st.dataframe(result["windows"].style.format({
+                "期末資產":"{:,.0f}","總報酬":"{:.1%}","年化報酬":"{:.1%}",
+                "最大回撤":"{:.1%}","Sharpe":"{:.2f}","Profit Factor":lambda x:"∞" if np.isinf(x) else f"{x:.2f}",
+                "勝率":"{:.1%}","平均曝險":"{:.1%}",
+            }),use_container_width=True,hide_index=True)
+            st.subheader("跨區段鏈結績效")
+            st.json(result["metrics"])
+            if not result["equity"].empty:
+                wf_fig=go.Figure()
+                wf_fig.add_trace(go.Scatter(x=result["equity"]["日期"],y=result["equity"]["資產"],name="鏈結 OOS 資產"))
+                wf_fig.add_hline(y=wf_config[4],line_dash="dash")
+                wf_fig.update_layout(title="不重疊樣本外區段鏈結曲線",yaxis_title="新台幣")
+                st.plotly_chart(wf_fig,use_container_width=True)
+            st.subheader("滾動樣本外交易紀錄")
+            st.dataframe(result["trades"],use_container_width=True,hide_index=True)
+            if not result["trades"].empty:
+                st.download_button("下載滾動樣本外交易 CSV",
+                    result["trades"].to_csv(index=False).encode("utf-8-sig"),
+                    "rolling_walk_forward_trades.csv","text/csv")
+            st.caption(result["note"]+" 每段均採相同成本假設；樣本外區段仍可能受現行股票清單及歷史下市股缺漏影響。")
+    elif "rolling_wf_config" in st.session_state:
+        st.info("滾動測試設定或股票清單已變更；請重新執行。")
 
 
 with t7:
