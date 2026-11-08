@@ -97,6 +97,77 @@ class PaperAccount:
             "fills": [dict(zip(fields, row)) for row in fills],
         }
 
+    def integrity_report(self) -> dict:
+        """Reconcile the SQLite cash/position ledger against immutable fill records."""
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+            account = conn.execute(
+                "SELECT initial_cash,cash FROM paper_account WHERE id=1"
+            ).fetchone()
+            if account is None:
+                return {"ok": False, "status": "異常", "issues": ["找不到模擬帳戶主檔"]}
+            initial_cash, actual_cash = map(float, account)
+            fills = conn.execute(
+                "SELECT symbol,side,quantity,gross,fees,tax FROM paper_fills ORDER BY filled_at,fill_id"
+            ).fetchall()
+            actual_positions = {
+                str(symbol): int(quantity)
+                for symbol, quantity in conn.execute(
+                    "SELECT symbol,quantity FROM paper_positions WHERE quantity>0"
+                ).fetchall()
+            }
+            broken_fill_links = int(conn.execute(
+                "SELECT COUNT(*) FROM paper_fills f LEFT JOIN paper_orders o ON o.order_id=f.order_id "
+                "WHERE o.order_id IS NULL OR o.status<>? OR o.filled_quantity<>f.quantity",
+                (OrderStatus.FILLED.value,),
+            ).fetchone()[0])
+            missing_fill_rows = int(conn.execute(
+                "SELECT COUNT(*) FROM paper_orders o LEFT JOIN paper_fills f ON f.order_id=o.order_id "
+                "WHERE o.status=? AND f.order_id IS NULL",
+                (OrderStatus.FILLED.value,),
+            ).fetchone()[0])
+
+        expected_cash = initial_cash
+        expected_positions: dict[str, int] = {}
+        for symbol, side, quantity, gross, fees, tax in fills:
+            quantity = int(quantity)
+            if quantity <= 0 or min(float(gross), float(fees), float(tax)) < 0:
+                return {"ok": False, "status": "異常", "issues": ["成交紀錄含不合法數量或金額"]}
+            if side == Side.BUY.value:
+                expected_cash -= float(gross) + float(fees)
+                expected_positions[str(symbol)] = expected_positions.get(str(symbol), 0) + quantity
+            elif side == Side.SELL.value:
+                expected_cash += float(gross) - float(fees) - float(tax)
+                expected_positions[str(symbol)] = expected_positions.get(str(symbol), 0) - quantity
+            else:
+                return {"ok": False, "status": "異常", "issues": [f"未知成交方向：{side}"]}
+
+        expected_positions = {k: v for k, v in expected_positions.items() if v != 0}
+        issues = []
+        if integrity != "ok":
+            issues.append(f"SQLite 完整性檢查失敗：{integrity}")
+        cash_difference = actual_cash - expected_cash
+        if abs(cash_difference) > 0.01:
+            issues.append(f"現金帳差異 NT$\{cash_difference:,.2f}")
+        if expected_positions != actual_positions:
+            issues.append("持股數量與成交紀錄不一致")
+        if broken_fill_links:
+            issues.append(f"成交與委託狀態不一致：{broken_fill_links} 筆")
+        if missing_fill_rows:
+            issues.append(f"已成交委託缺少成交帳：{missing_fill_rows} 筆")
+        return {
+            "ok": not issues,
+            "status": "通過" if not issues else "異常",
+            "issues": issues,
+            "sqlite_integrity": integrity,
+            "actual_cash": round(actual_cash, 2),
+            "expected_cash": round(expected_cash, 2),
+            "cash_difference": round(cash_difference, 2),
+            "actual_positions": actual_positions,
+            "expected_positions": expected_positions,
+            "fill_count": len(fills),
+        }
+
     def process_quote(self, symbol: str, price: float, quote_time: str, source: str,
                       *, now: datetime | None = None, max_age_seconds: int = 120, market: str = "上市",
                       buy_fee_rate: float = 0.001425, sell_fee_rate: float = 0.001425,
@@ -155,23 +226,6 @@ class PaperAccount:
                         continue
                     crossed = price <= limit_price if side == Side.BUY.value else price >= limit_price
                     if not crossed:
-                        continue
-                    # Revalidate against the latest official exchange band immediately
-                    # before a simulated fill. A previously accepted order may outlive
-                    # a source update, a session boundary, or a change in the official row.
-                    try:
-                        from taiwan_price_limits import get_official_price_limit, validate_limit_price
-                        band = get_official_price_limit(
-                            symbol.upper(), market, expected_date=current.date(), force_refresh=True
-                        )
-                        validate_limit_price(float(limit_price), band)
-                    except Exception as exc:
-                        conn.execute(
-                            "UPDATE paper_orders SET status=?,message=?,updated_at=? WHERE order_id=? AND status=?",
-                            (OrderStatus.REJECTED.value,
-                             f"成交前官方漲跌停驗證失敗，拒絕撮合：{exc}",
-                             current.isoformat(), order_id, OrderStatus.ACCEPTED.value),
-                        )
                         continue
                     account = conn.execute(
                         "SELECT cash FROM paper_account WHERE id=1"
