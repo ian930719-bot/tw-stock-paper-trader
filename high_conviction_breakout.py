@@ -26,6 +26,7 @@ def _features(frame: pd.DataFrame) -> pd.DataFrame:
     z["prior_high_55"] = high.shift(1).rolling(55, min_periods=55).max()
     z["prior_low_20"] = low.shift(1).rolling(20, min_periods=20).min()
     z["volume_avg_20"] = volume.shift(1).rolling(20, min_periods=20).mean()
+    z["volume"] = volume
     return z[["date", "close", "volume", "mom_126", "mom_63", "sma_50",
               "sma_200", "ema_21", "prior_high_55", "prior_low_20",
               "volume_avg_20"]]
