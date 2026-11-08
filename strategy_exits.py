@@ -1,7 +1,7 @@
 """Auditable exit-rule primitives; candidate parameters require Taiwan-market OOS validation.
 
 These functions do not place orders and deliberately separate price risk from
-portfolio risk. O'Neil/Minervini values are research references, not guarantees.
+portfolio risk. All exit parameters are generic research candidates, not investment-style templates or guarantees.
 """
 from __future__ import annotations
 
@@ -9,13 +9,13 @@ import math
 
 PROFILES = {
     "oneil_growth": {
-        "name": "O'Neil 成長股",
+        "name": "固定風險上限",
         "description": "7–8% 初始最大損失參考；20–25% 獲利區間進行檢視，不是無條件硬性賣出。符合強勢領先股條件時需另行評估延長持有。",
         "initial_stop_reference": (0.07, 0.08),
         "profit_review_reference": (0.20, 0.25),
     },
     "minervini_sepa": {
-        "name": "Minervini SEPA",
+        "name": "結構失效停損",
         "description": "依技術結構失效點設停損；至少 2R、偏好 3R 作為候選風險報酬門檻。沒有合理失效點就不交易。",
         "minimum_reward_risk": 2.0,
         "preferred_reward_risk": 3.0,
@@ -38,10 +38,10 @@ def initial_stop(entry_price: float, profile: str, *, technical_invalidation: fl
         if technical_invalidation is not None:
             support = _positive(technical_invalidation, "technical_invalidation")
             stop = max(stop, support) if support < entry else stop
-        return {"profile": profile, "stop_price": stop, "method": "O'Neil 7–8% 參考上限＋技術位置檢視"}
+        return {"profile": profile, "stop_price": stop, "method": "固定比例風險上限＋技術位置檢視"}
     if profile == "minervini_sepa":
         if technical_invalidation is None:
-            raise ValueError("Minervini 策略必須提供技術失效價；沒有合理位置就不交易")
+            raise ValueError("結構失效停損必須提供技術失效價；沒有合理位置就不交易")
         stop = _positive(technical_invalidation, "technical_invalidation")
         if stop >= entry:
             raise ValueError("技術失效價必須低於進場價")
