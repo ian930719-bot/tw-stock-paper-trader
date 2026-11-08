@@ -17,6 +17,7 @@ from strategy_evolution import evolve_strategy
 from fundamental_factors import score_fundamental_snapshot
 from taiwan_factor_data import load_symbol_history, next_start_date, enrich_industry_comparison
 from research_engine import STRATEGIES, daily_strategy_returns, performance, fundamental_snapshot, shared_capital_backtest
+from corporate_actions import fetch_symbol_corporate_actions
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from market_data import quote_freshness
@@ -44,6 +45,7 @@ _WALK_FORWARD_SELECTION_CACHE = OrderedDict()
 def cached_rolling_walk_forward(
     frames, strategy, initial_capital, max_positions, risk_fraction,
     lookback_days, test_days, step_days, warmup_bars, exit_profile,
+    corporate_actions,
 ):
     """Cache expensive deterministic research runs across Streamlit reruns."""
     return rolling_walk_forward(
@@ -51,7 +53,59 @@ def cached_rolling_walk_forward(
         max_positions=max_positions, risk_fraction=risk_fraction,
         lookback_days=lookback_days, test_days=test_days, step_days=step_days,
         warmup_bars=warmup_bars, exit_profile=exit_profile,
+        corporate_actions=corporate_actions,
     )
+
+@st.cache_data(ttl=86400, max_entries=128, show_spinner=False)
+def cached_symbol_corporate_actions(symbol, start_date, end_date, token):
+    try:
+        frame = fetch_symbol_corporate_actions(
+            str(symbol), str(start_date), str(end_date), token=str(token or "")
+        )
+        return frame, None
+    except Exception as exc:
+        return pd.DataFrame(), str(exc)
+
+
+def load_corporate_actions(frames):
+    """Load point-in-time event data for each backtest symbol; never assume missing means none."""
+    actions = {}
+    failures = {}
+    for symbol, frame in frames.items():
+        if frame is None or frame.empty or "date" not in frame:
+            actions[str(symbol)] = pd.DataFrame()
+            failures[str(symbol)] = "缺少可用歷史日期"
+            continue
+        dates = pd.to_datetime(frame["date"], errors="coerce").dropna()
+        if dates.empty:
+            actions[str(symbol)] = pd.DataFrame()
+            failures[str(symbol)] = "歷史日期無效"
+            continue
+        events, error = cached_symbol_corporate_actions(
+            str(symbol), dates.min().date().isoformat(),
+            dates.max().date().isoformat(), finmind_token,
+        )
+        actions[str(symbol)] = events
+        if error:
+            failures[str(symbol)] = error
+    return actions, failures
+
+
+def research_backtest(frames, *args, **kwargs):
+    actions, failures = load_corporate_actions(frames)
+    kwargs["corporate_actions"] = actions
+    result = research_backtest(frames, *args, **kwargs)
+    result["corporate_action_coverage"] = {
+        "requested": len(frames), "loaded": len(frames) - len(failures),
+        "failed_symbols": failures,
+    }
+    if failures:
+        st.warning(
+            "公司行動資料未完整取得，這次回測仍包含未覆蓋標的，"
+            "結果不得視為完整除權息績效。缺漏標的：" + "、".join(sorted(failures))
+        )
+    return result
+
 
 TZ=ZoneInfo("Asia/Taipei")
 from stock_universe import fetch_stock_universe, universe_summary, StockUniverseError
@@ -364,7 +418,7 @@ with t2:
             comparison_rows = []
             with st.spinner("以相同股票、期間、本金及風險設定比較三種策略…"):
                 for strategy_name in STRATEGIES:
-                    comparison = shared_capital_backtest(
+                    comparison = research_backtest(
                         selected_frames, strategy_name,
                         initial_capital=float(capital), max_positions=int(portfolio_max_positions),
                         risk_fraction=float(portfolio_risk_pct), warmup=260,
@@ -490,6 +544,9 @@ with t2:
         walkforward_strategy = "AI 自適應策略" if adaptive_walkforward else portfolio_strategy
         if st.button("執行 Walk-forward＋0050 基準比較", key="run_walkforward_benchmark", disabled=not portfolio_symbols):
             wf_frames = {code: data[code].copy() for code in portfolio_symbols if code in data}
+            wf_actions, wf_action_failures = load_corporate_actions(wf_frames)
+            if wf_action_failures:
+                st.warning("Walk-forward 公司行動資料未完整取得：" + "、".join(sorted(wf_action_failures)))
             with st.spinner("執行多段樣本外驗證，並取得 0050 原始價格日線作基準…"):
                 wf_result = cached_rolling_walk_forward(
                     wf_frames, walkforward_strategy,
@@ -498,6 +555,7 @@ with t2:
                     risk_fraction=float(portfolio_risk_pct),
                     lookback_days=756, test_days=126, step_days=126,
                     warmup_bars=260, exit_profile=portfolio_exit[0],
+                    corporate_actions=wf_actions,
                 )
                 fixed_wf_result = None
                 if adaptive_walkforward:
@@ -508,6 +566,7 @@ with t2:
                         risk_fraction=float(portfolio_risk_pct),
                         lookback_days=756, test_days=126, step_days=126,
                         warmup_bars=260, exit_profile=portfolio_exit[0],
+                        corporate_actions=wf_actions,
                     )
                 benchmark_raw, benchmark_info = getdata("0050", period, finmind_token)
                 benchmark_frame = benchmark_raw.copy() if benchmark_raw is not None else pd.DataFrame()
@@ -592,7 +651,7 @@ with t2:
         if st.button("執行多股票組合回測", key="run_historical_multi_portfolio", disabled=not portfolio_symbols):
             selected_frames = {code: data[code].copy() for code in portfolio_symbols if code in data}
             with st.spinner("使用共享資金池逐日模擬所有股票…"):
-                result = shared_capital_backtest(
+                result = research_backtest(
                     selected_frames, portfolio_strategy,
                     initial_capital=float(capital), max_positions=int(portfolio_max_positions),
                     risk_fraction=float(portfolio_risk_pct), warmup=260,
@@ -872,7 +931,7 @@ with t5:
     if st.button("執行單股策略比較",key="run_single_master"):
         results=[]; curves={}; trade_tables={}
         for strategy in STRATEGIES:
-            result=shared_capital_backtest(
+            result=research_backtest(
                 {bs:frame},strategy,initial_capital=float(initial),
                 max_positions=1,risk_fraction=min(max(float(risk)/float(initial),0.0001),0.10),warmup=0
             )
@@ -924,7 +983,7 @@ with t5:
     if st.button("比較不同出場規則",key="run_exit_profile_compare"):
         profile_rows=[]; profile_curves={}; profile_trades={}
         for profile_key,profile_label in exit_profiles:
-            result=shared_capital_backtest(
+            result=research_backtest(
                 {bs:frame},exit_entry_strategy,initial_capital=float(initial),
                 max_positions=1,risk_fraction=min(max(float(risk)/float(initial),0.0001),0.10),
                 warmup=0,exit_profile=profile_key
@@ -1034,7 +1093,7 @@ with t6:
             stress_rows=[]; strategy_curves={}
             for strategy in STRATEGIES:
                 for slip,label in [(0.001,"單邊滑價 0.10%"),(0.002,"單邊滑價 0.20%"),(0.003,"單邊滑價 0.30%")]:
-                    result=shared_capital_backtest(
+                    result=research_backtest(
                         analysis_frames,strategy,initial_capital=analysis_capital,
                         max_positions=int(st.session_state.get("wf_max_positions",5)),
                         risk_fraction=risk_fraction,
@@ -1211,7 +1270,7 @@ with t6:
                         # Keep prior observations for indicators, but report and
                         # trade only from the segment's common start date onward.
                         segment_frames[code]=pd.concat([history,active],ignore_index=True)
-                    result=shared_capital_backtest(
+                    result=research_backtest(
                         segment_frames,strategy,initial_capital=float(pc),
                         max_positions=int(maxpos),risk_fraction=float(risk_pct),warmup=260,
                         report_start_date=segment_start
