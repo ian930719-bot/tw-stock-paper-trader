@@ -74,7 +74,7 @@ def tpex_trading_day_status(day: date | datetime, *, fetcher=None) -> tuple[bool
 
 def market_trading_day_status(day: date | datetime, market: str) -> tuple[bool, str]:
     if market == "上市":
-        return twse_trading_day_status(day, market="上市")
+        return twse_trading_day_status(day)
     if market == "上櫃":
         return tpex_trading_day_status(day)
     return False, f"未知市場別 {market}，停止委託"
