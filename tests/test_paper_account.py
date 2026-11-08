@@ -18,7 +18,7 @@ class PaperAccountTests(unittest.TestCase):
         self.engine = PaperExecutionEngine(self.db, RiskLimits(
             max_order_notional=50000, max_symbol_exposure=100000,
             max_portfolio_exposure=150000))
-        self.account = PaperAccount(self.db, initial_cash=100000)
+        self.account = PaperAccount(self.db, initial_cash=100000, calendar_checker=lambda day: (True, "test calendar"))
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -91,6 +91,14 @@ class PaperAccountTests(unittest.TestCase):
         self.order(Side.BUY, 1000, "source-1")
         with self.assertRaisesRegex(ValueError, "來源"):
             self.quote(source="")
+
+    def test_official_holiday_rejects_fill(self):
+        account = PaperAccount(self.db, initial_cash=100000, calendar_checker=lambda day: (False, "official holiday"))
+        self.engine.submit(
+            OrderIntent("2330", Side.BUY, 1000, 10, "holiday", "holiday-fill"),
+            cash=100000, positions={}, equity=100000, now=NOW)
+        with self.assertRaisesRegex(ValueError, "官方交易日曆"):
+            account.process_quote("2330", 9, NOW.isoformat(), "test-feed", now=NOW)
 
     def test_outside_session_is_rejected(self):
         self.order(Side.BUY, 1000, "closed-1")
