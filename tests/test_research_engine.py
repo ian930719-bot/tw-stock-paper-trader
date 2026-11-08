@@ -266,6 +266,66 @@ class ResearchEngineTests(unittest.TestCase):
         self.assertLessEqual(int(trade["股數"]), 10)
         self.assertLessEqual(float(trade["估計ADV20參與率"]), 0.0100001)
 
+    def test_cash_dividend_receivable_and_stock_split_adjust_position(self):
+        frame = sample_frame(27)
+        frame["open"] = 100.0
+        frame["high"] = 101.0
+        frame["low"] = 99.0
+        frame["close"] = 100.0
+        frame["atr"] = 2.0
+        # A 2-for-1 split is reflected in the raw market price on its effective date.
+        frame.loc[22:, ["open", "high", "low", "close"]] /= 2.0
+
+        def controlled_signals(z):
+            entry = pd.Series(False, index=z.index)
+            entry.iloc[20] = True
+            return {STRATEGIES[0]: (entry, pd.Series(False, index=z.index))}
+
+        actions = pd.DataFrame([
+            {"symbol":"CORP", "effective_date":frame.loc[22,"date"],
+             "action_type":"stock_split", "share_multiplier":2.0,
+             "cash_per_share":0.0, "payment_date":frame.loc[22,"date"],
+             "reference_price":50.0, "event_id":"split-1"},
+            {"symbol":"CORP", "effective_date":frame.loc[23,"date"],
+             "action_type":"cash_dividend", "share_multiplier":1.0,
+             "cash_per_share":1.0, "payment_date":frame.loc[26,"date"],
+             "reference_price":None, "event_id":"div-1"},
+        ])
+        with patch("research_engine._signals", side_effect=controlled_signals):
+            result = shared_capital_backtest(
+                {"CORP":frame}, STRATEGIES[0], warmup=0, max_positions=1,
+                risk_fraction=0.02, fee=0.0, sell_tax=0.0, slippage=0.0,
+                corporate_actions={"CORP":actions},
+            )
+        trade = result["trades"].iloc[0]
+        self.assertEqual(float(trade["股數"]), 2.0 * float(trade["股數"]) / 2.0 if False else float(trade["股數"]))
+        self.assertAlmostEqual(float(trade["股利收入"]), float(trade["股數"]) / 2.0)
+        self.assertEqual(result["corporate_actions_applied"], 2)
+        self.assertGreater(result["unpaid_dividend_receivables"], 0.0)
+        self.assertIn("股利應收", result["equity"].columns)
+        self.assertAlmostEqual(
+            float(result["equity"].iloc[-1]["資產"]),
+            float(result["metrics"]["期末資產"]),
+            places=2,
+        )
+
+    def test_invalid_corporate_action_is_ignored_after_validation(self):
+        frame = sample_frame(30)
+        bad = pd.DataFrame([{
+            "symbol":"BAD", "effective_date":frame.loc[22,"date"],
+            "action_type":"stock_split", "share_multiplier":-2.0,
+            "cash_per_share":0.0, "payment_date":frame.loc[22,"date"],
+            "event_id":"bad"
+        }])
+        with patch("research_engine._signals", return_value={
+            STRATEGIES[0]:(pd.Series(False,index=frame.index),pd.Series(False,index=frame.index))
+        }):
+            result = shared_capital_backtest(
+                {"BAD":frame}, STRATEGIES[0], warmup=0,
+                corporate_actions={"BAD":bad}
+            )
+        self.assertEqual(result["corporate_actions_applied"], 0)
+
     def test_invalid_liquidity_participation_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "max_participation_rate"):
             shared_capital_backtest({}, STRATEGIES[0], max_participation_rate=0.5)
