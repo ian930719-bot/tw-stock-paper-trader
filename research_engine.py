@@ -287,7 +287,10 @@ def shared_capital_backtest(
                     if not prepared[k].loc[pd.to_datetime(prepared[k]["date"]) < d].empty
                 )
                 risk_budget = max(float(prior_equity), 0.0) * risk_fraction
-                shares_by_risk = int(risk_budget / max(open_px - stop, 0.01))
+                # Keep entry sizing comparable across exit profiles: size from the
+                # common ATR×2 reference distance, not each profile's own stop width.
+                sizing_stop = open_px - 2.0 * atr
+                shares_by_risk = int(risk_budget / max(open_px - sizing_stop, 0.01))
                 shares_by_cash = int(cash / (open_px * (1.0 + fee_rate)))
                 shares_by_alloc = int(allocation / (open_px * (1.0 + fee_rate)))
                 shares = max(0, min(shares_by_risk, shares_by_cash, shares_by_alloc))
