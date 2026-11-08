@@ -146,6 +146,22 @@ def evolve_strategy(
         signal_overrides=holdout_overrides,
     )
     holdout_stats = trade_statistics(holdout["trades"])
+    annual_rows = []
+    if not holdout["equity"].empty:
+        annual_equity = holdout["equity"].copy()
+        annual_equity["年度"] = pd.to_datetime(annual_equity["日期"]).dt.year
+        for year, group in annual_equity.groupby("年度", sort=True):
+            start_value = float(group["資產"].iloc[0])
+            end_value = float(group["資產"].iloc[-1])
+            annual_return = end_value / start_value - 1.0 if start_value > 0 else -1.0
+            annual_rows.append({
+                "年度": int(year),
+                "年初資產（樣本外首日）": start_value,
+                "年底資產": end_value,
+                "年度報酬": annual_return,
+                "100%目標達成": bool(annual_return >= 1.0),
+            })
+    annual_performance = pd.DataFrame(annual_rows)
     return {
         "status": "ok",
         "selected_params": dict(best),
@@ -153,7 +169,7 @@ def evolve_strategy(
         "split_date": split_date,
         "train_rows": pd.DataFrame(rows).sort_values("研究分數", ascending=False),
         "holdout": holdout,
-        "holdout_stats": holdout_stats,
+        "holdout_stats": holdout_stats,\n        "annual_performance": annual_performance,\n        "annual_100pct_years": int(annual_performance["100%目標達成"].sum()) if not annual_performance.empty else 0,
         "search_count": len(rows),
         "symbols": len(clean),
     }
