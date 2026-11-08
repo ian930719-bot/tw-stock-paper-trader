@@ -12,6 +12,7 @@ import pandas as pd
 
 from analytics import equity_risk_metrics, trade_statistics
 from research_engine import STRATEGIES, shared_capital_backtest
+from strategy_evolution import select_candidate, build_signals
 
 
 def rolling_walk_forward(
@@ -38,7 +39,8 @@ def rolling_walk_forward(
     from the test start onward. Capital is reset per window; aggregate returns
     chain the independent window outcomes.
     """
-    if strategy not in STRATEGIES:
+    adaptive = strategy == "AI 自適應策略"
+    if strategy not in STRATEGIES and not adaptive:
         raise ValueError("未知策略")
     if initial_capital <= 0 or not np.isfinite(initial_capital):
         raise ValueError("initial_capital 必須是有限正數")
@@ -82,12 +84,48 @@ def rolling_walk_forward(
                 continue
             window_frames[code] = pd.concat([history, active], ignore_index=True)
 
+        selected_params = None
+        selection_status = "固定策略"
+        selection_score = np.nan
+        signal_overrides = None
+        if adaptive:
+            # Only pre-test history is supplied to the selector. The outer test
+            # window is excluded from every candidate ranking and parameter choice.
+            training_only = {
+                code: frame.loc[pd.to_datetime(frame["date"]) < start_date].copy()
+                for code, frame in valid.items()
+                if (pd.to_datetime(frame["date"]) < start_date).any()
+            }
+            selection = select_candidate(
+                training_only,
+                initial_capital=float(initial_capital),
+                max_positions=int(max_positions),
+                risk_fraction=float(risk_fraction),
+                exit_profile=exit_profile,
+                warmup=int(warmup_bars),
+            )
+            selection_status = selection.get("status", "unknown")
+            if selection_status == "ok":
+                selected_params = selection["selected_params"]
+                selection_score = selection.get("selection_score", np.nan)
+                signal_overrides = {
+                    code: build_signals(frame, selected_params)
+                    for code, frame in window_frames.items()
+                }
+            else:
+                # Fail closed: if history cannot validate a candidate, remain in cash.
+                signal_overrides = {
+                    code: (pd.Series(False, index=frame.index),
+                           pd.Series(False, index=frame.index))
+                    for code, frame in window_frames.items()
+                }
         result = shared_capital_backtest(
-            window_frames, strategy, initial_capital=float(initial_capital),
+            window_frames, "AI 自適應策略" if adaptive else strategy,
+            initial_capital=float(initial_capital),
             max_positions=int(max_positions), risk_fraction=float(risk_fraction),
             fee=fee, sell_tax=sell_tax, slippage=slippage, warmup=0,
             report_start_date=start_date, trading_start_date=start_date,
-            exit_profile=exit_profile,
+            exit_profile=exit_profile, signal_overrides=signal_overrides,
         )
         eq = result["equity"].copy()
         trades = result["trades"].copy()
@@ -100,6 +138,10 @@ def rolling_walk_forward(
             "測試結束": end_date.date().isoformat(),
             "交易日數": int(len(eq)),
             "標的數": int(result["coverage"]["symbols_used"]),
+            "策略模式": "逐段重新選擇" if adaptive else "固定策略",
+            "選擇狀態": selection_status,
+            "選中策略參數": str(selected_params) if selected_params else "未採用（驗證不足）",
+            "選擇分數": selection_score,
             **metrics,
             "交易筆數": int(len(trades)),
         })
@@ -137,7 +179,7 @@ def rolling_walk_forward(
     return {
         "windows": windows, "equity": equity, "trades": trades,
         "metrics": metrics, "coverage": len(valid),
-        "note": "各測試區段獨立重設本金並清空持倉；鏈結曲線用於串接區段報酬，不代表同一帳戶連續持倉。",
+        "note": ("AI 自適應模式：每個外層測試區段只用該區段之前的歷史資料，先做內部時間序列驗證再選候選；無合格候選則該段保持現金。各測試區段獨立重設本金並清空持倉，鏈結曲線不代表同一帳戶連續持倉。" if adaptive else "各測試區段獨立重設本金並清空持倉；鏈結曲線用於串接區段報酬，不代表同一帳戶連續持倉。"),
     }
 
 
