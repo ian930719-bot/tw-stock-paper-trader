@@ -338,45 +338,69 @@ def shared_capital_backtest(
         for code, events in action_lookup.items():
             if code not in positions or code not in todays or events.empty:
                 continue
-            due = events.loc[pd.to_datetime(events["effective_date"]).dt.normalize() == pd.Timestamp(d).normalize()]
-            for event in due.itertuples(index=False):
-                event_id = str(event.event_id)
-                if event_id in processed_actions:
-                    continue
-                p = positions[code]
-                if event.action_type == "cash_dividend":
-                    amount = float(p["shares"]) * float(event.cash_per_share)
-                    if amount > 0:
-                        p["dividends"] = float(p.get("dividends", 0.0)) + amount
-                        dividend_receivables.append({
-                            "symbol": code, "event_id": event_id,
-                            "payment_date": pd.Timestamp(event.payment_date).normalize(),
-                            "amount": amount,
-                        })
-                elif event.action_type in {
-                    "stock_dividend", "stock_split", "capital_reduction", "par_value_change"
-                }:
-                    multiplier = float(event.share_multiplier)
-                    exact_shares = float(p["shares"]) * multiplier
-                    whole_shares = float(np.floor(exact_shares + 1e-9))
-                    fractional_shares = max(0.0, exact_shares - whole_shares)
-                    if fractional_shares > 1e-8:
-                        reference = event.reference_price
-                        try:
-                            reference = float(reference)
-                        except (TypeError, ValueError):
-                            reference = float(todays[code]["open"])
-                        if not np.isfinite(reference) or reference <= 0:
-                            reference = float(todays[code]["open"])
-                        cash_in_lieu = fractional_shares * reference
-                        cash += cash_in_lieu
-                        p["cash_in_lieu"] = float(p.get("cash_in_lieu", 0.0)) + cash_in_lieu
-                    p["shares"] = whole_shares
-                    if code in last_closes:
-                        last_closes[code] = float(last_closes[code]) / multiplier
-                    for key in ("entry_price", "stop", "high_water", "atr", "initial_risk"):
-                        p[key] = float(p[key]) / multiplier
-                processed_actions.add(event_id)
+            due = events.loc[
+                pd.to_datetime(events["effective_date"]).dt.normalize()
+                == pd.Timestamp(d).normalize()
+            ]
+            due = due.loc[~due["event_id"].astype(str).isin(processed_actions)]
+            if due.empty:
+                continue
+            p = positions[code]
+            prior_shares = float(p["shares"])
+            cash_dividends = due.loc[due["action_type"] == "cash_dividend"]
+            for event in cash_dividends.itertuples(index=False):
+                amount = prior_shares * float(event.cash_per_share)
+                if amount > 0:
+                    p["dividends"] = float(p.get("dividends", 0.0)) + amount
+                    payment = pd.to_datetime(event.payment_date, errors="coerce")
+                    dividend_receivables.append({
+                        "symbol": code, "event_id": str(event.event_id),
+                        "payment_date": payment.normalize() if pd.notna(payment) else pd.NaT,
+                        "amount": amount,
+                    })
+
+            share_events = due.loc[due["action_type"].isin({
+                "stock_dividend", "stock_split", "capital_reduction", "par_value_change"
+            })]
+            total_multiplier = float(share_events["share_multiplier"].prod()) if not share_events.empty else 1.0
+            if total_multiplier != 1.0:
+                exact_shares = prior_shares * total_multiplier
+                whole_shares = float(np.floor(exact_shares + 1e-9))
+                fractional_shares = max(0.0, exact_shares - whole_shares)
+                if fractional_shares > 1e-8:
+                    reference_values = pd.to_numeric(
+                        share_events["reference_price"], errors="coerce"
+                    ).dropna()
+                    reference = float(reference_values.iloc[-1]) if not reference_values.empty else float(todays[code]["open"])
+                    if not np.isfinite(reference) or reference <= 0:
+                        reference = float(todays[code]["open"])
+                    cash_in_lieu = fractional_shares * reference
+                    cash += cash_in_lieu
+                    p["cash_in_lieu"] = float(p.get("cash_in_lieu", 0.0)) + cash_in_lieu
+                p["shares"] = whole_shares
+
+            official_factors = sorted({
+                float(value) for value in pd.to_numeric(
+                    due["price_adjustment_factor"], errors="coerce"
+                ).dropna()
+                if np.isfinite(float(value)) and float(value) > 0
+            })
+            if official_factors:
+                price_factor = float(np.prod(official_factors))
+            else:
+                prior_close = float(last_closes.get(code, p["entry_price"]))
+                cash_per_share = float(cash_dividends["cash_per_share"].sum())
+                cash_factor = (
+                    (prior_close - cash_per_share) / prior_close
+                    if prior_close > cash_per_share > 0 else 1.0
+                )
+                price_factor = cash_factor / total_multiplier
+            if np.isfinite(price_factor) and price_factor > 0 and price_factor != 1.0:
+                for key in ("entry_price", "stop", "high_water", "atr", "initial_risk"):
+                    p[key] = float(p[key]) * price_factor
+                if code in last_closes:
+                    last_closes[code] = float(last_closes[code]) * price_factor
+            processed_actions.update(due["event_id"].astype(str).tolist())
 
         # Settle previously accrued cash dividends on their published payment date.
         still_receivable = []
