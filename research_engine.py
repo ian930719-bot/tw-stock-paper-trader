@@ -339,7 +339,21 @@ def shared_capital_backtest(
                     "stock_dividend", "stock_split", "capital_reduction", "par_value_change"
                 }:
                     multiplier = float(event.share_multiplier)
-                    p["shares"] = float(p["shares"]) * multiplier
+                    exact_shares = float(p["shares"]) * multiplier
+                    whole_shares = float(np.floor(exact_shares + 1e-9))
+                    fractional_shares = max(0.0, exact_shares - whole_shares)
+                    if fractional_shares > 1e-8:
+                        reference = event.reference_price
+                        try:
+                            reference = float(reference)
+                        except (TypeError, ValueError):
+                            reference = float(todays[code]["open"])
+                        if not np.isfinite(reference) or reference <= 0:
+                            reference = float(todays[code]["open"])
+                        cash_in_lieu = fractional_shares * reference
+                        cash += cash_in_lieu
+                        p["dividends"] = float(p.get("dividends", 0.0)) + cash_in_lieu
+                    p["shares"] = whole_shares
                     for key in ("entry_price", "stop", "high_water", "atr", "initial_risk"):
                         p[key] = float(p[key]) / multiplier
                 processed_actions.add(event_id)
