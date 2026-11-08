@@ -87,6 +87,69 @@ def risk_parity_weights(returns, *, max_weight=0.30, target_exposure=0.90,
     return w, risk, corr
 
 
+def dynamic_strategy_ensemble(strategy_equities, *, initial_capital=100000,
+                              lookback=60, rebalance_frequency=20,
+                              max_weight=0.40, target_exposure=0.90):
+    """Combine strategy OOS equity curves using lagged rolling risk parity.
+
+    Weights for date t use returns strictly before t. The first lookback period
+    uses equal weights. This is a sequential ensemble, not a retroactive fit.
+    """
+    if initial_capital <= 0 or lookback < 30 or rebalance_frequency < 1:
+        raise ValueError("本金、回看期或再平衡頻率設定不合法")
+    series = {}
+    for name, curve in strategy_equities.items():
+        if curve is None or curve.empty or not {"日期", "資產"}.issubset(curve.columns):
+            continue
+        z = curve[["日期", "資產"]].copy()
+        z["日期"] = pd.to_datetime(z["日期"], errors="coerce")
+        z["資產"] = pd.to_numeric(z["資產"], errors="coerce")
+        z = z.dropna().sort_values("日期").drop_duplicates("日期", keep="last")
+        z = z.loc[z["資產"] > 0]
+        if len(z) < lookback + 2:
+            continue
+        r = z.set_index("日期")["資產"].pct_change()
+        r.iloc[0] = float(z["資產"].iloc[0]) / float(initial_capital) - 1.0
+        series[str(name)] = r
+    if len(series) < 2:
+        return {"status": "insufficient_strategies", "equity": pd.DataFrame(),
+                "weights": pd.DataFrame(), "returns": pd.Series(dtype=float)}
+    panel = pd.concat(series, axis=1, join="inner").replace([np.inf, -np.inf], np.nan).dropna()
+    if len(panel) < lookback + 1:
+        return {"status": "insufficient_history", "equity": pd.DataFrame(),
+                "weights": pd.DataFrame(), "returns": pd.Series(dtype=float)}
+    n = panel.shape[1]
+    cap = max(float(max_weight), float(target_exposure) / n)
+    cap = min(cap, 1.0)
+    weights = np.full(n, float(target_exposure) / n)
+    weight_rows = []
+    blended = []
+    for i, (day, current_returns) in enumerate(panel.iterrows()):
+        if i >= lookback and (i - lookback) % rebalance_frequency == 0:
+            history = panel.iloc[i - lookback:i]
+            try:
+                w, _, _ = risk_parity_weights(
+                    history, max_weight=cap, target_exposure=target_exposure)
+                weights = w.reindex(panel.columns).fillna(0).to_numpy(dtype=float)
+            except ValueError:
+                # If the trailing covariance is degenerate, retain the last valid weights.
+                pass
+        blended.append(float(np.dot(weights, current_returns.to_numpy(dtype=float))))
+        weight_rows.append({"日期": day, **dict(zip(panel.columns, weights))})
+    daily = pd.Series(blended, index=panel.index, name="組合日報酬")
+    equity = pd.DataFrame({
+        "日期": panel.index,
+        "資產": float(initial_capital) * (1.0 + daily).cumprod().to_numpy(),
+        "日報酬": daily.to_numpy(),
+    })
+    return {
+        "status": "ok", "equity": equity,
+        "weights": pd.DataFrame(weight_rows).set_index("日期"),
+        "returns": daily, "strategies": list(panel.columns),
+        "method": f"使用前 {lookback} 個交易日估計風險；每 {rebalance_frequency} 日再平衡；當日權重只使用此前資料；曝險上限 {target_exposure:.0%}；不使用槓桿",
+    }
+
+
 def portfolio_risk_report(frames, *, min_history=60, max_weight=0.30,
                           target_exposure=0.90, shrinkage=0.20):
     """Current as-of snapshot only; never use this output to rewrite past OOS."""
