@@ -201,8 +201,63 @@ def concentration_diagnostics(trades: pd.DataFrame, windows: pd.DataFrame,
     }
 
 
+def benchmark_metrics_from_close(close: pd.Series, initial_capital: float = INITIAL_CAPITAL,
+                               fee: float = FEE, sell_tax: float = SELL_TAX,
+                               slippage: float = SLIPPAGE) -> dict:
+    """Calculate a cost-adjusted 0050 buy-and-hold benchmark on total-return prices."""
+    prices = pd.to_numeric(close, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+    prices = prices[prices > 0].sort_index()
+    if len(prices) < 2:
+        raise ValueError("0050.TW 基準資料不足兩個有效交易日")
+    rates = (float(fee), float(sell_tax), float(slippage))
+    if any(not np.isfinite(x) or x < 0 for x in rates):
+        raise ValueError("基準交易成本必須為有限非負數")
+    if not np.isfinite(initial_capital) or initial_capital <= 0:
+        raise ValueError("基準初始資金必須為有限正數")
+
+    values = prices.to_numpy(dtype=float)
+    # Fractional units keep this a transparent theoretical benchmark; costs
+    # match the strategy's one-way fee, sell tax and slippage assumptions.
+    shares = float(initial_capital) / (values[0] * (1.0 + fee + slippage))
+    marked_equity = shares * values
+    ending_equity = shares * values[-1] * (1.0 - fee - sell_tax - slippage)
+    marked_equity[-1] = ending_equity
+    equity_path = np.r_[float(initial_capital), marked_equity]
+    peaks = np.maximum.accumulate(equity_path)
+    drawdowns = equity_path[1:] / peaks[1:] - 1.0
+    returns = pd.Series(marked_equity).pct_change().dropna()
+    first_date = pd.Timestamp(prices.index[0])
+    last_date = pd.Timestamp(prices.index[-1])
+    if first_date.tzinfo is not None:
+        first_date = first_date.tz_localize(None)
+    if last_date.tzinfo is not None:
+        last_date = last_date.tz_localize(None)
+    years = max((last_date - first_date).total_seconds() / (365.25 * 86400), 1 / 252)
+    total_return = float(ending_equity / initial_capital - 1.0)
+    cagr = float((ending_equity / initial_capital) ** (1.0 / years) - 1.0)
+    daily_returns = pd.Series(marked_equity).pct_change().dropna()
+    sharpe = (float(daily_returns.mean() / daily_returns.std(ddof=1) * np.sqrt(252))
+              if len(daily_returns) > 1 and daily_returns.std(ddof=1) > 0 else 0.0)
+    return {
+        "基準": "0050 買進持有（Yahoo auto-adjusted；含買入及賣出成本）",
+        "起始日": first_date.date().isoformat(),
+        "結束日": last_date.date().isoformat(),
+        "交易日數": int(len(prices)),
+        "期末資產_NT": float(ending_equity),
+        "總報酬": total_return,
+        "年化報酬_CAGR": cagr,
+        "最大回撤": float(np.nanmin(drawdowns)) if len(drawdowns) else 0.0,
+        "Sharpe": sharpe,
+        "買入手續費": float(fee), "賣出手續費": float(fee),
+        "賣出證交稅": float(sell_tax),
+        "單邊滑價": float(slippage),
+        "成本處理": "已扣買入及賣出手續費、賣出證交稅及雙邊滑價；價格含 Yahoo auto-adjusted 分配調整",
+        "股數假設": "理論零股，不含整股單位限制；只作成本對齊基準",
+    }
+
+
 def benchmark_0050(start_date, end_date):
-    """Buy-and-hold 0050 total-return proxy using Yahoo auto-adjusted daily bars."""
+    """Fetch Yahoo auto-adjusted 0050 prices and apply the same costs as strategies."""
     end_exclusive = (pd.Timestamp(end_date) + pd.Timedelta(days=1)).date().isoformat()
     raw = yf.Ticker("0050.TW").history(
         start=pd.Timestamp(start_date).date().isoformat(),
@@ -212,31 +267,7 @@ def benchmark_0050(start_date, end_date):
     if raw is None or raw.empty or "Close" not in raw:
         raise RuntimeError("0050.TW 基準資料下載失敗或為空")
     close = pd.to_numeric(raw["Close"], errors="coerce").dropna()
-    close = close[close > 0]
-    if len(close) < 2:
-        raise RuntimeError("0050.TW 基準資料不足兩個交易日")
-    values = close.to_numpy(dtype=float)
-    equity = INITIAL_CAPITAL * values / values[0]
-    peak = np.maximum.accumulate(np.r_[INITIAL_CAPITAL, equity])[1:]
-    returns = pd.Series(equity).pct_change().dropna()
-    years = max((pd.Timestamp(close.index[-1]).tz_localize(None)
-                 - pd.Timestamp(close.index[0]).tz_localize(None)).days / 365.25, 1 / 252)
-    total_return = float(equity[-1] / INITIAL_CAPITAL - 1.0)
-    cagr = float((equity[-1] / INITIAL_CAPITAL) ** (1 / years) - 1.0)
-    sharpe = (float(returns.mean() / returns.std(ddof=1) * np.sqrt(252))
-              if len(returns) > 1 and returns.std(ddof=1) > 0 else 0.0)
-    return {
-        "基準": "0050 買進持有（Yahoo auto-adjusted）",
-        "起始日": pd.Timestamp(close.index[0]).date().isoformat(),
-        "結束日": pd.Timestamp(close.index[-1]).date().isoformat(),
-        "交易日數": int(len(close)),
-        "期末資產_NT": float(equity[-1]),
-        "總報酬": total_return,
-        "年化報酬_CAGR": cagr,
-        "最大回撤": float((equity / peak - 1.0).min()),
-        "Sharpe": sharpe,
-        "成本處理": "未扣交易成本；含 Yahoo 還原價格所反映的分配調整",
-    }
+    return benchmark_metrics_from_close(close)
 
 def main():
     os.makedirs("performance-artifacts", exist_ok=True)
@@ -396,9 +427,37 @@ def main():
             "performance-artifacts/robustness.csv", index=False, encoding="utf-8-sig"
         )
 
+    source_files = [
+        "performance_validation.py", "research_engine.py", "continuous_walk_forward.py",
+        "high_conviction_breakout.py", "corporate_actions.py", "analytics.py",
+    ]
+    code_hashes = {}
+    for source_path in source_files:
+        if os.path.isfile(source_path):
+            with open(source_path, "rb") as source_handle:
+                code_hashes[source_path] = hashlib.sha256(source_handle.read()).hexdigest()
+    data_digest = hashlib.sha256()
+    for symbol in sorted(frames):
+        data_digest.update(str(symbol).encode("utf-8"))
+        data_digest.update(pd.util.hash_pandas_object(
+            frames[symbol].sort_values("date").reset_index(drop=True), index=False
+        ).to_numpy().tobytes())
+
     metadata = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "data_source": "Yahoo Finance chart data via yfinance; raw OHLCV with dividend/split actions; 0050 benchmark uses auto-adjusted daily close",
+        "git_sha": os.getenv("GITHUB_SHA", "unknown"),
+        "git_ref": os.getenv("GITHUB_REF", "unknown"),
+        "github_run_id": os.getenv("GITHUB_RUN_ID", "unknown"),
+        "github_run_number": os.getenv("GITHUB_RUN_NUMBER", "unknown"),
+        "python_version": sys.version,
+        "code_sha256": code_hashes,
+        "input_ohlcv_sha256": data_digest.hexdigest(),
+        "research_grade_eligible": False,
+        "eligibility_blockers": [
+            "股票池使用 2026-08-10 0050 成分股快照加 2603，並非歷史時點成分股；存活者偏差未排除。",
+            "Yahoo Finance 非交易所認證資料源；公司行動與退市證券覆蓋尚未完整驗證。",
+        ],
+        "data_source": "Yahoo Finance chart data via yfinance; raw OHLCV with dividend/split actions; 0050 benchmark uses auto-adjusted daily close and matched transaction costs",
         "benchmark": benchmark,
         "symbols": list(frames.keys()),
         "universe_description": UNIVERSE_DESCRIPTION,
@@ -433,7 +492,9 @@ def main():
         "limitations": [
             "Yahoo Finance is not an exchange-certified source; its historical bars and corporate-action coverage may be revised or incomplete.",
             "Dividend and split events are sourced from Yahoo Finance; cash-dividend payment dates and some capital-reduction/par-value events are not fully modeled.",
-            "Exploratory universe uses the top 20 constituents from a 2026-08-10 0050 holdings snapshot plus 2603; historical membership is not point-in-time and survivorship bias remains.",
+            "Exploratory universe uses the top 20 constituents from a 2026-08-10 0050 holdings snapshot plus 2603; historical membership is not point-in-time and survivorship bias remains. This run is not research-grade acceptance evidence.",
+            "0050 benchmark now deducts the same fee, sell tax and one-way slippage assumptions as the strategy; fractional units are used for benchmark comparability.",
+            "CAGR is annualized using exact elapsed calendar time when dated equity observations are available.",
             "Portfolio cash and open positions carry continuously across OOS boundaries; adaptive candidates are selected only from pre-window history.",
             "Daily OHLCV cannot reconstruct intraday queue position, limit-up/down execution, halts, partial fills, or market impact.",
             "Results are paper research only and are not a prediction or guarantee of future returns.",
