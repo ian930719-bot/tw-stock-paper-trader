@@ -204,7 +204,10 @@ def _research_features(frame: pd.DataFrame, strategy: str) -> pd.DataFrame:
         (high - close.shift()).abs(),
         (low - close.shift()).abs(),
     ], axis=1).max(axis=1)
-    atr = tr.ewm(alpha=1 / 14, adjust=False).mean().fillna(close * 0.04)
+    if "atr" in z:
+        atr = pd.to_numeric(z["atr"], errors="coerce").fillna(close * 0.04)
+    else:
+        atr = tr.ewm(alpha=1 / 14, adjust=False).mean().fillna(close * 0.04)
     adv20 = (close * volume).rolling(20, min_periods=20).mean()
     return pd.DataFrame({
         "_entry": entry.fillna(False).astype(bool),
