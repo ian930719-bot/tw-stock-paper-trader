@@ -35,7 +35,7 @@ class PortfolioRiskTests(unittest.TestCase):
 
     def test_infeasible_caps_are_rejected(self):
         returns = pd.DataFrame(np.random.default_rng(2).normal(0, .01, (80, 2)))
-        with self.assertRaisesRegex(ValueError, "無法達到總曝險"):
+        with self.assertRaisesRegex(ValueError, "無法在單檔上限"):
             risk_parity_weights(returns, max_weight=.30, target_exposure=.90)
 
     def test_short_history_fails_closed(self):
