@@ -41,7 +41,14 @@ class ContinuousWalkForwardTests(unittest.TestCase):
 
         self.assertEqual(simulator.call_count, 1)
         self.assertEqual(len(result["windows"]), 2)
-        self.assertGreater(len(result["equity"]), 100)
+        self.assertEqual(
+            len(result["equity"]),
+            int(result["windows"]["交易日數"].sum()),
+        )
+        self.assertEqual(
+            pd.Timestamp(result["equity"]["日期"].iloc[-1]),
+            pd.Timestamp(result["windows"]["測試結束"].iloc[-1]),
+        )
         self.assertGreaterEqual(int(result["equity"]["持倉數"].max()), 1)
         # The first position survives the first OOS boundary; the account is
         # not liquidated and restarted when the next test window begins.
