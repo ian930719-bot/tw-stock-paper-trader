@@ -173,6 +173,34 @@ def summarize_result(name: str, result: dict, risk_fraction: float):
 
 
 
+def concentration_diagnostics(trades: pd.DataFrame, windows: pd.DataFrame,
+                              initial_capital: float, ending_equity: float) -> dict:
+    """Describe dependence on a few trades/windows; not a causal counterfactual."""
+    pnl = (pd.to_numeric(trades.get("損益", pd.Series(dtype=float)), errors="coerce")
+           .dropna().sort_values(ascending=False))
+    net_profit = float(ending_equity - initial_capital)
+    top1 = float(pnl.iloc[0]) if len(pnl) else 0.0
+    top3 = float(pnl.head(3).sum()) if len(pnl) else 0.0
+    window_profit = pd.Series(dtype=float)
+    if not windows.empty and {"期初資產", "期末資產"}.issubset(windows.columns):
+        window_profit = (
+            pd.to_numeric(windows["期末資產"], errors="coerce")
+            - pd.to_numeric(windows["期初資產"], errors="coerce")
+        ).dropna().sort_values(ascending=False)
+    top_window = float(window_profit.iloc[0]) if len(window_profit) else 0.0
+    return {
+        "交易筆數": int(len(pnl)), "淨利_NT": net_profit,
+        "最大單筆獲利_NT": top1,
+        "最大單筆佔淨利比例": top1 / net_profit if net_profit > 0 else np.nan,
+        "前三筆獲利合計_NT": top3,
+        "前三筆佔淨利比例": top3 / net_profit if net_profit > 0 else np.nan,
+        "移除最大單筆後近似期末資產_NT": float(ending_equity - top1),
+        "最大單筆樣本外區段獲利_NT": top_window,
+        "最大區段佔淨利比例": top_window / net_profit if net_profit > 0 else np.nan,
+        "解讀限制": "移除單筆交易為簡化敏感度指標；不重播後續資金路徑，不是可交易反事實",
+    }
+
+
 def benchmark_0050(start_date, end_date):
     """Buy-and-hold 0050 total-return proxy using Yahoo auto-adjusted daily bars."""
     end_exclusive = (pd.Timestamp(end_date) + pd.Timedelta(days=1)).date().isoformat()
@@ -258,6 +286,7 @@ def main():
         "AI 自適應策略", "橫斷面動能輪動", "高攻擊55日突破", "Minervini SEPA-VCP 20日突破",
     ]
     summaries, all_windows, all_trades, all_equity = [], [], [], []
+    robustness_rows = []
     for strategy in strategies:
         print(f"開始樣本外測試：{strategy}", flush=True)
         is_aggressive = strategy == "高攻擊55日突破"
@@ -283,6 +312,47 @@ def main():
         if len(result["windows"]) < 4:
             raise RuntimeError(f"{strategy} 僅完成 {len(result['windows'])} 個樣本外區段")
         summaries.append(summarize_result(strategy, result, RISK_FRACTION))
+        if is_aggressive:
+            values = pd.to_numeric(result["equity"]["資產"], errors="coerce").dropna()
+            robustness_rows.append({
+                "策略": strategy, "測試類型": "交易與區段集中度",
+                **concentration_diagnostics(
+                    result["trades"], result["windows"], INITIAL_CAPITAL,
+                    float(values.iloc[-1]) if not values.empty else INITIAL_CAPITAL,
+                ),
+                "費率": FEE, "賣出證交稅": SELL_TAX, "單邊滑價": SLIPPAGE,
+            })
+            # Keep signals and parameters fixed; only increase execution costs.
+            for cost_multiplier in (1.5, 2.0):
+                stress = continuous_walk_forward(
+                    frames, strategy, initial_capital=INITIAL_CAPITAL,
+                    max_positions=MAX_POSITIONS, risk_fraction=RISK_FRACTION,
+                    lookback_days=LOOKBACK_DAYS, test_days=TEST_DAYS,
+                    warmup_bars=WARMUP_BARS, fee=FEE * cost_multiplier,
+                    sell_tax=SELL_TAX * cost_multiplier,
+                    slippage=SLIPPAGE * cost_multiplier,
+                    exit_profile="atr_2_5", min_test_days=40,
+                    corporate_actions=actions,
+                    custom_signal_overrides=aggressive_overrides,
+                )
+                stress_values = pd.to_numeric(stress["equity"]["資產"], errors="coerce").dropna()
+                stress_metrics = stress.get("metrics", {})
+                robustness_rows.append({
+                    "策略": strategy, "測試類型": f"成本壓力測試_{cost_multiplier:.1f}x",
+                    "交易筆數": int(trade_statistics(stress["trades"])["交易筆數"]),
+                    "淨利_NT": float(stress_values.iloc[-1] - INITIAL_CAPITAL) if not stress_values.empty else np.nan,
+                    "最大單筆獲利_NT": np.nan, "最大單筆佔淨利比例": np.nan,
+                    "前三筆獲利合計_NT": np.nan, "前三筆佔淨利比例": np.nan,
+                    "移除最大單筆後近似期末資產_NT": np.nan,
+                    "最大單筆樣本外區段獲利_NT": np.nan,
+                    "最大區段佔淨利比例": np.nan,
+                    "年化報酬_CAGR": float(stress_metrics.get("年化報酬", np.nan)),
+                    "最大回撤": float(stress_metrics.get("最大回撤", np.nan)),
+                    "費率": FEE * cost_multiplier,
+                    "賣出證交稅": SELL_TAX * cost_multiplier,
+                    "單邊滑價": SLIPPAGE * cost_multiplier,
+                    "解讀限制": "固定訊號與參數，只提高成本；非未來實際滑價預測",
+                })
         if not result["windows"].empty:
             part = result["windows"].copy()
             part.insert(0, "策略", strategy)
@@ -321,6 +391,10 @@ def main():
     pd.DataFrame(quality).to_csv(
         "performance-artifacts/data_quality.csv", index=False, encoding="utf-8-sig"
     )
+    if robustness_rows:
+        pd.DataFrame(robustness_rows).to_csv(
+            "performance-artifacts/robustness.csv", index=False, encoding="utf-8-sig"
+        )
 
     metadata = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -364,6 +438,13 @@ def main():
             "Daily OHLCV cannot reconstruct intraday queue position, limit-up/down execution, halts, partial fills, or market impact.",
             "Results are paper research only and are not a prediction or guarantee of future returns.",
         ],
+        "robustness_protocol": {
+            "focus_strategy": "高攻擊55日突破",
+            "trade_concentration": "最大單筆、前三筆及最大樣本外區段對總淨利的貢獻；移除最大單筆僅為近似敏感度",
+            "cost_stress_multipliers": [1.5, 2.0],
+            "stress_controls": "固定訊號、股票池、持倉上限、風險預算、區段及出場設定，只同比例提高費用、證交稅與滑價",
+            "parameter_tuning": "本輪不依 OOS 結果調參",
+        },
         "result_rows": len(summary),
     }
     with open("performance-artifacts/metadata.json", "w", encoding="utf-8") as handle:
