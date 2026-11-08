@@ -22,8 +22,8 @@ class AnalyticsTests(unittest.TestCase):
     def test_cagr_uses_actual_elapsed_calendar_time_when_dates_exist(self):
         equity = pd.DataFrame({
             "日期": pd.to_datetime(["2020-01-01", "2020-07-01", "2021-01-01"]),
-            "資產": [100.0, 105.0, 121.0],
-            "持倉市值": [100.0, 105.0, 121.0],
+            "資產": [100.0, 95.0, 121.0],
+            "持倉市值": [100.0, 95.0, 121.0],
         })
         result = equity_risk_metrics(equity, 100.0)
         expected = 1.21 ** (365.25 / 366.0) - 1.0
