@@ -24,6 +24,7 @@ from walk_forward import rolling_walk_forward, regime_performance, parameter_sen
 from taiwan_market_rules import floor_board_lot
 from taiwan_trading_calendar import trading_day_status
 from taiwan_price_limits import get_official_price_limit
+from market_trading_calendar import market_trading_day_status
 st.set_page_config(page_title="台股模擬交易",layout="wide")
 TZ=ZoneInfo("Asia/Taipei")
 from stock_universe import fetch_stock_universe, universe_summary, StockUniverseError
@@ -938,6 +939,7 @@ with t7:
         price_limit_provider=lambda symbol, market: get_official_price_limit(
             symbol, market, expected_date=session_now.date()
         ),
+        calendar_provider=market_trading_day_status,
     )
     paper_account = PaperAccount(engine.db_path, initial_cash=float(capital))
     stop_monitor = StopMonitor(engine.db_path, stop_loss_pct=0.05, take_profit_pct=0.10, trailing_stop_pct=0.05)
@@ -1225,7 +1227,8 @@ with t7:
             try:
                 fill_results.extend(paper_account.process_quote(
                     q["代號"], float(q["盤中參考價"]), str(q.get("報價時間") or ""),
-                    "Yahoo Finance 1-minute", now=session_now
+                    "Yahoo Finance 1-minute", now=session_now,
+                    market=market_by_symbol.get(str(q["代號"]), "上市")
                 ))
             except ValueError:
                 continue
