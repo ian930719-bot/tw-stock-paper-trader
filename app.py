@@ -384,11 +384,20 @@ with t2:
             evolution = st.session_state["ai_evolution_result"]
             st.subheader("AI 自主策略演化研究")
             if evolution.get("status") != "ok":
-                st.warning(
-                    "目前資料不足以進行可靠的訓練／樣本外切分。"
-                    f"可用共同交易日：{evolution.get('available_sessions', 0)}；"
-                    f"至少需要：{evolution.get('required_sessions', 0)}。"
-                )
+                if evolution.get("status") == "no_robust_candidate":
+                    st.warning(
+                        "候選策略在內部驗證期未達最低交易樣本或穩健性門檻；"
+                        "本次不選策略、不將候選套用到模擬交易。請增加股票樣本或歷史期間，"
+                        "不要為了產生訊號而降低門檻。"
+                    )
+                    if not evolution.get("candidates", pd.DataFrame()).empty:
+                        st.dataframe(evolution["candidates"], use_container_width=True, hide_index=True)
+                else:
+                    st.warning(
+                        "目前資料不足以進行可靠的訓練／樣本外切分。"
+                        f"可用共同交易日：{evolution.get('available_sessions', 0)}；"
+                        f"至少需要：{evolution.get('required_sessions', 0)}。"
+                    )
             else:
                 st.write(
                     f"搜尋 {evolution['search_count']} 組候選；"
