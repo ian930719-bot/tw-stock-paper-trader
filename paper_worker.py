@@ -696,8 +696,9 @@ class PaperWorker:
         for symbol, market in market_map.items():
             try:
                 quote = self.quote_fetcher(symbol, market)
+                quote_now = parse_timestamp(self.now_provider())
                 if not quote or not quote_is_fresh(
-                    quote, current, self.config.max_quote_age_seconds
+                    quote, quote_now, self.config.max_quote_age_seconds
                 ):
                     continue
                 stamp = parse_timestamp(quote["timestamp"]).isoformat()
@@ -717,12 +718,18 @@ class PaperWorker:
 
         # Match previously submitted orders before creating any new order. A quote
         # timestamp is consumed once, so the same minute bar cannot fill a new order.
-        for symbol, quote in quotes.items():
+        for symbol, quote in list(quotes.items()):
             market = market_map[symbol]
+            processing_now = parse_timestamp(self.now_provider())
+            if not quote_is_fresh(
+                quote, processing_now, self.config.max_quote_age_seconds
+            ):
+                quotes.pop(symbol, None)
+                continue
             try:
                 fills = self.account.process_quote(
                     symbol, float(quote["price"]), quote["timestamp"],
-                    str(quote["source"]), now=current,
+                    str(quote["source"]), now=processing_now,
                     max_age_seconds=self.config.max_quote_age_seconds,
                     market=market,
                 )
@@ -748,8 +755,17 @@ class PaperWorker:
             except Exception as exc:
                 self._event("warning", "日線歷史載入失敗", symbol=symbol, reason=str(exc))
 
-        exit_results = self._manage_positions(quotes, frames, market_map, current)
-        entry_results = self._submit_entries(quotes, frames, market_map, current)
+        decision_now = parse_timestamp(self.now_provider())
+        quotes = {
+            symbol: quote for symbol, quote in quotes.items()
+            if quote_is_fresh(quote, decision_now, self.config.max_quote_age_seconds)
+        }
+        if not quotes:
+            summary["status"] = "日線載入後盤中報價已過期"
+            self._set_status("waiting_quote", summary)
+            return summary
+        exit_results = self._manage_positions(quotes, frames, market_map, decision_now)
+        entry_results = self._submit_entries(quotes, frames, market_map, decision_now)
         summary["exits"] = sum(1 for item in exit_results if item == "ACCEPTED")
         summary["entries"] = sum(1 for item in entry_results if item == "ACCEPTED")
         summary["status"] = "執行完成"
