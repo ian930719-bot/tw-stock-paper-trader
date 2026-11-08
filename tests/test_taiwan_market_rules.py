@@ -7,7 +7,7 @@ from taiwan_market_rules import stock_tick_size, is_valid_stock_tick, floor_boar
 class TaiwanMarketRulesTests(unittest.TestCase):
     def test_stock_tick_price_bands(self):
         cases = [
-            (9.99, "0.01"), (10, "0.05"), (49.95, "0.05"),
+            (4.99, "0.01"), (5, "0.05"), (9.99, "0.05"), (10, "0.05"), (49.95, "0.05"),
             (50, "0.10"), (99.9, "0.10"), (100, "0.50"),
             (499.5, "0.50"), (500, "1.00"), (999, "1.00"),
             (1000, "5.00"), (1500, "5.00"),
