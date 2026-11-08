@@ -21,6 +21,7 @@ from continuous_walk_forward import continuous_walk_forward
 from analytics import trade_statistics
 from cross_sectional_momentum import build_cross_sectional_overrides
 from high_conviction_breakout import build_high_conviction_breakout_overrides
+from minervini_vcp_breakout import build_minervini_vcp_overrides
 
 # Exploratory broad universe: top 20 names from the 0050 holdings snapshot
 # dated 2026-08-10, plus 2603 for the prior shipping-sector test. This is NOT
@@ -248,13 +249,19 @@ def main():
         frames, corporate_actions=actions, relative_strength_quantile=0.90,
         minimum_universe=MIN_SYMBOLS, volume_multiple=1.50,
     )
+    minervini_overrides = build_minervini_vcp_overrides(
+        frames, corporate_actions=actions, relative_strength_quantile=0.90,
+        minimum_universe=MIN_SYMBOLS, volume_multiple=1.50,
+        contraction_ratio=0.85,
+    )
     strategies = list(STRATEGIES) + [
-        "AI 自適應策略", "橫斷面動能輪動", "高攻擊55日突破",
+        "AI 自適應策略", "橫斷面動能輪動", "高攻擊55日突破", "Minervini SEPA-VCP 20日突破",
     ]
     summaries, all_windows, all_trades, all_equity = [], [], [], []
     for strategy in strategies:
         print(f"開始樣本外測試：{strategy}", flush=True)
         is_aggressive = strategy == "高攻擊55日突破"
+        is_minervini = strategy == "Minervini SEPA-VCP 20日突破"
         result = continuous_walk_forward(
             frames, strategy,
             initial_capital=INITIAL_CAPITAL,
@@ -264,12 +271,13 @@ def main():
             test_days=TEST_DAYS,
             warmup_bars=WARMUP_BARS,
             fee=FEE, sell_tax=SELL_TAX, slippage=SLIPPAGE,
-            exit_profile="atr_2_5" if is_aggressive else "baseline_atr2",
+            exit_profile=("atr_2_5" if is_aggressive else "minervini_structure" if is_minervini else "baseline_atr2"),
             min_test_days=40,
             corporate_actions=actions,
             custom_signal_overrides=(
                 rotation_overrides if strategy == "橫斷面動能輪動"
-                else aggressive_overrides if is_aggressive else None
+                else aggressive_overrides if is_aggressive
+                else minervini_overrides if is_minervini else None
             ),
         )
         if len(result["windows"]) < 4:
@@ -331,6 +339,14 @@ def main():
             "oos_window_sessions": TEST_DAYS, "warmup_sessions": WARMUP_BARS,
             "exit_profile": "baseline_atr2",
             "continuous_portfolio": True,
+            "minervini_sepa_vcp": {
+                "entry": "trend template: close>SMA50>SMA150>SMA200; SMA50/SMA200 rising; price >=30% above 252-session low and within 20% of 252-session high; positive 63/126 momentum; top 10% cross-sectional 126-day momentum; ATR14/ATR50 <=0.85; 20-session breakout with volume >=1.5x prior 50-session average",
+                "exit": "close below EMA21 or prior 10-session low or negative 63-session momentum; Minervini structural stop/trailing management",
+                "risk_fraction_per_trade": RISK_FRACTION,
+                "max_positions": MAX_POSITIONS,
+                "exit_profile": "minervini_structure",
+                "leverage": 1.0,
+            },
             "high_conviction_breakout": {
                 "entry": "55-session high breakout; top 10% 126-session momentum; positive 63/126-session momentum; rising SMA50 and SMA200 over 20 sessions; close above SMA50>SMA200; breakout extension capped at 8%; volume >= 1.5x prior 20-session average",
                 "exit": "close below EMA21 or prior 20-session low or negative 63-session momentum",
