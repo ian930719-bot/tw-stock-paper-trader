@@ -92,7 +92,7 @@ class RollingWalkForwardTests(unittest.TestCase):
         self.assertTrue(result["trades"].empty)
 
     def test_selection_cache_hits_only_for_identical_training_data(self):
-        frame = sample_frame(450)
+        frame = sample_frame(440)
         cache = OrderedDict()
         selected = {
             "status": "ok",
