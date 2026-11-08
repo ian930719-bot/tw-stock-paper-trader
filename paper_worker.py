@@ -376,7 +376,7 @@ class PaperWorker:
     def _fallback_daily(self, symbol: str, period: str) -> pd.DataFrame:
         suffix = ".TW" if self.watchlist.get(symbol, "上市") == "上市" else ".TWO"
         history = yf.Ticker(f"{symbol}{suffix}").history(
-            period=period, interval="1d", auto_adjust=True,
+            period=period, interval="1d", auto_adjust=False,
         )
         if history is None or history.empty:
             return pd.DataFrame()
