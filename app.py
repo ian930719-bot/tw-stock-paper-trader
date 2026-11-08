@@ -15,6 +15,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from market_data import quote_freshness
 from analytics import equity_risk_metrics, trade_statistics
+from historical_store import get_incremental_history, price_cache_summary
 st.set_page_config(page_title="台股模擬交易",layout="wide")
 TZ=ZoneInfo("Asia/Taipei")
 from stock_universe import fetch_stock_universe, universe_summary, StockUniverseError
@@ -70,17 +71,28 @@ with st.sidebar:
     risk=st.number_input("單筆風險上限",500,50000,5000,500)
     if st.button("重新抓取"): st.cache_data.clear()
 if not ss: st.stop()
-@st.cache_data(ttl=300)
-def getdata(code,p):
-    for suffix in [".TW",".TWO"]:
+def fetch_yahoo_history(code, period):
+    for suffix in [".TW", ".TWO"]:
         try:
-            d=yf.Ticker(code+suffix).history(period=p,interval="1d",auto_adjust=True)
-            if not d.empty:
-                d=d.reset_index(); d=d.rename(columns={"Date":"date","Datetime":"date","Open":"open","High":"high","Low":"low","Close":"close","Volume":"volume"})
-                d["date"]=pd.to_datetime(d.date).dt.tz_localize(None)
-                return d[["date","open","high","low","close","volume"]].dropna()
-        except Exception: pass
+            frame = yf.Ticker(str(code) + suffix).history(
+                period=period, interval="1d", auto_adjust=True
+            )
+            if not frame.empty:
+                frame = frame.reset_index().rename(columns={
+                    "Date":"date", "Datetime":"date", "Open":"open",
+                    "High":"high", "Low":"low", "Close":"close", "Volume":"volume"
+                })
+                frame["date"] = pd.to_datetime(frame["date"]).dt.tz_localize(None)
+                return frame[["date","open","high","low","close","volume"]].dropna()
+        except Exception:
+            continue
     return pd.DataFrame()
+
+@st.cache_data(ttl=900, show_spinner=False)
+def getdata(code, p, token):
+    return get_incremental_history(
+        code, p, token=token, fallback_fetcher=fetch_yahoo_history
+    )
 def ind(d):
     x=d.copy(); c=x.close
     for n in [21,50,200]: x["ema"+str(n)]=c.ewm(span=n,adjust=False).mean()
@@ -180,10 +192,11 @@ def train_ml(d):
     return prob, metric, baseline_metric
 
 inst_data=get_institutional()
-data={}; rows=[]; quotes=[]
+data={}; rows=[]; quotes=[]; history_status={}
 with st.spinner("讀取歷史行情…"):
     for s in ss:
-        d=getdata(s,period)
+        d, history_info=getdata(s,period,finmind_token)
+        history_status[s]=history_info
         if d.empty: continue
         d=ind(d); d["obvp"]=d.obv.shift(5); data[s]=d; r=d.iloc[-1]
         inst=inst_data.get(s); net=inst.get("三大法人買賣超股數") if inst else None
@@ -405,7 +418,21 @@ with t3:
         except Exception as exc:
             st.error(f"匯入失敗：{exc}")
 with t4:
-    st.markdown("歷史日線使用 Yahoo Finance 自動調整資料。盤中參考價可能延遲，非交易所認證即時行情。三大法人數據使用證交所 T86 日報，取最近可取得交易日；API 不可用時顯示空值。尚未接入法人歷史序列、融資融券與分點籌碼。")
+    cache_stats=price_cache_summary()
+    st.subheader("歷史行情資料庫狀態")
+    c1,c2,c3=st.columns(3)
+    c1.metric("SQLite 快取日線",f"{cache_stats['資料列數']:,}")
+    c2.metric("已快取標的",f"{cache_stats['已快取標的']:,}")
+    c3.metric("資料庫最新交易日",cache_stats["最新交易日"] or "尚無資料")
+    st.caption("歷史日線優先使用 FinMind TaiwanStockPriceAdj（還原日線），每檔以最近 10 個日曆日重疊區間增量更新；API 失敗時使用可用快取，首次無快取才以 Yahoo Finance 還原日線備援。")
+    status_rows=[]
+    for code,info in history_status.items():
+        status_rows.append({"代號":code,"來源狀態":info.get("來源狀態"),
+                            "最後交易日":info.get("最後交易日"),
+                            "更新錯誤":info.get("更新錯誤")})
+    st.dataframe(pd.DataFrame(status_rows),use_container_width=True,hide_index=True)
+    st.warning("重要：SQLite 目前是 Streamlit 執行環境的本機快取。Streamlit Community Cloud 重新部署或重啟可能清除檔案；尚未連接永久外部資料庫，因此不能宣稱為永久全市場歷史資料庫。") 
+    st.markdown("盤中參考價可能延遲，非交易所認證即時行情。三大法人數據使用證交所 T86 日報，取最近可取得交易日；API 不可用時顯示空值。尚未接入法人歷史序列、融資融券與分點籌碼。")
     st.markdown("AI 欄位使用隨機森林，以歷史技術特徵預測未來 5 個交易日報酬是否超過 1.5%，按時間順序切分訓練與測試資料。平衡準確率是歷史測試指標，不代表未來勝率或獲利保證。")
     st.markdown("回測成本假設：手續費 0.1425%、一般股票賣出稅 0.3%、滑價 0.1%。尚未完整處理除權息、停牌、漲跌停、流動性與下市股偏誤。不連接券商、不會下單。")
     st.subheader("觀察清單資料品質")
