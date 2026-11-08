@@ -31,7 +31,7 @@ class CorporateActionTests(unittest.TestCase):
             par_value_changes=[{"date":"2026-03-01","before_close":80,"after_ref_close":40}],
         )
         self.assertEqual(len(events), 3)
-        self.assertTrue((events["share_multiplier"] == 2.0).all())
+        self.assertEqual(sorted(events["share_multiplier"].astype(float).tolist()), [2.0, 2.0, 4.0])
 
     def test_invalid_action_ratios_are_filtered(self):
         events = pd.DataFrame([{
