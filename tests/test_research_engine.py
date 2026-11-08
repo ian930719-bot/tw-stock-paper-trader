@@ -160,6 +160,35 @@ class ResearchEngineTests(unittest.TestCase):
         self.assertEqual(atr_result["trades"]["出場原因"].iloc[0], "進場日觸及初始停損")
         self.assertIn("該標的資料期末平倉", oneil_result["trades"]["出場原因"].iloc[0])
 
+    def test_entry_day_high_updates_atr_trailing_stop_for_next_session(self):
+        frame = sample_frame(26)
+        frame["open"] = 100.0
+        frame["high"] = 100.5
+        frame["low"] = 99.5
+        frame["close"] = 100.0
+        frame["atr"] = 2.0
+        # Entry fills at row 21. Its high raises the ATR(2) trail to 106.
+        frame.loc[21, ["high", "close"]] = [110.0, 108.0]
+        # The next session opens above the stop, then trades below it.
+        frame.loc[22, ["open", "high", "low", "close"]] = [108.0, 109.0, 105.0, 107.0]
+
+        def controlled_signals(z):
+            entry = pd.Series(False, index=z.index)
+            entry.iloc[20] = True
+            return {STRATEGIES[0]: (entry, pd.Series(False, index=z.index))}
+
+        with patch("research_engine._signals", side_effect=controlled_signals):
+            result = shared_capital_backtest(
+                {"ENTRY_TRAIL": frame}, STRATEGIES[0], warmup=0,
+                max_positions=1, risk_fraction=0.02, exit_profile="atr_2",
+                fee=0.0, sell_tax=0.0, slippage=0.0,
+            )
+        trades = result["trades"]
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades.iloc[0]["出場日"], str(pd.Timestamp(frame.loc[22, "date"]).date()))
+        self.assertEqual(trades.iloc[0]["出場原因"], "停損／移動停損")
+        self.assertAlmostEqual(float(trades.iloc[0]["出場收入"]) / float(trades.iloc[0]["股數"]), 106.0)
+
     def test_unknown_exit_profile_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "未知出場設定"):
             shared_capital_backtest({}, STRATEGIES[0], exit_profile="magic")
