@@ -23,8 +23,8 @@ def frame(n=620):
 class StrategyEvolutionTests(unittest.TestCase):
     def test_candidate_space_is_bounded_and_reproducible(self):
         candidates = list(candidate_grid())
-        self.assertEqual(len(candidates), 18)
-        self.assertEqual(len({tuple(sorted(x.items())) for x in candidates}), 18)
+        self.assertEqual(len(candidates), 30)
+        self.assertEqual(len({tuple(sorted(x.items())) for x in candidates}), 30)
 
     def test_signals_do_not_use_future_bars(self):
         original = frame()
@@ -45,6 +45,23 @@ class StrategyEvolutionTests(unittest.TestCase):
         entry_b, exit_b = build_signals(altered, params)
         pd.testing.assert_series_equal(entry_a.iloc[:400], entry_b.iloc[:400])
         pd.testing.assert_series_equal(exit_a.iloc[:400], exit_b.iloc[:400])
+
+    def test_mean_reversion_and_squeeze_candidates_are_causal(self):
+        original = frame()
+        altered = original.copy()
+        altered.loc[400:, ["open", "high", "low", "close", "volume"]] *= 3
+        candidates = [x for x in candidate_grid()
+                      if x["signal_family"] in {"mean_reversion", "squeeze_breakout"}]
+        self.assertEqual(len(candidates), 12)
+        self.assertEqual(
+            {x["signal_family"] for x in candidates},
+            {"mean_reversion", "squeeze_breakout"},
+        )
+        for params in candidates:
+            entry_a, exit_a = build_signals(original, params)
+            entry_b, exit_b = build_signals(altered, params)
+            pd.testing.assert_series_equal(entry_a.iloc[:400], entry_b.iloc[:400])
+            pd.testing.assert_series_equal(exit_a.iloc[:400], exit_b.iloc[:400])
 
     def test_insufficient_history_is_rejected_cleanly(self):
         result = evolve_strategy({"2330": frame(300)}, warmup=260)
