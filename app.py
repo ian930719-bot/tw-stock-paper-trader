@@ -963,8 +963,8 @@ with t7:
     )
     browser_symbols = st.multiselect(
         "雲端監控標的（最多 5 檔，先從少量標的驗證）",
-        options=ss,
-        default=ss[:min(5, len(ss))],
+        options=[code for code in ss if code in market_by_symbol],
+        default=[code for code in ss if code in market_by_symbol][:5],
         format_func=lambda code: f"{code} {W.get(code, code)}",
         key="browser_worker_symbols",
     )
