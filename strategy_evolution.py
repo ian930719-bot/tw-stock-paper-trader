@@ -103,6 +103,9 @@ def select_candidate(
     warmup=260,
     min_validation_trades=8,
     signal_cache=None,
+    fee=0.001425,
+    sell_tax=0.003,
+    slippage=0.001,
 ):
     """Choose a candidate using an inner chronological validation slice only.
 
@@ -148,6 +151,7 @@ def select_candidate(
             initial_capital=initial_capital,
             max_positions=max_positions,
             risk_fraction=risk_fraction,
+            fee=fee, sell_tax=sell_tax, slippage=slippage,
             warmup=warmup,
             exit_profile=exit_profile,
             trading_start_date=validation_start,
