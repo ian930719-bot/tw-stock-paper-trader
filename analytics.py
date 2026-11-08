@@ -39,6 +39,71 @@ def equity_risk_metrics(equity: pd.DataFrame, initial_capital: float) -> dict:
     }
 
 
+
+def strategy_decay_report(
+    equity_curves: dict[str, pd.DataFrame],
+    initial_capital: float,
+    *,
+    recent_window: int = 63,
+    min_observations: int = 40,
+) -> pd.DataFrame:
+    """Flag possible strategy deterioration from realized OOS curves.
+
+    This is a diagnostic only: it never disables a strategy or changes past
+    weights. The recent window is compared with the full supplied OOS sample.
+    """
+    columns = ["策略", "樣本日數", "近期Sharpe", "全期Sharpe", "近期最大回撤", "全期最大回撤", "資料截至", "狀態"]
+    rows = []
+    if initial_capital <= 0 or recent_window < 20 or min_observations < 20:
+        raise ValueError("本金、近期視窗及最低樣本數設定不合理")
+    for name, curve in (equity_curves or {}).items():
+        if curve is None or curve.empty or not {"日期", "資產"}.issubset(curve.columns):
+            continue
+        z = curve[["日期", "資產"]].copy()
+        z["日期"] = pd.to_datetime(z["日期"], errors="coerce")
+        z["資產"] = pd.to_numeric(z["資產"], errors="coerce")
+        z = z.dropna().sort_values("日期").drop_duplicates("日期", keep="last")
+        z = z.loc[z["資產"] > 0]
+        if z.empty:
+            continue
+        returns = z["資產"].pct_change()
+        returns.iloc[0] = float(z["資產"].iloc[0]) / float(initial_capital) - 1.0
+        returns = returns.replace([np.inf, -np.inf], np.nan).dropna()
+        recent = returns.tail(int(recent_window))
+
+        def sharpe(values):
+            vol = float(values.std(ddof=1)) if len(values) > 1 else 0.0
+            return float(values.mean() / vol * np.sqrt(252)) if vol > 0 else 0.0
+
+        def drawdown(values, start_value):
+            path = float(start_value) * (1.0 + values).cumprod()
+            peaks = np.maximum.accumulate(np.r_[float(start_value), path.to_numpy()])[1:]
+            return float((path.to_numpy() / peaks - 1.0).min()) if len(path) else 0.0
+
+        full_sharpe = sharpe(returns)
+        recent_sharpe = sharpe(recent)
+        full_dd = drawdown(returns, initial_capital)
+        start_value = float(z["資產"].iloc[max(0, len(z) - len(recent) - 1)])
+        recent_dd = drawdown(recent, start_value)
+        if len(returns) < int(min_observations):
+            status = "樣本不足"
+        elif recent_sharpe < 0 and full_sharpe > 0:
+            status = "退化警示"
+        elif recent_sharpe < full_sharpe - 1.0 or recent_dd < full_dd * 1.5:
+            status = "表現轉弱"
+        else:
+            status = "未見明顯退化"
+        rows.append({
+            "策略": str(name), "樣本日數": int(len(returns)),
+            "近期Sharpe": recent_sharpe, "全期Sharpe": full_sharpe,
+            "近期最大回撤": recent_dd, "全期最大回撤": full_dd,
+            "資料截至": pd.Timestamp(z["日期"].iloc[-1]).date().isoformat(),
+            "狀態": status,
+        })
+    return pd.DataFrame(rows, columns=columns).sort_values(
+        ["狀態", "近期Sharpe"], ascending=[True, True]
+    ).reset_index(drop=True) if rows else pd.DataFrame(columns=columns)
+
 def trade_statistics(trades: pd.DataFrame) -> dict:
     """Summarize closed trades only; open positions are not included."""
     empty = {
