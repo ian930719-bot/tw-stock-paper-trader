@@ -1,13 +1,28 @@
 """Tests for Taiwan corporate-action normalization and event integrity."""
 import unittest
 import pandas as pd
+from unittest.mock import patch, Mock
 
 from corporate_actions import (
     normalize_corporate_actions, validate_action_frame, point_in_time_recalculate,
+    _fetch_dataset,
 )
 
 
 class CorporateActionTests(unittest.TestCase):
+    def test_finmind_token_uses_bearer_authorization_header(self):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {"status":200,"data":[{"stock_id":"2330"}]}
+        with patch("corporate_actions.requests.get", return_value=response) as request:
+            rows = _fetch_dataset("TaiwanStockDividendResult","2026-01-01",
+                                  "2026-12-31","secret-token","2330")
+        self.assertEqual(rows[0]["stock_id"], "2330")
+        args, kwargs = request.call_args
+        self.assertEqual(kwargs["headers"]["Authorization"], "Bearer secret-token")
+        self.assertNotIn("token", kwargs["params"])
+        self.assertEqual(kwargs["params"]["data_id"], "2330")
+
     def test_dividend_ex_dates_and_payment_date_are_distinct(self):
         events = normalize_corporate_actions("2330", dividends=[{
             "StockExDividendTradingDate":"2026-07-01",
