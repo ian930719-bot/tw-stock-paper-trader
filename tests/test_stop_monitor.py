@@ -18,7 +18,7 @@ class StopMonitorTests(unittest.TestCase):
         self.db = str(Path(self.tmp.name) / "paper.sqlite3")
         self.engine = PaperExecutionEngine(self.db)
         self.account = PaperAccount(self.db, initial_cash=100000)
-        self.monitor = StopMonitor(self.db)
+        self.monitor = StopMonitor(self.db, take_profit_pct=0.99)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -30,9 +30,9 @@ class StopMonitorTests(unittest.TestCase):
         self.account.process_quote("2330", price, NOW.isoformat(), "test", now=NOW)
         self.assertEqual(self.engine.get_order(order.order_id).status, "FILLED")
 
-    def evaluate(self, price, at=NOW):
+    def evaluate(self, price, at=NOW, now=NOW):
         return self.monitor.evaluate_quote(
-            "2330", price, at.isoformat(), "test-feed", now=at)
+            "2330", price, at.isoformat(), "test-feed", now=now)
 
     def test_stop_loss_signal(self):
         self.buy_position()
@@ -55,7 +55,7 @@ class StopMonitorTests(unittest.TestCase):
         self.buy_position()
         old = NOW - timedelta(minutes=5)
         with self.assertRaisesRegex(ValueError, "過期"):
-            self.evaluate(90, old)
+            self.evaluate(90, old, now=NOW)
 
     def test_no_position_no_signal(self):
         self.assertIsNone(self.evaluate(90))
