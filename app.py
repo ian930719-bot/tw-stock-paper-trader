@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 from market_data import quote_freshness
 from analytics import equity_risk_metrics, trade_statistics
 from historical_store import get_incremental_history, price_cache_summary
-from execution_engine import PaperExecutionEngine, OrderIntent, RiskLimits, Side, taiwan_regular_session
+from execution_engine import PaperExecutionEngine, OrderIntent, RiskLimits, Side, taiwan_regular_session, realized_pnl_from_trades
 st.set_page_config(page_title="台股模擬交易",layout="wide")
 TZ=ZoneInfo("Asia/Taipei")
 from stock_universe import fetch_stock_universe, universe_summary, StockUniverseError
@@ -823,7 +823,15 @@ with t7:
     else:
         st.info("目前沒有同時符合 AI 條件與新鮮盤中報價的標的；不會使用舊收盤價代替盤中價格建立自動委託。")
     enable_paper_auto = st.checkbox("啟用本輪自動模擬委託（不是真實下單）",value=False)
-    if st.button("依策略訊號建立模擬委託",disabled=(not enable_paper_auto or not session_open or not auto_candidates)):
+    today_for_risk = session_now.strftime("%Y-%m-%d")
+    daily_pnl = realized_pnl_from_trades(
+        st.session_state.get("paper_trades", []), today_for_risk
+    )
+    if daily_pnl is None:
+        st.error("無法由完整模擬成交紀錄核對每日已實現損益（可能有匯入持倉缺少成本）；自動委託已鎖定。")
+    else:
+        st.caption(f"今日模擬已實現損益：NTD {daily_pnl:,.0f}")
+    if st.button("依策略訊號建立模擬委託",disabled=(not enable_paper_auto or not session_open or not auto_candidates or daily_pnl is None)):
         positions = dict(st.session_state.get("paper_positions", {}))
         cash_available = float(st.session_state.get("paper_cash", capital))
         market_value = sum(
@@ -847,7 +855,7 @@ with t7:
             )
             result = engine.submit(
                 intent, cash=cash_available, positions=positions,
-                equity=equity_value, daily_realized_pnl=0.0,
+                equity=equity_value, daily_realized_pnl=daily_pnl,
                 open_order_count=pending_count, daily_order_count=daily_count,
                 now=session_now,
             )
