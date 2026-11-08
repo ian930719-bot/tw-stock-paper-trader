@@ -460,6 +460,16 @@ with t2:
                     lookback_days=756, test_days=126, step_days=126,
                     warmup_bars=260, exit_profile=portfolio_exit[0],
                 )
+                fixed_wf_result = None
+                if adaptive_walkforward:
+                    fixed_wf_result = rolling_walk_forward(
+                        wf_frames, portfolio_strategy,
+                        initial_capital=float(capital),
+                        max_positions=int(portfolio_max_positions),
+                        risk_fraction=float(portfolio_risk_pct),
+                        lookback_days=756, test_days=126, step_days=126,
+                        warmup_bars=260, exit_profile=portfolio_exit[0],
+                    )
                 benchmark_raw, benchmark_info = getdata("0050", period, finmind_token)
                 benchmark_frame = benchmark_raw.copy() if benchmark_raw is not None else pd.DataFrame()
                 if not benchmark_frame.empty:
@@ -478,16 +488,25 @@ with t2:
                             continue
                         base_price = float(prior.iloc[-1])
                         end_price = float(finish.iloc[-1])
-                        benchmark_rows.append({
+                        row = {
                             "區段": int(window["區段"]),
                             "測試開始": window["測試開始"],
                             "測試結束": window["測試結束"],
                             "0050買進持有報酬": end_price / base_price - 1.0,
-                            "策略報酬": float(window.get("總報酬", 0.0)),
-                        })
+                            "AI自適應策略報酬" if adaptive_walkforward else "固定策略報酬": float(window.get("總報酬", 0.0)),
+                        }
+                        if fixed_wf_result is not None and not fixed_wf_result["windows"].empty:
+                            fixed_rows = fixed_wf_result["windows"]
+                            fixed_match = fixed_rows.loc[fixed_rows["區段"] == int(window["區段"])]
+                            row["原固定策略報酬"] = (
+                                float(fixed_match.iloc[0].get("總報酬", 0.0))
+                                if not fixed_match.empty else np.nan
+                            )
+                        benchmark_rows.append(row)
                 benchmark_comparison = pd.DataFrame(benchmark_rows)
                 st.session_state["walk_forward_result"] = wf_result
                 st.session_state["walk_forward_benchmark"] = benchmark_comparison
+                st.session_state["walk_forward_fixed_result"] = fixed_wf_result
                 st.session_state["walk_forward_config"] = portfolio_config + (bool(adaptive_walkforward),)
         if st.session_state.get("walk_forward_config") == portfolio_config + (bool(adaptive_walkforward),):
             wf = st.session_state["walk_forward_result"]
@@ -510,7 +529,10 @@ with t2:
                     st.subheader("各樣本外區段：策略 vs 0050 買進持有")
                     st.dataframe(
                         bench.style.format({
-                            "0050買進持有報酬": "{:.1%}", "策略報酬": "{:.1%}",
+                            "0050買進持有報酬": "{:.1%}",
+                            "AI自適應策略報酬": "{:.1%}",
+                            "固定策略報酬": "{:.1%}",
+                            "原固定策略報酬": "{:.1%}",
                         }),
                         use_container_width=True, hide_index=True,
                     )
