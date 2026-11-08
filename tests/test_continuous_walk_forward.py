@@ -19,6 +19,22 @@ def flat_frame(n=450):
 
 
 class ContinuousWalkForwardTests(unittest.TestCase):
+    def test_custom_strategy_overrides_run_through_shared_account(self):
+        frame = flat_frame()
+        entry = pd.Series(False, index=frame.index)
+        entry.iloc[299] = True
+        exit_signal = pd.Series(False, index=frame.index)
+        result = continuous_walk_forward(
+            {"TEST": frame}, "自訂橫斷面策略",
+            initial_capital=100_000, max_positions=1,
+            lookback_days=300, test_days=60, warmup_bars=200,
+            min_test_days=40, risk_fraction=0.005,
+            fee=0, sell_tax=0, slippage=0,
+            custom_signal_overrides={"TEST": (entry, exit_signal)},
+        )
+        self.assertEqual(len(result["windows"]), 2)
+        self.assertGreaterEqual(int(result["equity"]["持倉數"].max()), 1)
+
     def test_fixed_strategy_uses_one_continuous_portfolio_run(self):
         frame = flat_frame()
 
