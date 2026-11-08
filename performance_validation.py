@@ -152,6 +152,44 @@ def summarize_result(name: str, result: dict):
     }
 
 
+
+def benchmark_0050(start_date, end_date):
+    """Buy-and-hold 0050 total-return proxy using Yahoo auto-adjusted daily bars."""
+    end_exclusive = (pd.Timestamp(end_date) + pd.Timedelta(days=1)).date().isoformat()
+    raw = yf.Ticker("0050.TW").history(
+        start=pd.Timestamp(start_date).date().isoformat(),
+        end=end_exclusive, interval="1d", auto_adjust=True,
+        actions=False, repair=False, timeout=30,
+    )
+    if raw is None or raw.empty or "Close" not in raw:
+        raise RuntimeError("0050.TW 基準資料下載失敗或為空")
+    close = pd.to_numeric(raw["Close"], errors="coerce").dropna()
+    close = close[close > 0]
+    if len(close) < 2:
+        raise RuntimeError("0050.TW 基準資料不足兩個交易日")
+    values = close.to_numpy(dtype=float)
+    equity = INITIAL_CAPITAL * values / values[0]
+    peak = np.maximum.accumulate(np.r_[INITIAL_CAPITAL, equity])[1:]
+    returns = pd.Series(equity).pct_change().dropna()
+    years = max((pd.Timestamp(close.index[-1]).tz_localize(None)
+                 - pd.Timestamp(close.index[0]).tz_localize(None)).days / 365.25, 1 / 252)
+    total_return = float(equity[-1] / INITIAL_CAPITAL - 1.0)
+    cagr = float((equity[-1] / INITIAL_CAPITAL) ** (1 / years) - 1.0)
+    sharpe = (float(returns.mean() / returns.std(ddof=1) * np.sqrt(252))
+              if len(returns) > 1 and returns.std(ddof=1) > 0 else 0.0)
+    return {
+        "基準": "0050 買進持有（Yahoo auto-adjusted）",
+        "起始日": pd.Timestamp(close.index[0]).date().isoformat(),
+        "結束日": pd.Timestamp(close.index[-1]).date().isoformat(),
+        "交易日數": int(len(close)),
+        "期末資產_NT": float(equity[-1]),
+        "總報酬": total_return,
+        "年化報酬_CAGR": cagr,
+        "最大回撤": float((equity / peak - 1.0).min()),
+        "Sharpe": sharpe,
+        "成本處理": "未扣交易成本；含 Yahoo 還原價格所反映的分配調整",
+    }
+
 def main():
     os.makedirs("performance-artifacts", exist_ok=True)
     frames, actions, quality = {}, {}, []
@@ -205,6 +243,14 @@ def main():
         print(f"完成：{strategy}；區段 {len(result['windows'])}；交易 {len(result['trades'])}", flush=True)
 
     summary = pd.DataFrame(summaries).sort_values("年化報酬_CAGR", ascending=False)
+    oos_start = pd.Timestamp(min(pd.to_datetime(x["日期"]).min() for x in all_equity))
+    oos_end = pd.Timestamp(max(pd.to_datetime(x["日期"]).max() for x in all_equity))
+    benchmark = benchmark_0050(oos_start, oos_end)
+    summary["0050年化報酬_CAGR"] = float(benchmark["年化報酬_CAGR"])
+    summary["相對0050年化超額"] = summary["年化報酬_CAGR"] - summary["0050年化報酬_CAGR"]
+    pd.DataFrame([benchmark]).to_csv(
+        "performance-artifacts/benchmark.csv", index=False, encoding="utf-8-sig"
+    )
     summary.to_csv("performance-artifacts/summary.csv", index=False, encoding="utf-8-sig")
     pd.concat(all_windows, ignore_index=True).to_csv(
         "performance-artifacts/window_metrics.csv", index=False, encoding="utf-8-sig"
@@ -223,7 +269,8 @@ def main():
 
     metadata = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "data_source": "Yahoo Finance chart data via yfinance; raw OHLCV with dividend/split actions",
+        "data_source": "Yahoo Finance chart data via yfinance; raw OHLCV with dividend/split actions; 0050 benchmark uses auto-adjusted daily close",
+        "benchmark": benchmark,
         "symbols": list(SYMBOLS.values()),
         "common_calendar_days": len(all_dates),
         "settings": {
