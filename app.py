@@ -928,6 +928,24 @@ with t6:
 with t7:
     st.subheader("自動交易引擎｜模擬模式")
     st.warning("目前只建立與撮合模擬委託，不會連接券商或送出真實委託。實盤交易開關尚未實作，預設不存在。")
+    st.markdown("**自動策略條件**：買進採用「多因子觀察」訊號，要求 AI 測試優於多數類基準至少 2 個百分點、五日預測分數至少 55%；賣出則檢查 EMA21、RSI 與 MACD 退出條件。買賣都必須取得盤中更新的參考報價。")
+    limits = RiskLimits()
+    engine = PaperExecutionEngine(limits=limits)
+    expired_orders = engine.expire_day_orders(session_now)
+    paper_account = PaperAccount(engine.db_path, initial_cash=float(capital))
+    stop_monitor = StopMonitor(engine.db_path, stop_loss_pct=0.05, take_profit_pct=0.10, trailing_stop_pct=0.05)
+    account_snapshot = paper_account.snapshot()
+    account_positions = {p["symbol"]: int(p["quantity"]) for p in account_snapshot["positions"]}
+    account_costs = {p["symbol"]: float(p["average_cost"]) for p in account_snapshot["positions"]}
+    session_now = datetime.now(TZ)
+    session_open = taiwan_regular_session(session_now)
+    st.write("交易時段：", "台股一般盤中" if session_open else "非台股一般盤中時段")
+    l1,l2,l3,l4=st.columns(4)
+    l1.metric("單筆委託上限",f"NTD {limits.max_order_notional:,.0f}")
+    l2.metric("單一標的曝險上限",f"NTD {limits.max_symbol_exposure:,.0f}")
+    l3.metric("投資組合曝險上限",f"NTD {limits.max_portfolio_exposure:,.0f}")
+    l4.metric("每日虧損停手",f"NTD {limits.max_daily_loss:,.0f}")
+    st.caption("整股委託限 09:00–13:25；盤中零股委託限 09:00–13:30、1–999 股，均採限價當日有效。模擬成交不重建交易所每 5 秒集合競價及真實排隊順位。")
     st.subheader("手動模擬委託（整股／盤中零股）")
     manual_symbols = sorted([str(x) for x in stock_master["代號"].tolist()])
     manual_symbol = st.selectbox("股票代號", manual_symbols, key="manual_paper_symbol")
@@ -963,24 +981,6 @@ with t7:
             st.success(f"模擬委託已接受：{manual_result.order_id}")
         else:
             st.error(f"委託遭拒：{manual_result.message}")
-    st.markdown("**自動策略條件**：買進採用「多因子觀察」訊號，要求 AI 測試優於多數類基準至少 2 個百分點、五日預測分數至少 55%；賣出則檢查 EMA21、RSI 與 MACD 退出條件。買賣都必須取得盤中更新的參考報價。")
-    limits = RiskLimits()
-    engine = PaperExecutionEngine(limits=limits)
-    expired_orders = engine.expire_day_orders(session_now)
-    paper_account = PaperAccount(engine.db_path, initial_cash=float(capital))
-    stop_monitor = StopMonitor(engine.db_path, stop_loss_pct=0.05, take_profit_pct=0.10, trailing_stop_pct=0.05)
-    account_snapshot = paper_account.snapshot()
-    account_positions = {p["symbol"]: int(p["quantity"]) for p in account_snapshot["positions"]}
-    account_costs = {p["symbol"]: float(p["average_cost"]) for p in account_snapshot["positions"]}
-    session_now = datetime.now(TZ)
-    session_open = taiwan_regular_session(session_now)
-    st.write("交易時段：", "台股一般盤中" if session_open else "非台股一般盤中時段")
-    l1,l2,l3,l4=st.columns(4)
-    l1.metric("單筆委託上限",f"NTD {limits.max_order_notional:,.0f}")
-    l2.metric("單一標的曝險上限",f"NTD {limits.max_symbol_exposure:,.0f}")
-    l3.metric("投資組合曝險上限",f"NTD {limits.max_portfolio_exposure:,.0f}")
-    l4.metric("每日虧損停手",f"NTD {limits.max_daily_loss:,.0f}")
-    st.caption("整股委託限 09:00–13:25；盤中零股委託限 09:00–13:30、1–999 股，均採限價當日有效。模擬成交不重建交易所每 5 秒集合競價及真實排隊順位。")
     auto_candidates = []
     quote_lookup = {q["代號"]: q for q in quotes}
     row_lookup = {r["代號"]: r for r in rows}
