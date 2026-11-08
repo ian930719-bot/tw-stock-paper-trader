@@ -955,9 +955,9 @@ with t7:
     if worker_status:
         heartbeat = datetime.fromisoformat(worker_status["heartbeat_at"])
         heartbeat_age = max(0, (datetime.now(TZ) - heartbeat.astimezone(TZ)).total_seconds())
-        worker_label = "運作中" if heartbeat_age <= 120 and worker_status["status"] == "running" else "非活躍／待確認"
+        worker_label = "心跳正常" if heartbeat_age <= 120 else "心跳逾時"
         st.write(
-            f"常駐 Worker：{worker_label}｜最近心跳：{worker_status['heartbeat_at']} "
+            f"常駐 Worker：{worker_label}｜程序狀態：{worker_status['status']}｜最近心跳：{worker_status['heartbeat_at']} "
             f"（{heartbeat_age:.0f} 秒前）"
         )
         if worker_status.get("summary"):
