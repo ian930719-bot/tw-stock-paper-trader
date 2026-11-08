@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 import pandas as pd
-from portfolio_risk import portfolio_risk_report, risk_parity_weights
+from portfolio_risk import portfolio_risk_report, risk_parity_weights, dynamic_strategy_ensemble
 
 
 def fixture(n=320):
@@ -40,6 +40,34 @@ class PortfolioRiskTests(unittest.TestCase):
 
     def test_short_history_fails_closed(self):
         self.assertEqual(portfolio_risk_report(fixture(50))["status"], "insufficient_history")
+
+    def test_dynamic_ensemble_uses_only_prior_returns(self):
+        dates = pd.bdate_range("2024-01-02", periods=150)
+        curves = {}
+        for i, name in enumerate(("trend", "breakout", "reversion")):
+            r = 0.0003 + (0.004 + i * 0.002) * np.sin(np.arange(150) / (6 + i))
+            curves[name] = pd.DataFrame({
+                "日期": dates,
+                "資產": 100000 * np.cumprod(1 + r),
+            })
+        first = dynamic_strategy_ensemble(curves, lookback=40, rebalance_frequency=10)
+        changed = {k: v.copy() for k, v in curves.items()}
+        for v in changed.values():
+            v.loc[100:, "資產"] *= 4
+        second = dynamic_strategy_ensemble(changed, lookback=40, rebalance_frequency=10)
+        self.assertEqual(first["status"], "ok")
+        self.assertTrue(np.allclose(
+            first["weights"].loc[:dates[99]].to_numpy(),
+            second["weights"].loc[:dates[99]].to_numpy(),
+        ))
+        self.assertLessEqual(float(first["weights"].to_numpy().max()), 0.40 + 1e-8)
+        self.assertTrue((first["weights"].sum(axis=1) <= 0.90 + 1e-8).all())
+
+    def test_dynamic_ensemble_requires_enough_strategy_history(self):
+        dates = pd.bdate_range("2024-01-02", periods=45)
+        curve = pd.DataFrame({"日期": dates, "資產": np.linspace(100000, 105000, 45)})
+        result = dynamic_strategy_ensemble({"a": curve, "b": curve}, lookback=60)
+        self.assertEqual(result["status"], "insufficient_strategies")
 
     def test_snapshot_is_asof_and_does_not_use_later_rows(self):
         frames = fixture(340)
