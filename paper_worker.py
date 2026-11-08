@@ -526,10 +526,15 @@ class PaperWorker:
             quote = quotes.get(symbol)
             market = market_map.get(symbol)
             frame = frames.get(symbol)
-            if quote is None or market is None or frame is None or symbol in pending_sells:
+            decision_now = parse_timestamp(self.now_provider())
+            if (
+                quote is None or market is None or frame is None
+                or symbol in pending_sells
+                or not quote_is_fresh(quote, decision_now, self.config.max_quote_age_seconds)
+            ):
                 continue
             try:
-                z = completed_daily_bars(frame, now.date())
+                z = completed_daily_bars(frame, decision_now.date())
                 if len(z) < 16:
                     continue
                 atr = calculate_atr(z)
@@ -540,15 +545,15 @@ class PaperWorker:
                     atr, position_version=int(position["position_version"]),
                     profile=self.exit_profile,
                     atr_multiple=float(os.getenv("PAPER_ATR_MULTIPLE", "2.0")),
-                    technical_invalidation=technical, now=now,
+                    technical_invalidation=technical, now=decision_now,
                 )
                 signal = self.exit_monitor.evaluate_quote(
                     symbol, float(quote["price"]), str(quote["timestamp"]),
-                    str(quote["source"]), now=now,
+                    str(quote["source"]), now=decision_now,
                 )
                 if signal:
                     result = self._submit_exit(
-                        signal, position, quote, market, now, quotes
+                        signal, position, quote, market, decision_now, quotes
                     )
                     if result:
                         results.append(result.status)
