@@ -14,6 +14,7 @@ import numpy as np
 import plotly.graph_objects as go
 # Keep this import synchronized with research_engine.py in the same deployed revision.
 from strategy_evolution import evolve_strategy
+from fundamental_factors import score_fundamental_snapshot
 from research_engine import STRATEGIES, daily_strategy_returns, performance, fundamental_snapshot, shared_capital_backtest
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -235,7 +236,7 @@ with st.spinner("讀取歷史行情…"):
                   else "AI未確認" if score>=70 else "等待" if score>=50 else "不進場")
         rows.append({"代號":s,"名稱":W.get(s,s),"規則分數":int(score),"訊號":signal,"AI五日上漲機率":round(prob,3) if prob is not None else None,"模型測試平衡準確率":round(metric,3) if metric is not None else None,"多數類基準平衡準確率":round(baseline_metric,3) if baseline_metric is not None else None,"三大法人買賣超(股)":net,"法人資料日期":inst.get("資料日期") if inst else None,"RSI14":round(r.rsi,1) if pd.notna(r.rsi) else None,"20日報酬":r.r20,"60日報酬":r.r60,"日線日期":r.date.strftime("%Y-%m-%d")})
 if not data: st.error("目前無法取得歷史行情，請稍後重試。"); st.stop()
-t0,t1,t2,t3,t4,t5,t6,t7=st.tabs(["上市櫃股票庫","行情監控","歷史回測","模擬帳本","資料限制","大師策略回測","整合研究中心","自動交易（模擬）"])
+t0,t1,t2,t3,t4,t5,t6,t7=st.tabs(["上市櫃股票庫","行情監控","歷史回測","模擬帳本","資料限制","多因子研究","整合研究中心","自動交易（模擬）"])
 with t0:
     st.subheader("台灣上市／上櫃證券主檔")
     st.caption("資料來源："+universe_source+"。依每一證券代號最新市場別紀錄判斷是否仍為上市或上櫃，避免把已轉板股票誤列為興櫃。")
@@ -1001,38 +1002,18 @@ with t6:
         st.subheader("滑價成本敏感度")
         st.dataframe(st.session_state["cost_stress_rows"].style.format({"期末資產":"{:,.0f}","總報酬":"{:.1%}","年化報酬":"{:.1%}","最大回撤":"{:.1%}","Sharpe":"{:.2f}"}),use_container_width=True,hide_index=True)
         st.caption("三種成本情境固定手續費 0.1425%、一般股票賣出稅 0.3%，僅將單邊滑價由 0.1% 提高至 0.3%。分析區間與選定樣本外／完整歷史一致；ETF 稅率、券商折扣、最低手續費與市場衝擊仍未完整納入。")
-    st.markdown("**基本面快照（最新可取得資料）**")
-    st.caption("以下為目前可取得的最新快照，不是歷史逐期財報；不會用來回填歷史交易訊號。")
+    st.markdown("**基本面因子研究（最新可取得快照）**")
+    st.caption("以下是目前資料來源回傳的最新快照，不是歷史逐期財報；僅供當下橫向觀察，絕不回填歷史回測。")
     if st.button("載入基本面資料",key="fund_load"):
         with st.spinner("讀取財務資料…"):
             st.session_state["fund_data"]=fundamental_snapshot(tuple(data.keys()))
     if "fund_data" in st.session_state:
-        fund=st.session_state["fund_data"].copy()
-        st.dataframe(fund,use_container_width=True,hide_index=True)
-        st.markdown("**巴菲特／彼得林區風格：最新資料簡化篩選**")
-        st.caption("這是當前財務快照的條件檢查，不是完整投資大師模型，也不能用於歷史回測；缺值不會視為通過。")
-        def style_check(row, rules):
-            known=0; passed=0
-            for field, predicate in rules:
-                value=row.get(field)
-                if pd.notna(value):
-                    known+=1
-                    passed+=int(bool(predicate(float(value))))
-            return f"{passed}/{known} 項符合" if known else "資料不足"
-        buffett_rules=[
-            ("ROE",lambda x:x>=0.15),
-            ("自由現金流",lambda x:x>0),
-            ("負債／權益",lambda x:x<=100),
-            ("本益比",lambda x:0<x<=25),
-        ]
-        lynch_rules=[
-            ("營收成長率",lambda x:x>=0.10),
-            ("獲利成長率",lambda x:x>=0.10),
-            ("本益比",lambda x:0<x<=25),
-        ]
-        fund["巴菲特風格條件"] = fund.apply(lambda r:style_check(r,buffett_rules),axis=1)
-        fund["林區風格條件"] = fund.apply(lambda r:style_check(r,lynch_rules),axis=1)
-        st.dataframe(fund[["代號","巴菲特風格條件","林區風格條件","資料狀態"]],use_container_width=True,hide_index=True)
+        fund=score_fundamental_snapshot(st.session_state["fund_data"].copy())
+        st.dataframe(
+            fund.sort_values("基本面分數",ascending=False,na_position="last"),
+            use_container_width=True,hide_index=True
+        )
+        st.caption("基本面分數依目前觀察清單內可取得欄位做橫向百分位排名；缺值不當作零分，並顯示資料完整度。不同股票池的分數不可直接跨池比較。")
 
     st.divider()
     st.markdown("**多股票共享資金池：訓練／驗證／樣本外**")
