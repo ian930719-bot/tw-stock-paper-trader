@@ -313,8 +313,8 @@ with t2:
             "出場／停損規則",
             [
                 ("baseline_atr2", "ATR × 2（基準）"),
-                ("oneil_8pct", "O’Neil 8% 參考停損"),
-                ("minervini_structure", "Minervini 結構低點代理"),
+                ("oneil_8pct", "固定比例風險上限"),
+                ("minervini_structure", "結構失效停損"),
                 ("atr_1_5", "ATR × 1.5"),
                 ("atr_2_5", "ATR × 2.5"),
                 ("atr_3", "ATR × 3"),
@@ -843,12 +843,12 @@ with t5:
     elif "single_master_results" in st.session_state:
         st.info("標的、期間或本金已變更；請重新執行策略比較。")
     st.markdown("**同一進場策略的出場規則比較**")
-    st.caption("固定同一標的、進場訊號、初始本金、帳戶風險預算與交易成本；各規則依自己的初始停損距離計算股數，因此每筆預估價格風險一致，但實際股數會不同。ATR 依前一交易日收盤資料更新移動停損，下一交易日生效；O’Neil 達 +20% 只標記獲利檢視並採較寬 3 ATR 追蹤，不硬性停利；Minervini 達 2R 將停損推至成本價、達 3R 啟動 2.5 ATR 追蹤。這些是待驗證的代理規則，並非完整複製大師策略。")
+    st.caption("固定同一標的、進場訊號、初始本金、帳戶風險預算與交易成本；各規則依自己的初始停損距離計算股數，因此每筆預估價格風險一致，但實際股數會不同。ATR 依前一交易日收盤資料更新移動停損，下一交易日生效；固定比例、結構失效與 ATR 追蹤均為可調風險參數，不是任何投資大師策略模板；各參數須以樣本外結果驗證。")
     exit_entry_strategy=st.selectbox("固定進場策略",STRATEGIES,key="exit_compare_entry")
     exit_profiles=[
         ("baseline_atr2","原始 ATR × 2"),
-        ("oneil_8pct","O’Neil 8% 參考停損"),
-        ("minervini_structure","Minervini 10 日結構低點代理"),
+        ("oneil_8pct","固定比例風險上限"),
+        ("minervini_structure","10 日結構失效停損"),
         ("atr_1_5","ATR × 1.5"),
         ("atr_2","ATR × 2"),
         ("atr_2_5","ATR × 2.5"),
@@ -893,7 +893,7 @@ with t5:
         st.plotly_chart(profile_fig,use_container_width=True)
         selected_profile=st.selectbox("查看出場規則交易明細",list(st.session_state["exit_profile_trades"]),key="exit_profile_detail")
         st.dataframe(st.session_state["exit_profile_trades"][selected_profile],use_container_width=True,hide_index=True)
-    st.warning("Minervini、O’Neil、Livermore 為公開理念的技術代理，不是完整複製原策略。回測仍未完整處理除權息、停牌、漲跌停排隊、流動性衝擊及下市股偏誤。");
+    st.warning("策略訊號為通用技術條件組合，不依附特定投資大師；回測仍未完整處理除權息、停牌、漲跌停排隊、流動性衝擊及下市股偏誤。回測仍未完整處理除權息、停牌、漲跌停排隊、流動性衝擊及下市股偏誤。");
 
 
 with t6:
@@ -1216,8 +1216,8 @@ with t6:
     wf_test=st.slider("每段樣本外長度（交易日）",40,252,126,10,key="rolling_wf_test")
     wf_exit=st.selectbox("滾動測試出場規則",[
         ("baseline_atr2","原始 ATR × 2"),
-        ("oneil_8pct","O’Neil 8% 參考停損"),
-        ("minervini_structure","Minervini 結構低點代理"),
+        ("oneil_8pct","固定比例風險上限"),
+        ("minervini_structure","結構失效停損"),
         ("atr_1_5","ATR × 1.5"),
         ("atr_2_5","ATR × 2.5"),
         ("atr_3","ATR × 3"),
@@ -1623,7 +1623,7 @@ with t7:
         format_func=lambda key: PROFILES[key]["name"], key="exit_profile")
     st.caption(PROFILES[profile_key]["description"])
     entry_ref = st.number_input("假設進場價", min_value=0.01, value=100.0, step=1.0, key="exit_entry")
-    invalidation = st.number_input("技術失效價（Minervini 必填；其他策略選填）",
+    invalidation = st.number_input("技術失效價（選填）",
         min_value=0.0, value=0.0, step=0.5, key="exit_invalidation")
     atr_value = st.number_input("ATR（ATR 策略使用）", min_value=0.0, value=2.0, step=0.1, key="exit_atr")
     atr_multiple = st.selectbox("ATR 倍數（待驗證）", [1.5, 2.0, 2.5, 3.0], index=1)
@@ -1648,8 +1648,8 @@ with t7:
         ["atr_dynamic", "oneil_growth", "minervini_sepa"],
         format_func=lambda key: {
             "atr_dynamic": "ATR 動態停損（預設）",
-            "oneil_growth": "O'Neil 成長股（獲利奔跑）",
-            "minervini_sepa": "Minervini SEPA（結構失效＋R 倍數）",
+            "oneil_growth": "固定比例風險上限（獲利奔跑）",
+            "minervini_sepa": "結構失效＋R 倍數",
         }[key],
         key="adaptive_exit_profile",
     )
