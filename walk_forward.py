@@ -163,6 +163,7 @@ def rolling_walk_forward(
                     exit_profile=exit_profile, warmup=int(warmup_bars),
                     signal_cache=candidate_signal_cache,
                     fee=fee, sell_tax=sell_tax, slippage=slippage,
+                    corporate_actions=corporate_actions,
                 )
                 local_selection_cache[cache_key] = dict(selection)
                 while len(local_selection_cache) > _SELECTION_CACHE_MAX:
