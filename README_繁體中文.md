@@ -130,3 +130,8 @@ docker compose logs -f paper-worker
 
 ### 尚未完成、不得宣稱已自動實盤
 券商尚未指定，因此目前不會登入券商帳戶或送出真實委託。已新增獨立常駐 Paper Worker，可於持久化主機持續執行模擬報價監控；Streamlit Community Cloud 本身仍不會自動啟動該 Worker。要達到真正無人值守的全自動實盤，仍需選定券商、完成官方 API Adapter、使用安全憑證管理、部署常駐 Worker／排程器、可靠持久化資料庫、即時行情來源、券商委託與成交回報同步、斷線復原及人工緊急停止演練。任何實盤啟用前都必須通過完整模擬及小額驗證。
+
+
+## Windows 本機登入後自動啟動
+
+若不打算讓電腦 24 小時開機，可使用 Windows 工作排程器在使用者登入後自動啟動 Docker Desktop、Streamlit 與 Paper Worker。完整安裝、檢查、停止及移除方式請參閱 [Windows 部署指南](windows/README_Windows.md)。電腦關機或睡眠期間不會監控行情或執行停損；此部署仍是純模擬交易。
