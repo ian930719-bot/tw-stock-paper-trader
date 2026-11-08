@@ -55,6 +55,7 @@ def cached_rolling_walk_forward(
 
 TZ=ZoneInfo("Asia/Taipei")
 from stock_universe import fetch_stock_universe, universe_summary, StockUniverseError
+from universe_history import save_daily_universe_snapshot, universe_snapshot_history
 
 @st.cache_data(ttl=21600, show_spinner=False)
 def get_stock_master(token):
@@ -65,9 +66,14 @@ try:
 except Exception:
     finmind_token = ""
 universe_error = None
+universe_snapshot_status = None
 try:
     stock_master = get_stock_master(finmind_token)
     universe_source = "FinMind TaiwanStockInfo（每日更新之全市場主檔）"
+    try:
+        universe_snapshot_status = save_daily_universe_snapshot(stock_master)
+    except Exception as snapshot_exc:
+        universe_snapshot_status = {"saved": False, "status": f"歷史主檔快照保存失敗：{snapshot_exc}"}
 except Exception as exc:
     universe_error = str(exc)
     stock_master = pd.DataFrame([
@@ -96,6 +102,12 @@ universe_stats = universe_summary(stock_master) if universe_error is None else {
 }
 st.title("台股模擬交易研究系統")
 st.caption("研究用途；行情可能延遲，非交易所認證即時行情。不連接券商、不會送出真實委託。")
+if universe_snapshot_status:
+    st.caption(
+        f"歷史證券名單快照：{universe_snapshot_status.get('status')}｜"
+        f"日期 {universe_snapshot_status.get('snapshot_date', '無')}｜"
+        f"證券數 {universe_snapshot_status.get('security_count', 0):,}"
+    )
 with st.sidebar:
     st.subheader("全市場證券選取")
     popular = ["2330","2454","2308","2317","2382","3231","3017","2603","2881","2891"]
