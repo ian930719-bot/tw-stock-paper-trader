@@ -1,4 +1,5 @@
 import unittest
+from collections import OrderedDict
 from unittest.mock import patch
 
 import numpy as np
@@ -89,6 +90,61 @@ class RollingWalkForwardTests(unittest.TestCase):
             self.assertLess(history_end, test_start)
         self.assertTrue((result["windows"]["選擇狀態"] == "ok").all())
         self.assertTrue(result["trades"].empty)
+
+    def test_selection_cache_hits_only_for_identical_training_data(self):
+        frame = sample_frame(450)
+        cache = OrderedDict()
+        selected = {
+            "status": "ok",
+            "selected_params": {
+                "signal_family": "breakout", "breakout": 20,
+                "volume_multiple": 1.2, "trend_period": 50,
+                "min_entry_score": 4, "max_atr_pct": 0.12,
+            },
+            "selection_score": 0.1,
+        }
+        with patch("walk_forward.select_candidate", return_value=selected) as selector:
+            first = rolling_walk_forward(
+                {"A": frame}, "AI 自適應策略", initial_capital=100_000,
+                lookback_days=300, test_days=100, step_days=100,
+                warmup_bars=200, min_test_days=40, selection_cache=cache,
+            )
+            first_calls = selector.call_count
+            second = rolling_walk_forward(
+                {"A": frame}, "AI 自適應策略", initial_capital=100_000,
+                lookback_days=300, test_days=100, step_days=100,
+                warmup_bars=200, min_test_days=40, selection_cache=cache,
+            )
+        self.assertEqual(len(first["windows"]), 1)
+        self.assertEqual(first_calls, 1)
+        self.assertEqual(selector.call_count, first_calls)
+        self.assertEqual(second["cache_hits"], 1)
+        self.assertEqual(second["cache_misses"], 0)
+
+        changed = frame.copy()
+        changed.loc[100, "close"] += 0.01
+        with patch("walk_forward.select_candidate", return_value=selected) as changed_selector:
+            changed_result = rolling_walk_forward(
+                {"A": changed}, "AI 自適應策略", initial_capital=100_000,
+                lookback_days=300, test_days=100, step_days=100,
+                warmup_bars=200, min_test_days=40, selection_cache=cache,
+            )
+        self.assertEqual(changed_selector.call_count, 1)
+        self.assertEqual(changed_result["cache_misses"], 1)
+        self.assertEqual(changed_result["cache_hits"], 0)
+
+    def test_progress_callback_reports_each_window(self):
+        updates = []
+        result = rolling_walk_forward(
+            {"A": sample_frame(820)}, STRATEGIES[0],
+            lookback_days=300, test_days=100, step_days=100,
+            warmup_bars=200,
+            progress_callback=lambda done, total, message: updates.append((done, total, message)),
+        )
+        self.assertEqual(len(updates), len(result["windows"]))
+        self.assertEqual(updates[-1][0], len(result["windows"]))
+        self.assertGreaterEqual(updates[-1][1], updates[-1][0])
+        self.assertIn("完成樣本外區段", updates[-1][2])
 
     def test_adaptive_walk_forward_fails_closed_without_candidate(self):
         frame = sample_frame(820)
