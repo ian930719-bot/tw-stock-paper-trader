@@ -23,7 +23,7 @@ class TaiwanPriceLimitTests(unittest.TestCase):
     def test_parse_tpex_next_day_official_fields(self):
         rows = [{
             "SecuritiesCompanyCode": "6488",
-            "Date": "1151109",
+            "Date": "1151106",
             "NextDayReferencePrice": "100",
             "NextDayLimitUpPrice": "110",
             "NextDayLimitDownPrice": "90",
@@ -44,6 +44,17 @@ class TaiwanPriceLimitTests(unittest.TestCase):
         self.assertTrue(band["no_price_limit"])
         self.assertIsNone(band["upper_limit"])
         validate_limit_price(999.0, band)
+
+    def test_tpex_rejects_same_day_next_session_limits(self):
+        rows = [{
+            "SecuritiesCompanyCode": "6488",
+            "Date": "1151109",
+            "NextDayReferencePrice": "100",
+            "NextDayLimitUpPrice": "110",
+            "NextDayLimitDownPrice": "90",
+        }]
+        with self.assertRaises(PriceLimitUnavailable):
+            _parse_rows(rows, "6488", date(2026, 11, 9), "上櫃")
 
     def test_reject_price_outside_official_band(self):
         band = {"no_price_limit": False, "lower_limit": 90, "upper_limit": 110}
