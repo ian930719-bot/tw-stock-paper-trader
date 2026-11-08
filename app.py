@@ -1104,8 +1104,8 @@ with t7:
             if not signal or signal["symbol"] in pending_sell_symbols:
                 continue
             held = int(account_positions.get(signal["symbol"], 0))
-            qty = min(held, signal["quantity"],
-                      int(limits.max_order_notional / signal["price"]))
+            qty = floor_board_lot(min(held, signal["quantity"],
+                      int(limits.max_order_notional / signal["price"])))
             if qty <= 0:
                 continue
             intent = OrderIntent(
