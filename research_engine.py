@@ -219,8 +219,10 @@ def shared_capital_backtest(
             p = positions[code]
             open_px = float(row["open"])
             low_px = float(row["low"])
-            stop_hit = low_px <= p["stop"]
             prior_exit = p["exit_next"]
+            # A signal formed at the prior close is executed at today's open.
+            # Do not let today's later low retroactively override that fill.
+            stop_hit = (not prior_exit) and low_px <= p["stop"]
             if stop_hit or prior_exit:
                 raw_fill = min(open_px, p["stop"]) if stop_hit else open_px
                 fill = raw_fill * (1.0 - slip_rate)
@@ -231,7 +233,7 @@ def shared_capital_backtest(
                     "出場日": str(pd.Timestamp(d).date()), "股數": p["shares"],
                     "進場成本": p["entry_cost"], "出場收入": proceeds,
                     "損益": pnl, "報酬率": pnl / p["entry_cost"] if p["entry_cost"] else 0.0,
-                    "出場原因": "停損／移動停損" if stop_hit else "策略出場",
+                    "出場原因": "策略出場" if prior_exit else "停損／移動停損",
                     "曾觸發獲利檢視": bool(p.get("profit_review_triggered", False)),
                     "最高風險倍數": round((p.get("high_water", p["entry_price"]) - p["entry_price"]) / max(p.get("initial_risk", 0.01), 0.01), 2),
                 })
