@@ -87,6 +87,7 @@ def continuous_walk_forward(
     exit_profile: str = "baseline_atr2",
     min_test_days: int = 40,
     corporate_actions=None,
+    custom_signal_overrides=None,
 ) -> dict:
     """Run a single continuously funded portfolio over non-overlapping OOS windows.
 
@@ -94,8 +95,8 @@ def continuous_walk_forward(
     strategy selects a candidate from each window's pre-test history only.
     Existing positions and cash carry across all OOS boundaries.
     """
-    if strategy not in STRATEGIES and strategy != "AI 自適應策略":
-        raise ValueError("未知策略")
+    if strategy not in STRATEGIES and strategy != "AI 自適應策略" and custom_signal_overrides is None:
+        raise ValueError("未知策略；自訂策略必須提供 custom_signal_overrides")
     clean = {
         str(code): frame.copy().sort_values("date").reset_index(drop=True)
         for code, frame in frames.items()
@@ -114,7 +115,7 @@ def continuous_walk_forward(
                 "trades": pd.DataFrame(), "metrics": {}, "coverage": len(clean),
                 "note": "可用歷史不足以建立樣本外區段"}
 
-    signal_overrides = None
+    signal_overrides = custom_signal_overrides
     selection_rows = []
     if strategy == "AI 自適應策略":
         selection_run = rolling_walk_forward(
