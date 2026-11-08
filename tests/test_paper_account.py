@@ -46,9 +46,9 @@ class PaperAccountTests(unittest.TestCase):
         self.order(Side.BUY, 1000, "buy-first")
         self.quote(9)
         sell = self.engine.submit(
-            OrderIntent("2330", Side.SELL, 1000, 10, "exit", "sell-1"),
+            OrderIntent("2330", Side.SELL, 1000, 11, "exit", "sell-1"),
             cash=90000, positions={"2330": 1000}, equity=100000, now=NOW)
-        fills = self.quote(11)
+        fills = self.quote(12)
         self.assertEqual(len(fills), 1)
         self.assertGreater(fills[0]["realized_pnl"], 0)
         self.assertEqual(self.account.snapshot()["positions"], [])
