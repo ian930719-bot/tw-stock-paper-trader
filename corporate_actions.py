@@ -248,7 +248,7 @@ def validate_action_frame(actions: pd.DataFrame | None, symbol: str) -> pd.DataF
     frame["share_multiplier"] = pd.to_numeric(frame["share_multiplier"], errors="coerce")
     frame["cash_per_share"] = pd.to_numeric(frame["cash_per_share"], errors="coerce")
     if "price_adjustment_factor" not in frame:
-        frame["price_adjustment_factor"] = np.nan
+        frame["price_adjustment_factor"] = float("nan")
     frame["price_adjustment_factor"] = pd.to_numeric(
         frame["price_adjustment_factor"], errors="coerce"
     )
