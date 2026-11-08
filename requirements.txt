@@ -5,3 +5,4 @@ numpy>=1.26
 plotly>=5.22
 requests>=2.31
 scikit-learn>=1.4
+lxml>=5.2
