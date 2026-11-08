@@ -28,7 +28,7 @@ def equity_risk_metrics(equity: pd.DataFrame, initial_capital: float) -> dict:
     else:
         dates = pd.Series(dtype="datetime64[ns]")
     if len(dates) >= 2:
-        first_date, last_date = pd.Timestamp(dates.iloc[0]), pd.Timestamp(dates.iloc[-1])
+        first_date, last_date = pd.Timestamp(dates[0]), pd.Timestamp(dates[-1])
         if first_date.tzinfo is not None:
             first_date = first_date.tz_localize(None)
         if last_date.tzinfo is not None:
