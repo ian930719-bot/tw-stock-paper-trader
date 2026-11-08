@@ -147,3 +147,9 @@ docker compose logs -f paper-worker
 ## Windows 本機登入後自動啟動
 
 若不打算讓電腦 24 小時開機，可使用 Windows 工作排程器在使用者登入後自動啟動 Docker Desktop、Streamlit 與 Paper Worker。完整安裝、檢查、停止及移除方式請參閱 [Windows 部署指南](windows/README_Windows.md)。電腦關機或睡眠期間不會監控行情或執行停損；此部署仍是純模擬交易。
+
+## Walk-forward 效能與驗證
+
+- AI 自適應 Walk-forward 預先計算 18 組候選訊號，樣本外窗口重用已計算的訊號資料。
+- 候選選擇快取依精確訓練資料指紋及本金、持倉、風險、成本、出場與暖機設定識別；資料或設定不同即重新評估，快取容量有限。
+- 網頁提供每個已完成樣本外窗口的進度與日期資訊；快取不跨越不同訓練資料切片，也不會將外層樣本外資料用於策略選擇。
