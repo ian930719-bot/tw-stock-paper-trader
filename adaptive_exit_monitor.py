@@ -91,24 +91,28 @@ class AdaptiveExitMonitor:
         stamp = (now or datetime.now(TZ)).astimezone(TZ).isoformat()
         with closing(sqlite3.connect(self.db_path)) as conn:
             existing = conn.execute(
-                "SELECT position_version,stop_price,high_water,initial_risk FROM adaptive_exit_state WHERE symbol=?",
+                "SELECT position_version,stop_price,high_water,initial_risk,entry_price,profit_review_triggered "
+                "FROM adaptive_exit_state WHERE symbol=?",
                 (code,),
             ).fetchone()
-            if existing and int(existing[0]) == int(position_version):
-                # Refresh ATR and quantity without loosening the stop or resetting
-                # the original R denominator after protection has moved above entry.
+            if existing:
+                # A partial fill changes position_version too. Preserve the original
+                # risk anchor and never loosen a stop while the symbol remains held.
                 stop = max(stop, float(existing[1]))
                 high = max(entry, float(existing[2]))
                 initial_risk = float(existing[3])
+                entry = float(existing[4])
+                profit_review_triggered = int(existing[5])
             else:
                 high = entry
                 initial_risk = max(entry - stop, 0.01)
+                profit_review_triggered = 0
             conn.execute("""
                 INSERT INTO adaptive_exit_state(
                     symbol,quantity,position_version,entry_price,initial_risk,
                     high_water,atr,atr_multiple,profile,stop_price,
                     profit_review_triggered,updated_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,0,?)
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(symbol) DO UPDATE SET
                     quantity=excluded.quantity,
                     position_version=excluded.position_version,
@@ -119,16 +123,29 @@ class AdaptiveExitMonitor:
                     atr_multiple=excluded.atr_multiple,
                     profile=excluded.profile,
                     stop_price=excluded.stop_price,
-                    profit_review_triggered=CASE
-                        WHEN adaptive_exit_state.position_version=excluded.position_version
-                        THEN adaptive_exit_state.profit_review_triggered ELSE 0 END,
+                    profit_review_triggered=excluded.profit_review_triggered,
                     updated_at=excluded.updated_at
             """, (code, int(quantity), int(position_version), entry,
                   initial_risk, high, volatility, multiple,
-                  profile, stop, stamp))
+                  profile, stop, profit_review_triggered, stamp))
             conn.commit()
         return {"symbol": code, "profile": profile, "stop_price": stop,
                 "high_water": high, "atr": volatility}
+
+    def clear_absent_positions(self, held_symbols) -> int:
+        """Clear trailing state for symbols no longer held; retain historical events."""
+        held = {str(symbol).strip().upper() for symbol in held_symbols}
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            if held:
+                placeholders = ",".join("?" for _ in held)
+                cursor = conn.execute(
+                    f"DELETE FROM adaptive_exit_state WHERE symbol NOT IN ({placeholders})",
+                    tuple(sorted(held)),
+                )
+            else:
+                cursor = conn.execute("DELETE FROM adaptive_exit_state")
+            conn.commit()
+            return int(cursor.rowcount)
 
     def evaluate_quote(
         self, symbol: str, price: float, quote_time: str, source: str, *,
@@ -173,7 +190,7 @@ class AdaptiveExitMonitor:
                 r_multiple = (high - float(entry)) / risk
                 reviewed = bool(reviewed)
                 if profile == "oneil_growth":
-                    if px >= float(entry) * 1.20:
+                    if high >= float(entry) * 1.20:
                         reviewed = True
                     if reviewed:
                         stop = max(float(stop), trailing_stop(high, float(atr), 3.0, float(stop)))
