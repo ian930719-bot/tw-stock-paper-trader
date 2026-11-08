@@ -113,9 +113,13 @@ class PaperAccount:
         if not market_open:
             raise ValueError(f"官方交易日曆確認休市或無法確認，拒絕撮合：{calendar_note}")
 
-        # Verify the exchange calendar and official price band again for this
-        # quote-processing pass. Fail closed before opening the fill transaction.
-        market_open, calendar_note = market_trading_day_status(current.date(), market)
+        # Verify the exchange calendar again before opening the fill transaction.
+        # The price band is refreshed separately for each order immediately before
+        # the account cash/position mutation.
+        if self.calendar_checker is None:
+            market_open, calendar_note = market_trading_day_status(current.date(), market)
+        else:
+            market_open, calendar_note = self.calendar_checker(current.date())
         if not market_open:
             raise ValueError(f"官方交易日曆再次確認失敗，拒絕撮合：{calendar_note}")
         from taiwan_price_limits import get_official_price_limit, validate_limit_price
