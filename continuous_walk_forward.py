@@ -157,8 +157,24 @@ def continuous_walk_forward(
         }
 
     first_oos = windows[0][0]
+    last_oos = windows[-1][1]
+    # Exclude a trailing partial window: only complete, predeclared OOS windows
+    # belong in the reported sample. Keep all pre-OOS bars for indicator warm-up.
+    backtest_frames = {}
+    for code, frame in clean.items():
+        mask = pd.to_datetime(frame["date"]) <= last_oos
+        backtest_frames[code] = frame.loc[mask].reset_index(drop=True)
+    backtest_overrides = None
+    if signal_overrides is not None:
+        backtest_overrides = {}
+        for code, frame in clean.items():
+            mask = pd.to_datetime(frame["date"]) <= last_oos
+            backtest_overrides[code] = tuple(
+                pd.Series(values).reset_index(drop=True).loc[mask].reset_index(drop=True)
+                for values in signal_overrides[code]
+            )
     result = shared_capital_backtest(
-        clean, strategy,
+        backtest_frames, strategy,
         initial_capital=initial_capital,
         max_positions=max_positions,
         risk_fraction=risk_fraction,
@@ -167,7 +183,7 @@ def continuous_walk_forward(
         report_start_date=first_oos,
         trading_start_date=first_oos,
         exit_profile=exit_profile,
-        signal_overrides=signal_overrides,
+        signal_overrides=backtest_overrides,
         corporate_actions=corporate_actions,
     )
     equity = result["equity"].copy()
