@@ -132,7 +132,8 @@ class PaperAccount:
                     # Last-trade data confirms only that a limit was touched; it does not
                     # reveal queue priority or executable depth. Use the submitted
                     # limit as the conservative simulated fill price.
-                    fill_price = float(limit_price)\n                    gross = fill_price * int(quantity)
+                    fill_price = float(limit_price)
+                    gross = fill_price * int(quantity)
                     fee_rate = buy_fee_rate if side == Side.BUY.value else sell_fee_rate
                     fees = gross * fee_rate
                     tax = gross * sell_tax_rate if side == Side.SELL.value else 0.0
