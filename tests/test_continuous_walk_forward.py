@@ -12,8 +12,8 @@ def flat_frame(n=450):
     dates = pd.bdate_range("2021-01-04", periods=n)
     close = np.full(n, 100.0)
     return pd.DataFrame({
-        "date": dates, "open": close, "high": close + 0.2,
-        "low": close - 0.2, "close": close,
+        "date": dates, "open": close, "high": close + 0.05,
+        "low": close - 0.05, "close": close,
         "volume": np.full(n, 1_000_000), "atr": np.full(n, 0.1),
     })
 
