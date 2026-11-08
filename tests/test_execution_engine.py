@@ -145,6 +145,12 @@ class ExecutionEngineTests(unittest.TestCase):
                            open_order_count=0, daily_order_count=0, limits=self.engine.limits,
                            now=datetime(2026, 11, 9, 13, 31, tzinfo=TZ))
 
+    def test_expire_same_day_orders_after_close(self):
+        order = self.engine.submit(self.intent(), cash=100000, positions={}, equity=100000, now=OPEN)
+        after_close = datetime(2026, 11, 9, 13, 31, tzinfo=TZ)
+        self.assertEqual(self.engine.expire_day_orders(after_close), 1)
+        self.assertEqual(self.engine.get_order(order.order_id).status, "EXPIRED")
+
     def test_expire_previous_day_accepted_orders(self):
         order = self.engine.submit(self.intent(), cash=100000, positions={},
                                    equity=100000, now=OPEN)
