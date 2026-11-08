@@ -31,6 +31,7 @@ class OrderStatus(str, Enum):
     ACCEPTED = "ACCEPTED"
     FILLED = "FILLED"
     CANCELLED = "CANCELLED"
+    EXPIRED = "EXPIRED"
 
 
 @dataclass(frozen=True)
@@ -137,6 +138,11 @@ def validate_order(intent: OrderIntent, *, cash: float, positions: dict[str, int
     if isinstance(intent.quantity, bool) or not isinstance(intent.quantity, int) or intent.quantity <= 0:
         raise ValueError("委託股數必須是正整數")
     price = _positive_decimal(intent.limit_price, "限價")
+    from taiwan_market_rules import is_valid_stock_tick
+    if not is_valid_stock_tick(price):
+        raise ValueError("限價不符合台股普通股票升降單位")
+    if intent.quantity % 1000 != 0:
+        raise ValueError("普通交易股數須為 1,000 股整數倍；零股需使用獨立零股撮合")
     notional = price * intent.quantity
     if notional > Decimal(str(limits.max_order_notional)):
         raise ValueError("超過單筆委託金額上限")
@@ -262,7 +268,12 @@ class PaperExecutionEngine:
             crossed = market <= limit_price if side == Side.BUY.value else market >= limit_price
             if not crossed:
                 raise ValueError("市場價格尚未觸及限價，委託維持等待")
-            gross = market * quantity
+            # A last-trade/one-minute close only proves that the limit was touched.
+            # Queue position and executable depth are unavailable, so fill at the
+            # submitted limit (conservative for both sides), never at a better
+            # observed last-trade price.
+            fill_price = float(limit_price)
+            gross = fill_price * quantity
             fees = gross * (buy_fee_rate if side == Side.BUY.value else sell_fee_rate)
             if side == Side.SELL.value:
                 fees += gross * sell_tax_rate
@@ -271,7 +282,7 @@ class PaperExecutionEngine:
                 UPDATE paper_orders SET status=?,message=?,filled_quantity=?,
                     average_fill_price=?,fees=?,updated_at=? WHERE order_id=?
             """, (OrderStatus.FILLED.value, "模擬限價成交（以觸發時市場價估算）",
-                  quantity, market, fees, stamp, order_id))
+                  quantity, fill_price, fees, stamp, order_id))
             conn.commit()
         result = self.get_order(order_id)
         return result
@@ -305,6 +316,23 @@ class PaperExecutionEngine:
         if not row:
             raise KeyError("找不到模擬委託")
         return OrderResult(*row[:7], *row[7:10], created_at=row[10])
+
+    def expire_day_orders(self, now: datetime | None = None) -> int:
+        """Expire accepted day orders created before the current Taipei date."""
+        current = now or datetime.now(TZ)
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=TZ)
+        today = current.astimezone(TZ).date().isoformat()
+        stamp = current.astimezone(TZ).isoformat()
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            cursor = conn.execute(
+                "UPDATE paper_orders SET status=?,message=?,updated_at=? "
+                "WHERE status=? AND substr(created_at,1,10)<?",
+                (OrderStatus.EXPIRED.value, "當日有效委託已於交易日結束後到期",
+                 stamp, OrderStatus.ACCEPTED.value, today),
+            )
+            conn.commit()
+            return int(cursor.rowcount)
 
     def list_orders(self, limit: int = 200) -> list[dict]:
         with closing(sqlite3.connect(self.db_path)) as conn:
