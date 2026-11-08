@@ -92,6 +92,75 @@ def _score(result):
     return cagr + 0.10 * np.clip(sharpe, -2, 3) + 0.08 * np.log(max(pf, 0.05)) - 0.75 * drawdown
 
 
+
+def select_candidate(
+    frames,
+    *,
+    initial_capital=100_000,
+    max_positions=5,
+    risk_fraction=0.005,
+    exit_profile="baseline_atr2",
+    warmup=260,
+    min_validation_trades=8,
+):
+    """Choose a candidate using an inner chronological validation slice only.
+
+    The final outer walk-forward test window is never passed into this function.
+    Candidates are ranked on the later part of the supplied training history;
+    the earlier part supplies indicator warm-up and initial training context.
+    """
+    clean = {
+        code: frame.sort_values("date").reset_index(drop=True).copy()
+        for code, frame in frames.items()
+        if frame is not None and not frame.empty and "date" in frame
+    }
+    if not clean:
+        return {"status": "no_data", "selected_params": None, "ranking": pd.DataFrame()}
+    dates = sorted(set().union(*[
+        set(pd.to_datetime(frame["date"])) for frame in clean.values()
+    ]))
+    if len(dates) < int(warmup) + 100:
+        return {"status": "insufficient_history", "selected_params": None,
+                "available_sessions": len(dates), "ranking": pd.DataFrame()}
+    split = int(len(dates) * 0.70)
+    validation_start = pd.Timestamp(dates[split])
+    rows = []
+    best_params, best_score = None, -np.inf
+    for params in candidate_grid():
+        overrides = _prepare_overrides(clean, params)
+        result = shared_capital_backtest(
+            clean, "AI 候選內部驗證",
+            initial_capital=initial_capital,
+            max_positions=max_positions,
+            risk_fraction=risk_fraction,
+            warmup=warmup,
+            exit_profile=exit_profile,
+            trading_start_date=validation_start,
+            report_start_date=validation_start,
+            signal_overrides=overrides,
+        )
+        stats = trade_statistics(result["trades"])
+        trades = int(stats.get("交易筆數", len(result["trades"])))
+        score = _score(result) if trades >= int(min_validation_trades) else -10.0
+        rows.append({
+            **params,
+            "驗證年化報酬": result["metrics"].get("年化報酬", 0.0),
+            "驗證最大回撤": result["metrics"].get("最大回撤", 0.0),
+            "驗證Sharpe": result["metrics"].get("Sharpe", 0.0),
+            "驗證Profit Factor": stats.get("Profit Factor", 0.0),
+            "驗證交易筆數": trades,
+            "研究分數": score,
+        })
+        if score > best_score:
+            best_score, best_params = score, dict(params)
+    ranking = pd.DataFrame(rows).sort_values("研究分數", ascending=False)
+    if best_params is None or best_score <= -10.0:
+        return {"status": "no_robust_candidate", "selected_params": None,
+                "validation_start": validation_start, "ranking": ranking}
+    return {"status": "ok", "selected_params": best_params,
+            "selection_score": float(best_score),
+            "validation_start": validation_start, "ranking": ranking}
+
 def evolve_strategy(
     frames,
     initial_capital=100_000,
