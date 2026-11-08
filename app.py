@@ -1562,14 +1562,20 @@ with t7:
     else:
         st.info("尚未偵測到常駐 Paper Worker。需在持久化主機啟動 Docker Compose 的 worker 服務。")
     account_snapshot = paper_account.snapshot()
+    account_integrity = paper_account.integrity_report()
     account_positions = {p["symbol"]: int(p["quantity"]) for p in account_snapshot["positions"]}
     account_costs = {p["symbol"]: float(p["average_cost"]) for p in account_snapshot["positions"]}
     adaptive_monitor.clear_absent_positions(account_positions.keys())
     session_now = datetime.now(TZ)
     expired_orders = engine.expire_day_orders(session_now)
     market_day_open, market_day_note = trading_day_status(session_now.date())
-    session_open = taiwan_regular_session(session_now) and market_day_open
-    st.write("交易時段：", "台股一般盤中" if session_open else "非台股一般盤中時段")
+    session_open = taiwan_regular_session(session_now) and market_day_open and account_integrity["ok"]
+    if not account_integrity["ok"]:
+        st.error("帳本完整性異常：所有新增委託、動態出場及模擬撮合功能已鎖定。請先下載備份並查明差異。")
+        for issue in account_integrity["issues"]:
+            st.warning(issue)
+    else:
+        st.write("交易時段：", "台股一般盤中" if session_open else "非台股一般盤中時段")
     if not market_day_open:
         st.warning(market_day_note)
     else:
@@ -1751,15 +1757,10 @@ with t7:
     m2.metric("持股市值估算",f"NTD {position_value:,.0f}")
     m3.metric("帳戶資產估算",f"NTD {equity_now:,.0f}")
     m4.metric("今日已實現損益",f"NTD {daily_pnl:,.0f}")
-    ledger_check = paper_account.integrity_report()
-    if ledger_check["ok"]:
+    if account_integrity["ok"]:
         st.success(
-            f"帳本完整性檢查通過｜SQLite 正常｜{ledger_check['fill_count']} 筆成交已與現金及持股核對"
+            f"帳本完整性檢查通過｜SQLite 正常｜{account_integrity['fill_count']} 筆成交已與現金及持股核對"
         )
-    else:
-        st.error("帳本完整性檢查異常，請先停止新增模擬委託並下載備份。")
-        for issue in ledger_check["issues"]:
-            st.warning(issue)
     if account_snapshot["positions"]:
         st.dataframe(pd.DataFrame(account_snapshot["positions"]),use_container_width=True,hide_index=True)
     else:
