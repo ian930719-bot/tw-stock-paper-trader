@@ -55,6 +55,7 @@ class OrderIntent:
     reason: str
     idempotency_key: str
     instrument_type: str = "stock"
+    odd_lot: bool = False
 
 
 @dataclass
@@ -142,8 +143,11 @@ def validate_order(intent: OrderIntent, *, cash: float, positions: dict[str, int
     from taiwan_market_rules import is_valid_stock_tick
     if not is_valid_stock_tick(price, intent.instrument_type):
         raise ValueError("限價不符合台股普通股票升降單位")
-    if intent.quantity % 1000 != 0:
-        raise ValueError("普通交易股數須為 1,000 股整數倍；零股需使用獨立零股撮合")
+    if intent.odd_lot:
+        if intent.quantity >= 1000:
+            raise ValueError("零股委託股數須為 1 至 999 股")
+    elif intent.quantity % 1000 != 0:
+        raise ValueError("整股委託股數須為 1,000 股整數倍；1 至 999 股請選擇零股委託")
     notional = price * intent.quantity
     if notional > Decimal(str(limits.max_order_notional)):
         raise ValueError("超過單筆委託金額上限")
@@ -155,8 +159,17 @@ def validate_order(intent: OrderIntent, *, cash: float, positions: dict[str, int
         raise ValueError("每日已實現損益無法核對，為安全起見停止自動委託")
     if daily_realized_pnl <= -abs(limits.max_daily_loss):
         raise ValueError("已觸及每日虧損停手機制")
-    if limits.require_regular_session and not taiwan_regular_session(now):
-        raise ValueError("目前不在台股一般盤中交易時段")
+    if limits.require_regular_session:
+        current = now or datetime.now(TZ)
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=TZ)
+        current = current.astimezone(TZ)
+        clock = current.time().replace(tzinfo=None)
+        if intent.odd_lot:
+            if current.weekday() >= 5 or not (time(9, 0) <= clock <= time(13, 30)):
+                raise ValueError("盤中零股委託時間為交易日 09:00–13:30")
+        elif not taiwan_regular_session(current):
+            raise ValueError("目前不在台股一般盤中交易時段")
     held = int(positions.get(symbol, 0))
     if intent.side == Side.SELL:
         if intent.quantity > held:
