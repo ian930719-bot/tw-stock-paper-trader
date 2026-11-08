@@ -1,0 +1,55 @@
+name: Taiwan Stock OOS Performance Validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "performance_validation.py"
+      - ".github/workflows/performance-validation.yml"
+      - "research_engine.py"
+      - "walk_forward.py"
+      - "strategy_evolution.py"
+      - "corporate_actions.py"
+      - "analytics.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: performance-validation-main
+  cancel-in-progress: false
+
+jobs:
+  performance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+
+      - name: Install research dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run historical walk-forward performance test
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: python performance_validation.py
+
+      - name: Upload reproducible performance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taiwan-stock-oos-performance-${{ github.run_number }}
+          path: performance-artifacts/
+          if-no-files-found: warn
+          retention-days: 30
