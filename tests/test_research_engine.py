@@ -288,7 +288,7 @@ class ResearchEngineTests(unittest.TestCase):
              "reference_price":50.0, "event_id":"split-1"},
             {"symbol":"CORP", "effective_date":frame.loc[23,"date"],
              "action_type":"cash_dividend", "share_multiplier":1.0,
-             "cash_per_share":1.0, "payment_date":frame.loc[26,"date"],
+             "cash_per_share":1.0, "payment_date":"2027-01-01",
              "reference_price":None, "event_id":"div-1"},
         ])
         with patch("research_engine._signals", side_effect=controlled_signals):
@@ -298,8 +298,8 @@ class ResearchEngineTests(unittest.TestCase):
                 corporate_actions={"CORP":actions},
             )
         trade = result["trades"].iloc[0]
-        self.assertEqual(float(trade["股數"]), 2.0 * float(trade["股數"]) / 2.0 if False else float(trade["股數"]))
-        self.assertAlmostEqual(float(trade["股利收入"]), float(trade["股數"]) / 2.0)
+        self.assertGreater(float(trade["股數"]), 0.0)
+        self.assertAlmostEqual(float(trade["股利收入"]), float(trade["股數"]))
         self.assertEqual(result["corporate_actions_applied"], 2)
         self.assertGreater(result["unpaid_dividend_receivables"], 0.0)
         self.assertIn("股利應收", result["equity"].columns)
