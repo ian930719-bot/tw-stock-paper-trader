@@ -18,6 +18,7 @@ from analytics import equity_risk_metrics, trade_statistics
 from historical_store import get_incremental_history, price_cache_summary
 from execution_engine import PaperExecutionEngine, OrderIntent, RiskLimits, Side, taiwan_regular_session, realized_pnl_from_trades
 from paper_account import PaperAccount
+from stop_monitor import StopMonitor
 st.set_page_config(page_title="台股模擬交易",layout="wide")
 TZ=ZoneInfo("Asia/Taipei")
 from stock_universe import fetch_stock_universe, universe_summary, StockUniverseError
@@ -765,6 +766,7 @@ with t7:
     limits = RiskLimits()
     engine = PaperExecutionEngine(limits=limits)
     paper_account = PaperAccount(engine.db_path, initial_cash=float(capital))
+    stop_monitor = StopMonitor(engine.db_path, stop_loss_pct=0.05, take_profit_pct=0.10, trailing_stop_pct=0.05)
     account_snapshot = paper_account.snapshot()
     account_positions = {p["symbol"]: int(p["quantity"]) for p in account_snapshot["positions"]}
     account_costs = {p["symbol"]: float(p["average_cost"]) for p in account_snapshot["positions"]}
@@ -891,6 +893,60 @@ with t7:
     else:
         st.info("目前模擬帳戶沒有持股。")
     st.caption("持股市值使用當前可取得報價；若無報價則暫以平均成本估算。帳戶資料存在執行環境 SQLite，雲端重啟可能清除。")
+    st.subheader("停損／停利／移動停利監控")
+    st.caption("固定停損 5%、停利 10%、移動停利 5%；僅使用新鮮盤中報價。觸發後建立受風控限制的模擬限價賣單，不會直接市價賣出。每次仍需按下掃描按鈕；不是背景常駐監控。")
+    if st.button("掃描持倉停損／停利並建立模擬退出委託", disabled=not session_open):
+        stop_created = []
+        current_orders = engine.list_orders()
+        pending_sell_symbols = {o["symbol"] for o in current_orders
+                                if o["status"] == "ACCEPTED" and o["side"] == "SELL"}
+        pending_count = sum(1 for o in current_orders if o["status"] == "ACCEPTED")
+        today_count = sum(1 for o in current_orders
+                          if str(o["created_at"]).startswith(today_for_risk))
+        current_equity = float(account_snapshot["cash"]) + sum(
+            int(p["quantity"]) * float(quote_lookup.get(p["symbol"], {}).get("盤中參考價") or p["average_cost"])
+            for p in account_snapshot["positions"])
+        for q in quotes:
+            if q.get("報價狀態") != "盤中更新" or q.get("盤中參考價") is None:
+                continue
+            try:
+                signal = stop_monitor.evaluate_quote(
+                    q["代號"], float(q["盤中參考價"]), str(q.get("報價時間") or ""),
+                    "Yahoo Finance 1-minute", now=session_now)
+            except ValueError:
+                continue
+            if not signal or signal["symbol"] in pending_sell_symbols:
+                continue
+            held = int(account_positions.get(signal["symbol"], 0))
+            qty = min(held, signal["quantity"],
+                      int(limits.max_order_notional / signal["price"]))
+            if qty <= 0:
+                continue
+            intent = OrderIntent(
+                symbol=signal["symbol"], side=Side.SELL, quantity=qty,
+                limit_price=float(signal["price"]), reason=signal["reason"],
+                idempotency_key=f"stop-{signal['symbol']}-{signal['reason']}-{today_for_risk}-{signal['quote_time']}")
+            result = engine.submit(
+                intent, cash=float(account_snapshot["cash"]),
+                positions=account_positions, equity=current_equity,
+                daily_realized_pnl=daily_pnl, open_order_count=pending_count,
+                daily_order_count=today_count, now=session_now)
+            if result.status == "ACCEPTED":
+                pending_sell_symbols.add(signal["symbol"])
+                pending_count += 1
+                today_count += 1
+                stop_created.append({"代號":signal["symbol"],"觸發":signal["reason"],
+                                     "觸發價":signal["trigger_price"],"參考價":signal["price"],
+                                     "委託股數":qty,"委託狀態":result.status})
+        if stop_created:
+            st.success(f"已建立 {len(stop_created)} 筆停損／停利模擬限價委託。")
+            st.dataframe(pd.DataFrame(stop_created),use_container_width=True,hide_index=True)
+        else:
+            st.info("本輪沒有觸發條件，或沒有可建立的合規退出委託。")
+        st.rerun()
+    stop_events = stop_monitor.events()
+    if stop_events:
+        st.dataframe(pd.DataFrame(stop_events),use_container_width=True,hide_index=True)
     st.subheader("用盤中報價自動撮合")
     st.caption("只處理報價狀態為「盤中更新」的標的；來源標記 Yahoo Finance 1 分鐘資料，並由引擎再次檢查報價時間、120 秒新鮮度及交易時段。")
     if st.button("使用目前新鮮盤中報價撮合等待委託", disabled=not session_open):
@@ -942,4 +998,4 @@ with t7:
             pd.DataFrame(order_rows).to_csv(index=False).encode("utf-8-sig"),
             "paper_order_log.csv","text/csv"
         )
-    st.caption("目前自動策略可產生模擬買進與賣出委託：買進依 AI 多因子訊號與 ATR 風險距離控量；賣出依 EMA21、RSI、MACD 退出條件。已加入 SQLite 模擬帳戶成交後現金／持股同步及新鮮報價觸發撮合；目前仍需使用者按鈕觸發每輪報價撮合，尚未有背景常駐即時監控、停損監控、撤單重送或券商真實成交回報；不得視為已具備實盤自動交易能力。")
+    st.caption("目前自動策略可產生模擬買進與賣出委託：買進依 AI 多因子訊號與 ATR 風險距離控量；賣出依 EMA21、RSI、MACD 退出條件。已加入 SQLite 模擬帳戶成交後現金／持股同步及新鮮報價觸發撮合；目前仍需使用者按鈕觸發每輪報價撮合，尚未有背景常駐即時監控、撤單重送或券商真實成交回報；不得視為已具備實盤自動交易能力。")
