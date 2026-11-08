@@ -31,6 +31,35 @@ class ExecutionEngineTests(unittest.TestCase):
         base.update(kw)
         return OrderIntent(**base)
 
+    def test_engine_rejects_order_outside_official_price_band(self):
+        engine = PaperExecutionEngine(
+            str(Path(self.tmp.name) / "price-band.sqlite3"),
+            self.engine.limits,
+            price_limit_provider=lambda symbol, market: {
+                "no_price_limit": False, "lower_limit": 9, "upper_limit": 11
+            },
+        )
+        result = engine.submit(
+            self.intent(limit_price=12), cash=100000, positions={},
+            equity=100000, now=OPEN,
+        )
+        self.assertEqual(result.status, "REJECTED")
+        self.assertIn("漲跌停範圍", result.message)
+
+    def test_engine_accepts_order_inside_official_price_band(self):
+        engine = PaperExecutionEngine(
+            str(Path(self.tmp.name) / "price-band-ok.sqlite3"),
+            self.engine.limits,
+            price_limit_provider=lambda symbol, market: {
+                "no_price_limit": False, "lower_limit": 9, "upper_limit": 11
+            },
+        )
+        result = engine.submit(
+            self.intent(limit_price=10), cash=100000, positions={},
+            equity=100000, now=OPEN,
+        )
+        self.assertEqual(result.status, "ACCEPTED")
+
     def test_buy_order_accepted_within_limits(self):
         result = self.engine.submit(self.intent(), cash=100000, positions={},
                                     equity=100000, now=OPEN)
