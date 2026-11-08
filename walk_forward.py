@@ -106,6 +106,8 @@ def rolling_walk_forward(
         if not eq.empty:
             scale = chained_equity / float(initial_capital)
             segment = eq[["日期", "資產"]].copy()
+            segment["區段"] = len(window_rows)
+            segment["區段資產"] = segment["資產"]
             segment["資產"] = segment["資產"] * scale
             curves.append(segment)
             chained_equity = float(segment["資產"].iloc[-1])
