@@ -107,8 +107,10 @@ class PaperAccount:
             if account is None:
                 return {"ok": False, "status": "異常", "issues": ["找不到模擬帳戶主檔"]}
             initial_cash, actual_cash = map(float, account)
+            if not math.isfinite(initial_cash) or not math.isfinite(actual_cash):
+                return {"ok": False, "status": "異常", "issues": ["帳戶現金含非有限數值"]}
             fills = conn.execute(
-                "SELECT symbol,side,quantity,gross,fees,tax FROM paper_fills ORDER BY filled_at,fill_id"
+                "SELECT symbol,side,quantity,price,gross,fees,tax FROM paper_fills ORDER BY filled_at,fill_id"
             ).fetchall()
             actual_positions = {
                 str(symbol): int(quantity)
@@ -129,10 +131,15 @@ class PaperAccount:
 
         expected_cash = initial_cash
         expected_positions: dict[str, int] = {}
-        for symbol, side, quantity, gross, fees, tax in fills:
+        for symbol, side, quantity, price, gross, fees, tax in fills:
             quantity = int(quantity)
-            if quantity <= 0 or min(float(gross), float(fees), float(tax)) < 0:
-                return {"ok": False, "status": "異常", "issues": ["成交紀錄含不合法數量或金額"]}
+            amounts = [float(price), float(gross), float(fees), float(tax)]
+            if (
+                quantity <= 0 or not all(math.isfinite(value) for value in amounts)
+                or amounts[0] <= 0 or min(amounts[1:]) < 0
+                or abs(amounts[1] - amounts[0] * quantity) > 0.02
+            ):
+                return {"ok": False, "status": "異常", "issues": ["成交紀錄含不合法數量、價格或金額"]}
             if side == Side.BUY.value:
                 expected_cash -= float(gross) + float(fees)
                 expected_positions[str(symbol)] = expected_positions.get(str(symbol), 0) + quantity
@@ -210,7 +217,6 @@ class PaperAccount:
             market_open, calendar_note = self.calendar_checker(current.date())
         if not market_open:
             raise ValueError(f"官方交易日曆再次確認失敗，拒絕撮合：{calendar_note}")
-        from taiwan_price_limits import get_official_price_limit, validate_limit_price
         completed = []
         with closing(sqlite3.connect(self.db_path, timeout=15)) as conn:
             conn.isolation_level = None
