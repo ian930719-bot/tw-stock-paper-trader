@@ -75,13 +75,13 @@ def _parse_rows(rows, symbol, expected_date, market):
         raise PriceLimitUnavailable("交易所回傳格式不是資料列")
     code_aliases = ("證券代號", "股票代號", "SecuritiesCompanyCode", "SecurityCode",
                     "Code", "StockNo", "股票代碼")
-    date_aliases = ("資料日期", "日期", "Date", "TradingDate", "交易日期", "最近成交日")
+    date_aliases = ("資料日期", "日期", "Date", "TradingDate", "交易日期")
     ref_aliases = ("參考價", "當日參考價", "今日參考價", "次日參考價",
-                   "ReferencePrice", "TradingReferencePrice", "NextDayReferencePrice", "本日開盤競價基準")
+                   "ReferencePrice", "TradingReferencePrice", "NextDayReferencePrice", "NextReferencePrice", "本日開盤競價基準")
     up_aliases = ("漲停價", "次日漲停價", "漲停價格", "UpperLimitPrice",
-                  "LimitUpPrice", "NextDayLimitUpPrice", "HighLimitPrice", "本日漲停價")
+                  "LimitUpPrice", "NextDayLimitUpPrice", "HighLimitPrice", "NextLimitUp", "NextLimitUpPrice", "本日漲停價", "次日漲停價")
     down_aliases = ("跌停價", "次日跌停價", "跌停價格", "LowerLimitPrice",
-                    "LimitDownPrice", "NextDayLimitDownPrice", "LowLimitPrice", "本日跌停價")
+                    "LimitDownPrice", "NextDayLimitDownPrice", "LowLimitPrice", "NextLimitDown", "NextLimitDownPrice", "本日跌停價", "次日跌停價")
     matches = [row for row in rows if isinstance(row, dict) and _find_code(row) == str(symbol).upper()]
     if not matches:
         raise PriceLimitUnavailable(f"{market} 官方資料找不到證券 {symbol}")
@@ -92,7 +92,17 @@ def _parse_rows(rows, symbol, expected_date, market):
         lower = _number(row, down_aliases)
         # TPEX daily close feed explicitly publishes next-session reference and limits.
         # A source date must match the expected trading date to prevent stale fills.
-        if row_date and row_date != expected_date.isoformat():
+        if market == "上櫃":
+            # TPEx labels these as next-session limits. During today's session,
+            # the latest completed daily row must therefore be from a prior day.
+            if not row_date or row_date >= expected_date.isoformat():
+                continue
+            try:
+                if (expected_date - date.fromisoformat(row_date)).days > 4:
+                    continue
+            except ValueError:
+                continue
+        elif row_date and row_date != expected_date.isoformat():
             continue
         if ref is None or upper is None or lower is None:
             continue
