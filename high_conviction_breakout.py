@@ -21,7 +21,9 @@ def _features(frame: pd.DataFrame) -> pd.DataFrame:
     z["mom_126"] = close.pct_change(126)
     z["mom_63"] = close.pct_change(63)
     z["sma_50"] = close.rolling(50, min_periods=50).mean()
+    z["sma_50_lag20"] = z["sma_50"].shift(20)
     z["sma_200"] = close.rolling(200, min_periods=200).mean()
+    z["sma_200_lag20"] = z["sma_200"].shift(20)
     z["ema_21"] = close.ewm(span=21, adjust=False, min_periods=21).mean()
     z["prior_high_55"] = high.shift(1).rolling(55, min_periods=55).max()
     z["prior_low_20"] = low.shift(1).rolling(20, min_periods=20).min()
@@ -73,10 +75,14 @@ def build_high_conviction_breakout_overrides(
         trend = (
             (part["close"] > part["sma_50"])
             & (part["sma_50"] > part["sma_200"])
+            & (part["sma_50"] > part["sma_50_lag20"])
+            & (part["sma_200"] > part["sma_200_lag20"])
             & (part["mom_126"] > 0)
+            & (part["mom_63"] > 0)
         )
         breakout = (
             (part["close"] > part["prior_high_55"])
+            & (part["close"] <= part["prior_high_55"] * 1.08)
             & (part["volume"] >= float(volume_multiple) * part["volume_avg_20"])
         )
         entry = (
