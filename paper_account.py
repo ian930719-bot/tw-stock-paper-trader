@@ -138,16 +138,37 @@ class PaperAccount:
                 "SELECT side,quantity,filled_at FROM paper_fills WHERE symbol=? ORDER BY filled_at,fill_id",
                 (str(symbol),),
             ).fetchall()
+            actions = conn.execute(
+                "SELECT action_type,share_multiplier,effective_date FROM paper_corporate_actions "
+                "WHERE symbol=? ORDER BY effective_date,applied_at,event_id",
+                (str(symbol),),
+            ).fetchall()
+        timeline = [
+            (datetime.fromisoformat(str(filled_at)), "fill", (side, int(amount)))
+            for side, amount, filled_at in fills
+        ]
+        for action_type, multiplier, effective_date in actions:
+            timeline.append((
+                datetime.fromisoformat(str(effective_date) + "T00:00:00+08:00"),
+                "action", (action_type, float(multiplier)),
+            ))
+        timeline.sort(key=lambda item: item[0])
         quantity = 0
         opened_at = None
-        for side, amount, filled_at in fills:
-            amount = int(amount)
-            if side == Side.BUY.value:
-                if quantity <= 0:
-                    opened_at = str(filled_at)
-                quantity += amount
-            elif side == Side.SELL.value:
-                quantity -= amount
+        for stamp, kind, payload in timeline:
+            if kind == "fill":
+                side, amount = payload
+                if side == Side.BUY.value:
+                    if quantity <= 0:
+                        opened_at = stamp.isoformat()
+                    quantity += amount
+                elif side == Side.SELL.value:
+                    quantity -= amount
+                    if quantity <= 0:
+                        quantity = 0
+                        opened_at = None
+            elif payload[0] in {"stock_dividend", "stock_split", "capital_reduction", "par_value_change"}:
+                quantity = int(math.floor(quantity * payload[1] + 1e-9))
                 if quantity <= 0:
                     quantity = 0
                     opened_at = None
