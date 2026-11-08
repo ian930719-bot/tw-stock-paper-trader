@@ -874,6 +874,19 @@ with t7:
     st.subheader("模擬委託佇列與成交狀態")
     order_rows = engine.list_orders()
     st.dataframe(pd.DataFrame(order_rows),use_container_width=True,hide_index=True)
+    pending_orders = [order for order in order_rows if order["status"] == "ACCEPTED"]
+    if pending_orders:
+        pending_ids = [order["order_id"] for order in pending_orders]
+        cancel_id = st.selectbox(
+            "選擇要取消的等待委託", pending_ids,
+            format_func=lambda oid: next(
+                f"{item['symbol']} {item['side']} {item['quantity']} 股 @ {item['limit_price']}"
+                for item in pending_orders if item["order_id"] == oid
+            ),
+        )
+        if st.button("取消選取的模擬委託"):
+            cancelled = engine.cancel_order(cancel_id)
+            st.success(f"已取消 {cancelled.order_id}")
     if order_rows:
         st.download_button(
             "下載模擬委託紀錄 CSV",
