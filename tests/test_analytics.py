@@ -18,6 +18,18 @@ class AnalyticsTests(unittest.TestCase):
         self.assertGreaterEqual(result["平均曝險"], 0)
         self.assertLessEqual(result["平均曝險"], 1)
 
+    def test_cagr_uses_actual_elapsed_calendar_time_when_dates_exist(self):
+        equity = pd.DataFrame({
+            "日期": pd.to_datetime(["2020-01-01", "2021-01-01"]),
+            "資產": [100.0, 121.0],
+            "持倉市值": [100.0, 121.0],
+        })
+        result = equity_risk_metrics(equity, 100.0)
+        expected = 1.21 ** (365.25 / 366.0) - 1.0
+        self.assertAlmostEqual(result["年化波動率"], result["年化波動率"])
+        self.assertAlmostEqual(result["Calmar"], expected / abs(result["最大回撤"]) if result["最大回撤"] < 0 else 0.0)
+        self.assertAlmostEqual(result["平均曝險"], 1.0)
+
     def test_strategy_decay_report_flags_recent_reversal(self):
         dates = pd.bdate_range("2024-01-02", periods=140)
         rng = np.random.default_rng(17)
