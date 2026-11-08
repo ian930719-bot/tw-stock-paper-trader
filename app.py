@@ -19,6 +19,7 @@ from historical_store import get_incremental_history, price_cache_summary
 from execution_engine import PaperExecutionEngine, OrderIntent, RiskLimits, Side, taiwan_regular_session, realized_pnl_from_trades
 from paper_account import PaperAccount
 from stop_monitor import StopMonitor
+from strategy_exits import PROFILES, initial_stop, risk_position_size
 st.set_page_config(page_title="台股模擬交易",layout="wide")
 TZ=ZoneInfo("Asia/Taipei")
 from stock_universe import fetch_stock_universe, universe_summary, StockUniverseError
@@ -893,9 +894,33 @@ with t7:
     else:
         st.info("目前模擬帳戶沒有持股。")
     st.caption("持股市值使用當前可取得報價；若無報價則暫以平均成本估算。帳戶資料存在執行環境 SQLite，雲端重啟可能清除。")
-    st.subheader("停損／停利／移動停利監控")
-    st.caption("固定停損 5%、停利 10%、移動停利 5%；僅使用新鮮盤中報價。觸發後建立受風控限制的模擬限價賣單，不會直接市價賣出。每次仍需按下掃描按鈕；不是背景常駐監控。")
-    if st.button("掃描持倉停損／停利並建立模擬退出委託", disabled=not session_open):
+    st.subheader("策略化出場與風險預算（研究版）")
+    profile_key = st.selectbox("出場策略", list(PROFILES),
+        format_func=lambda key: PROFILES[key]["name"], key="exit_profile")
+    st.caption(PROFILES[profile_key]["description"])
+    entry_ref = st.number_input("假設進場價", min_value=0.01, value=100.0, step=1.0, key="exit_entry")
+    invalidation = st.number_input("技術失效價（Minervini 必填；其他策略選填）",
+        min_value=0.0, value=0.0, step=0.5, key="exit_invalidation")
+    atr_value = st.number_input("ATR（ATR 策略使用）", min_value=0.0, value=2.0, step=0.1, key="exit_atr")
+    atr_multiple = st.selectbox("ATR 倍數（待驗證）", [1.5, 2.0, 2.5, 3.0], index=1)
+    risk_pct = st.selectbox("帳戶單筆風險預算候選", [0.005, 0.0075, 0.01], index=0,
+        format_func=lambda x: f"{x:.2%}")
+    if st.button("計算策略停損與風險股數", key="calc_exit_profile"):
+        try:
+            kwargs = {"technical_invalidation": invalidation if invalidation > 0 else None}
+            if profile_key == "atr_dynamic":
+                kwargs.update({"atr": atr_value, "atr_multiple": atr_multiple})
+            stop_result = initial_stop(entry_ref, profile_key, **kwargs)
+            sizing = risk_position_size(float(capital), risk_pct, entry_ref,
+                                        stop_result["stop_price"])
+            st.write({"策略停損": stop_result, "風險預算／股數": sizing})
+        except ValueError as exc:
+            st.error(str(exc))
+    st.caption("股數僅按帳戶風險預算與每股停損距離計算；尚未扣除現金、曝險、交易單位、費稅及流動性限制。候選參數未經台股樣本外驗證，不構成交易建議。")
+    st.divider()
+    st.subheader("舊版固定百分比退出（實驗功能，預設停用）")
+    st.warning("固定 5% 停損／10% 停利／5% 移動停利沒有完成台股樣本外驗證，不應作為正式策略。只有明確勾選後才可手動掃描；仍只建立模擬限價單。")
+    if st.checkbox("我了解限制，暫時啟用舊版固定百分比實驗規則", value=False, key="enable_experimental_fixed") and st.button("掃描持倉並建立實驗性模擬退出委託", disabled=not session_open):
         stop_created = []
         current_orders = engine.list_orders()
         pending_sell_symbols = {o["symbol"] for o in current_orders
