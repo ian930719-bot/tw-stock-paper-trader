@@ -2,7 +2,9 @@
 import unittest
 import pandas as pd
 
-from corporate_actions import normalize_corporate_actions, validate_action_frame
+from corporate_actions import (
+    normalize_corporate_actions, validate_action_frame, point_in_time_recalculate,
+)
 
 
 class CorporateActionTests(unittest.TestCase):
@@ -42,6 +44,74 @@ class CorporateActionTests(unittest.TestCase):
         )
         self.assertEqual(len(events), 3)
         self.assertEqual(sorted(events["share_multiplier"].astype(float).tolist()), [2.0, 2.0, 4.0])
+
+    def test_official_dividend_result_price_factor_is_attached_once(self):
+        events = normalize_corporate_actions(
+            "2330",
+            dividends=[{
+                "CashExDividendTradingDate":"2026-07-01",
+                "CashEarningsDistribution":5.0,
+                "StockExDividendTradingDate":"2026-07-01",
+                "StockEarningsDistribution":1.0,
+            }],
+            dividend_results=[{
+                "date":"2026-07-01","stock_id":"2330",
+                "before_price":100.0,"after_price":86.0,
+                "reference_price":86.0,
+            }],
+        )
+        self.assertEqual(len(events), 2)
+        self.assertTrue((events["price_adjustment_factor"] == 0.86).all())
+
+    def test_point_in_time_recalculation_does_not_rewrite_pre_ex_date_features(self):
+        frame = pd.DataFrame({
+            "date":pd.date_range("2026-01-01", periods=6),
+            "open":[80,90,100,50,55,60],
+            "high":[81,91,101,51,56,61],
+            "low":[79,89,99,49,54,59],
+            "close":[80,90,100,50,55,60],
+            "volume":[100,100,100,200,200,200],
+        })
+        actions = pd.DataFrame([{
+            "symbol":"2330","effective_date":"2026-01-04",
+            "action_type":"stock_split","share_multiplier":2.0,
+            "cash_per_share":0.0,"payment_date":None,
+            "reference_price":50.0,"price_adjustment_factor":0.5,
+            "event_id":"split-pit",
+        }])
+        def builder(z):
+            close = pd.to_numeric(z["close"])
+            return pd.DataFrame({
+                "sma3":close.rolling(3,min_periods=1).mean(),
+                "return1":close.pct_change(),
+                "volume3":pd.to_numeric(z["volume"]).rolling(3,min_periods=1).mean(),
+            })
+        result = point_in_time_recalculate(frame, actions, builder)
+        self.assertAlmostEqual(float(result.loc[2,"sma3"]), 90.0)
+        self.assertAlmostEqual(float(result.loc[3,"sma3"]), 45.0)
+        self.assertAlmostEqual(float(result.loc[3,"return1"]), 0.0)
+        self.assertAlmostEqual(float(result.loc[3,"volume3"]), 200.0)
+
+    def test_cash_dividend_price_gap_is_adjusted_only_from_ex_date(self):
+        frame = pd.DataFrame({
+            "date":pd.date_range("2026-01-01", periods=4),
+            "open":[100,100,90,91],"high":[101,101,91,92],
+            "low":[99,99,89,90],"close":[100,100,90,91],
+            "volume":[100,100,100,100],
+        })
+        actions = pd.DataFrame([{
+            "symbol":"2330","effective_date":"2026-01-03",
+            "action_type":"cash_dividend","share_multiplier":1.0,
+            "cash_per_share":10.0,"payment_date":"2026-01-20",
+            "reference_price":90.0,"price_adjustment_factor":0.9,
+            "event_id":"cash-pit",
+        }])
+        def builder(z):
+            close = pd.to_numeric(z["close"])
+            return pd.DataFrame({"return1":close.pct_change()})
+        result = point_in_time_recalculate(frame, actions, builder)
+        self.assertAlmostEqual(float(result.loc[1,"return1"]), 0.0)
+        self.assertAlmostEqual(float(result.loc[2,"return1"]), 0.0)
 
     def test_invalid_action_ratios_are_filtered(self):
         events = pd.DataFrame([{
