@@ -68,3 +68,15 @@ streamlit run app.py
 python -m py_compile app.py research_engine.py market_data.py analytics.py stock_universe.py historical_store.py tests/test_research_engine.py tests/test_market_data.py tests/test_analytics.py tests/test_stock_universe.py tests/test_historical_store.py
 python -m unittest discover -s tests -v
 ```
+
+## staged 自動交易架構（初期資金 NT$100,000）
+
+目前專案採 staged 路線：先完成自動策略與模擬交易驗證，再評估真實券商交易。預設模擬本金為 NT$100,000；新帳戶或完全沒有委託、成交及持倉的空帳戶，會套用此設定。已有交易紀錄的帳戶不會因設定變更而覆寫資金或帳本。
+
+- `trading_config.py`：集中管理初期資金及保守風控預設。初始單筆委託上限 NT$20,000、單一標的曝險 NT$25,000、總曝險 NT$80,000、每日已實現虧損停手 NT$2,000、最多 3 筆未完成委託、每日最多 8 筆委託、單筆風險預算 NT$500；不允許放空。這些是工程保護值，不代表可達成的報酬或最大損失保證。
+- `broker_gateway.py`：定義未來券商 Adapter 介面（帳戶、下單、撤單、未完成委託及成交回報）。目前只有 `UnconfiguredBroker`，所有實盤操作都會明確拒絕，不會假裝成功。
+- `trading_mode.py`：staged/live 模式閘門。即使檢查清單全數勾選，仍須提供真正標示為 live 的券商 Adapter 才能進入 LIVE；目前沒有任何實盤 Adapter。
+- `tests/test_staged_trading.py`：驗證 10 萬元初始資金、風控上限、實盤鎖定及未設定券商時拒絕下單。
+
+### 尚未完成、不得宣稱已自動實盤
+券商尚未指定，因此目前不會登入券商帳戶或送出真實委託。現有 Streamlit 介面仍以使用者觸發每輪模擬撮合為主，並非雲端常駐背景交易服務。要達到真正無人值守的全自動實盤，仍需選定券商、完成官方 API Adapter、使用安全憑證管理、部署常駐 Worker／排程器、可靠持久化資料庫、即時行情來源、券商委託與成交回報同步、斷線復原及人工緊急停止演練。任何實盤啟用前都必須通過完整模擬及小額驗證。
