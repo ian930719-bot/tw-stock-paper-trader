@@ -71,6 +71,7 @@ class OrderResult:
     average_fill_price: float | None = None
     fees: float = 0.0
     created_at: str = ""
+    odd_lot: bool = False
 
 
 def realized_pnl_from_trades(trades: list[dict], trading_date: str) -> float | None:
@@ -215,16 +216,20 @@ class PaperExecutionEngine:
                     fees REAL NOT NULL DEFAULT 0,
                     reason TEXT NOT NULL,
                     created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
+                    updated_at TEXT NOT NULL,
+                    odd_lot INTEGER NOT NULL DEFAULT 0
                 )
             """)
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(paper_orders)")}
+            if "odd_lot" not in columns:
+                conn.execute("ALTER TABLE paper_orders ADD COLUMN odd_lot INTEGER NOT NULL DEFAULT 0")
             conn.commit()
 
     def _existing(self, key: str):
         with closing(sqlite3.connect(self.db_path)) as conn:
             row = conn.execute(
                 "SELECT order_id,symbol,side,quantity,limit_price,status,message,"
-                "filled_quantity,average_fill_price,fees,created_at "
+                "filled_quantity,average_fill_price,fees,created_at,odd_lot "
                 "FROM paper_orders WHERE idempotency_key=?", (key,)
             ).fetchone()
         return row
@@ -235,7 +240,7 @@ class PaperExecutionEngine:
                now: datetime | None = None) -> OrderResult:
         existing = self._existing(intent.idempotency_key)
         if existing:
-            return OrderResult(*existing[:7], *existing[7:10], created_at=existing[10])
+            return OrderResult(*existing[:7], *existing[7:10], created_at=existing[10], odd_lot=bool(existing[11]))
         try:
             validate_order(
                 intent, cash=cash, positions=positions, equity=equity,
@@ -254,14 +259,14 @@ class PaperExecutionEngine:
             conn.execute("""
                 INSERT OR IGNORE INTO paper_orders(
                     order_id,idempotency_key,symbol,side,quantity,limit_price,status,
-                    message,reason,created_at,updated_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                    message,reason,created_at,updated_at,odd_lot
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
             """, (order_id, intent.idempotency_key, intent.symbol.upper(),
                   intent.side.value, intent.quantity, float(intent.limit_price),
-                  status, message, intent.reason, created, created))
+                  status, message, intent.reason, created, created, int(intent.odd_lot)))
             conn.commit()
         row = self._existing(intent.idempotency_key)
-        return OrderResult(*row[:7], *row[7:10], created_at=row[10])
+        return OrderResult(*row[:7], *row[7:10], created_at=row[10], odd_lot=bool(row[11]))
 
     def match_limit(self, order_id: str, market_price: float, *,
                     buy_fee_rate: float = 0.001425,
@@ -324,7 +329,7 @@ class PaperExecutionEngine:
         with closing(sqlite3.connect(self.db_path)) as conn:
             row = conn.execute(
                 "SELECT order_id,symbol,side,quantity,limit_price,status,message,"
-                "filled_quantity,average_fill_price,fees,created_at "
+                "filled_quantity,average_fill_price,fees,created_at,odd_lot "
                 "FROM paper_orders WHERE order_id=?", (order_id,)
             ).fetchone()
         if not row:
@@ -356,5 +361,5 @@ class PaperExecutionEngine:
                 "FROM paper_orders ORDER BY created_at DESC LIMIT ?", (int(limit),)
             ).fetchall()
         fields = ["order_id","symbol","side","quantity","limit_price","status",
-                  "message","filled_quantity","average_fill_price","fees","reason","created_at"]
+                  "message","filled_quantity","average_fill_price","fees","reason","created_at","odd_lot"]
         return [dict(zip(fields, row)) for row in rows]
