@@ -58,6 +58,7 @@ def rolling_walk_forward(
     min_test_days: int = 40,
     progress_callback: Callable[[int, int, str], None] | None = None,
     selection_cache: OrderedDict | None = None,
+    corporate_actions: dict[str, pd.DataFrame] | None = None,
 ) -> dict:
     """Evaluate fixed rules across rolling, non-overlapping OOS windows.
 
@@ -196,6 +197,7 @@ def rolling_walk_forward(
             fee=fee, sell_tax=sell_tax, slippage=slippage, warmup=0,
             report_start_date=start_date, trading_start_date=start_date,
             exit_profile=exit_profile, signal_overrides=signal_overrides,
+            corporate_actions=corporate_actions,
         )
         eq = result["equity"].copy()
         trades = result["trades"].copy()
