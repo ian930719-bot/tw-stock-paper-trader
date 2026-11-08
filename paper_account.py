@@ -28,8 +28,12 @@ class PaperAccount:
             conn.execute("""CREATE TABLE IF NOT EXISTS paper_positions (
                 symbol TEXT PRIMARY KEY,
                 quantity INTEGER NOT NULL CHECK(quantity >= 0),
-                average_cost REAL NOT NULL CHECK(average_cost >= 0)
+                average_cost REAL NOT NULL CHECK(average_cost >= 0),
+                position_version INTEGER NOT NULL DEFAULT 1
             )""")
+            position_columns = {row[1] for row in conn.execute("PRAGMA table_info(paper_positions)")}
+            if "position_version" not in position_columns:
+                conn.execute("ALTER TABLE paper_positions ADD COLUMN position_version INTEGER NOT NULL DEFAULT 1")
             conn.execute("""CREATE TABLE IF NOT EXISTS paper_fills (
                 fill_id TEXT PRIMARY KEY,
                 order_id TEXT NOT NULL UNIQUE,
@@ -138,8 +142,8 @@ class PaperAccount:
                         new_qty = held + int(quantity)
                         new_avg = ((held * avg_cost) + gross + fees) / new_qty
                         conn.execute(
-                            "INSERT INTO paper_positions(symbol,quantity,average_cost) VALUES(?,?,?) "
-                            "ON CONFLICT(symbol) DO UPDATE SET quantity=excluded.quantity,average_cost=excluded.average_cost",
+                            "INSERT INTO paper_positions(symbol,quantity,average_cost,position_version) VALUES(?,?,?,1) "
+                            "ON CONFLICT(symbol) DO UPDATE SET quantity=excluded.quantity,average_cost=excluded.average_cost,position_version=paper_positions.position_version+1",
                             (symbol.upper(), new_qty, new_avg),
                         )
                         conn.execute("UPDATE paper_account SET cash=cash-? WHERE id=1", (debit,))
@@ -153,7 +157,7 @@ class PaperAccount:
                         realized = gross - fees - tax - avg_cost * int(quantity)
                         new_qty = held - int(quantity)
                         conn.execute(
-                            "UPDATE paper_positions SET quantity=?,average_cost=? WHERE symbol=?",
+                            "UPDATE paper_positions SET quantity=?,average_cost=?,position_version=position_version+1 WHERE symbol=?",
                             (new_qty, avg_cost if new_qty else 0.0, symbol.upper()),
                         )
                         conn.execute("UPDATE paper_account SET cash=cash+? WHERE id=1", (gross - fees - tax,))
