@@ -276,6 +276,25 @@ class PaperExecutionEngine:
         result = self.get_order(order_id)
         return result
 
+    def cancel_order(self, order_id: str, now: datetime | None = None) -> OrderResult:
+        stamp = (now or datetime.now(TZ)).astimezone(TZ).isoformat()
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            cursor = conn.execute(
+                "UPDATE paper_orders SET status=?,message=?,updated_at=? "
+                "WHERE order_id=? AND status=?",
+                (OrderStatus.CANCELLED.value, "模擬委託已取消", stamp,
+                 order_id, OrderStatus.ACCEPTED.value),
+            )
+            conn.commit()
+            if cursor.rowcount == 0:
+                exists = conn.execute(
+                    "SELECT status FROM paper_orders WHERE order_id=?", (order_id,)
+                ).fetchone()
+                if not exists:
+                    raise KeyError("找不到模擬委託")
+                raise ValueError("只有等待中的模擬委託可以取消")
+        return self.get_order(order_id)
+
     def get_order(self, order_id: str) -> OrderResult:
         with closing(sqlite3.connect(self.db_path)) as conn:
             row = conn.execute(
