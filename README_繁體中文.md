@@ -69,6 +69,55 @@ python -m py_compile app.py research_engine.py market_data.py analytics.py stock
 python -m unittest discover -s tests -v
 ```
 
+## 常駐模擬交易 Worker（Docker Compose）
+
+本專案新增獨立的 paper_worker.py，不依賴 Streamlit 頁面是否開啟。Worker 與網頁服務透過同一個 Docker named volume 共用交易 SQLite 與歷史行情 SQLite；主機重啟後資料仍保留在該 volume。
+
+### 啟動方式
+
+~~~bash
+cp .env.example .env
+# 編輯 .env：設定 PAPER_WATCHLIST；確認資金與標的後，才將 PAPER_AUTO_ENTRIES 改為 true
+docker compose up -d --build
+docker compose ps
+docker compose logs -f paper-worker
+~~~
+
+網頁預設位於 http://localhost:8501。Worker 每 30 秒輪詢一次，預設最多監控 30 檔；觀察清單格式為 2330:上市,6488:上櫃。持倉標的也必須放在觀察清單，Worker 才能取得市場別與報價以管理退出。
+
+### Worker 執行規則
+
+- 盤中使用 Yahoo Finance 1 分鐘行情；報價時間必須在 60 秒內，過期、時間錯誤或來源缺失一律不交易。
+- 日線歷史優先 FinMind TaiwanStockPriceAdj，必要時才使用 Yahoo Finance 還原日線備援；只使用今日以前已完成的日線，至少 260 根才計算三種策略訊號。
+- 三種策略（Minervini 趨勢模板、O'Neil CAN SLIM 技術代理、Livermore 順勢突破）以訊號共識數及 20 日動能排序；這是可稽核的規則策略，不宣稱是已驗證的機器學習超額報酬模型。
+- 新進場依 NT$500 單筆風險預算，再受 NT$20,000 單筆委託、NT$25,000 單一標的、NT$80,000 總曝險、現金及交易筆數限制約束。
+- 每個報價時間戳只處理一次；Worker 使用 SQLite 租約避免兩個程序同時操盤，並保存心跳、成交、錯誤與策略事件。
+- 動態出場使用 PAPER_EXIT_PROFILE 與 PAPER_ATR_MULTIPLE；預設 ATR 動態策略。Worker 會在 09:00–13:30 管理持倉，買進只在一般盤 09:00–13:25 執行。
+- PAPER_AUTO_ENTRIES 預設為 false。設為 true 才會建立自動買進模擬委託；不論此設定為何，Worker 都不可能送出真實券商委託。
+
+### 環境變數
+
+| 變數 | 用途 |
+|---|---|
+| PAPER_WATCHLIST | 必填觀察清單，最多 30 檔，格式如 2330:上市,6488:上櫃 |
+| PAPER_AUTO_ENTRIES | 自動買進模擬委託開關，預設 false |
+| PAPER_EXIT_PROFILE | atr_dynamic、oneil_growth 或 minervini_sepa |
+| PAPER_ATR_MULTIPLE | ATR 移動停損倍數，預設 2.0 |
+| PAPER_ETF_SYMBOLS | 以逗號分隔的 ETF 代號，使用 ETF 升降單位 |
+| PAPER_WORKER_INTERVAL_SECONDS | 輪詢秒數，最少 10 秒，預設 30 秒 |
+| FINMIND_TOKEN | 可選 FinMind API Token |
+
+停止服務：docker compose down。若要連同模擬帳本資料一併刪除，才使用 docker compose down -v（此操作會刪除持久化交易資料，請勿誤用）。
+
+### 重要限制
+
+- Docker Compose 必須部署在持續運作且有持久化磁碟的主機（例如自行管理的 VPS）；Streamlit Community Cloud 不會因 GitHub 更新而自動啟動這個常駐 Worker。
+- Yahoo Finance 1 分鐘行情可能延遲或中斷；60 秒門檻會因此跳過交易，不代表行情是交易所認證即時報價。
+- 目前只掃描使用者設定的最多 30 檔，不會對全市場數千檔逐檔抓取日線，避免超過資料服務 API 配額。
+- 模擬撮合仍以報價觸及限價作為成交假設，不含真實委託簿、排隊順位、部分成交與市場衝擊。
+- Worker 與 Streamlit 必須使用同一組 EXECUTION_DB_PATH、MARKET_DB_PATH 及共享資料卷；若分開部署或使用不同磁碟，帳本不會自動同步。
+- 自動進場是多策略技術規則，不代表已經訓練或驗證出可持續獲利的 AI 模型。需先長期模擬並檢查扣除成本後的樣本外績效。
+
 ## staged 自動交易架構（初期資金 NT$100,000）
 
 目前專案採 staged 路線：先完成自動策略與模擬交易驗證，再評估真實券商交易。預設模擬本金為 NT$100,000；新帳戶或完全沒有委託、成交及持倉的空帳戶，會套用此設定。已有交易紀錄的帳戶不會因設定變更而覆寫資金或帳本。
@@ -80,4 +129,4 @@ python -m unittest discover -s tests -v
 - `tests/test_adaptive_exit_monitor.py`：驗證 ATR 移動停損、Minervini 結構失效與 R 倍數、O'Neil 獲利檢視、報價新鮮度及持倉風險狀態。
 
 ### 尚未完成、不得宣稱已自動實盤
-券商尚未指定，因此目前不會登入券商帳戶或送出真實委託。現有 Streamlit 介面仍以使用者觸發每輪模擬撮合為主，並非雲端常駐背景交易服務。要達到真正無人值守的全自動實盤，仍需選定券商、完成官方 API Adapter、使用安全憑證管理、部署常駐 Worker／排程器、可靠持久化資料庫、即時行情來源、券商委託與成交回報同步、斷線復原及人工緊急停止演練。任何實盤啟用前都必須通過完整模擬及小額驗證。
+券商尚未指定，因此目前不會登入券商帳戶或送出真實委託。已新增獨立常駐 Paper Worker，可於持久化主機持續執行模擬報價監控；Streamlit Community Cloud 本身仍不會自動啟動該 Worker。要達到真正無人值守的全自動實盤，仍需選定券商、完成官方 API Adapter、使用安全憑證管理、部署常駐 Worker／排程器、可靠持久化資料庫、即時行情來源、券商委託與成交回報同步、斷線復原及人工緊急停止演練。任何實盤啟用前都必須通過完整模擬及小額驗證。
