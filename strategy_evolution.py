@@ -15,6 +15,7 @@ import pandas as pd
 from research_engine import shared_capital_backtest
 from analytics import trade_statistics
 from multifactor_engine import multifactor_signals
+from corporate_actions import point_in_time_recalculate
 
 
 def candidate_grid():
@@ -113,8 +114,26 @@ def build_signals(frame: pd.DataFrame, params: Mapping[str, float]):
     return entry, exit_signal
 
 
-def _prepare_overrides(frames, params):
-    return {code: build_signals(frame, params) for code, frame in frames.items()}
+def _candidate_features(frame, params):
+    entry, exit_signal = build_signals(frame, params)
+    return pd.DataFrame({
+        "entry": pd.Series(entry).reset_index(drop=True).fillna(False).astype(bool),
+        "exit": pd.Series(exit_signal).reset_index(drop=True).fillna(False).astype(bool),
+    })
+
+
+def _prepare_overrides(frames, params, corporate_actions=None):
+    result = {}
+    for code, frame in frames.items():
+        events = (corporate_actions or {}).get(str(code))
+        features = point_in_time_recalculate(
+            frame, events, lambda adjusted: _candidate_features(adjusted, params)
+        )
+        result[code] = (
+            features["entry"].astype(bool),
+            features["exit"].astype(bool),
+        )
+    return result
 
 
 def _score(result):
@@ -176,14 +195,14 @@ def select_candidate(
     best_params, best_score = None, -np.inf
     for params in candidate_grid():
         if signal_cache is None:
-            overrides = _prepare_overrides(clean, params)
+            overrides = _prepare_overrides(clean, params, corporate_actions)
         else:
             key = tuple(sorted(params.items()))
             overrides = {}
             for code, frame in clean.items():
                 cached = signal_cache.get((code, key))
                 if cached is None:
-                    overrides[code] = build_signals(frame, params)
+                    overrides[code] = _prepare_overrides({code: frame}, params, corporate_actions)[code]
                 else:
                     dates_index = pd.DatetimeIndex(pd.to_datetime(frame["date"]))
                     overrides[code] = tuple(
@@ -285,7 +304,7 @@ def evolve_strategy(
         "驗證交易筆數": "訓練交易筆數",
     })
     # One untouched chronological holdout. No holdout metric influences selection.
-    holdout_overrides = _prepare_overrides(clean, best)
+    holdout_overrides = _prepare_overrides(clean, best, corporate_actions)
     holdout = shared_capital_backtest(
         clean, "AI 演化候選",
         initial_capital=initial_capital,
