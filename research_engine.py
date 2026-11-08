@@ -172,6 +172,7 @@ def shared_capital_backtest(
     report_start_date=None,
     trading_start_date=None,
     exit_profile: str = "baseline_atr2",
+    signal_overrides: Mapping[str, Tuple[pd.Series, pd.Series]] | None = None,
 ) -> dict:
     """Multi-symbol portfolio simulation with one shared cash balance.
 
@@ -206,10 +207,17 @@ def shared_capital_backtest(
         if raw is None or raw.empty or len(raw) <= warmup + 2:
             continue
         z = raw.copy().sort_values("date").reset_index(drop=True)
-        sigs = _signals(z)
-        if strategy not in sigs:
-            continue
-        entry, exit_ = sigs[strategy]
+        if signal_overrides is not None and code in signal_overrides:
+            entry, exit_ = signal_overrides[code]
+            entry = pd.Series(entry).reset_index(drop=True)
+            exit_ = pd.Series(exit_).reset_index(drop=True)
+            if len(entry) != len(z) or len(exit_) != len(z):
+                raise ValueError(f"{code} 的自訂訊號長度必須與歷史資料相同")
+        else:
+            sigs = _signals(z)
+            if strategy not in sigs:
+                continue
+            entry, exit_ = sigs[strategy]
         z["_entry"] = entry.fillna(False).to_numpy()
         z["_exit"] = exit_.fillna(False).to_numpy()
         z["_momentum"] = z["close"].pct_change(20).fillna(-999).to_numpy()
