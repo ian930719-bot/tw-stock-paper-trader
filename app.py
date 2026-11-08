@@ -94,7 +94,7 @@ def load_corporate_actions(frames):
 def research_backtest(frames, *args, **kwargs):
     actions, failures = load_corporate_actions(frames)
     kwargs["corporate_actions"] = actions
-    result = research_backtest(frames, *args, **kwargs)
+    result = shared_capital_backtest(frames, *args, **kwargs)
     result["corporate_action_coverage"] = {
         "requested": len(frames), "loaded": len(frames) - len(failures),
         "failed_symbols": failures,
