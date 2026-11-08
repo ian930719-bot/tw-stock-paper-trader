@@ -149,6 +149,7 @@ def select_candidate(
     fee=0.001425,
     sell_tax=0.003,
     slippage=0.001,
+    corporate_actions=None,
 ):
     """Choose a candidate using an inner chronological validation slice only.
 
@@ -200,6 +201,7 @@ def select_candidate(
             trading_start_date=validation_start,
             report_start_date=validation_start,
             signal_overrides=overrides,
+            corporate_actions=corporate_actions,
         )
         stats = trade_statistics(result["trades"])
         trades = int(stats.get("交易筆數", len(result["trades"])))
@@ -230,6 +232,7 @@ def evolve_strategy(
     risk_fraction=0.005,
     exit_profile="baseline_atr2",
     warmup=260,
+    corporate_actions=None,
 ):
     """Select on first 70% chronologically; evaluate once on final 30%."""
     clean = {
@@ -262,6 +265,7 @@ def evolve_strategy(
         risk_fraction=risk_fraction,
         exit_profile=exit_profile,
         warmup=warmup,
+        corporate_actions=corporate_actions,
     )
     if selection.get("status") != "ok":
         return {
@@ -292,6 +296,7 @@ def evolve_strategy(
         trading_start_date=split_date,
         report_start_date=split_date,
         signal_overrides=holdout_overrides,
+        corporate_actions=corporate_actions,
     )
     holdout_stats = trade_statistics(holdout["trades"])
     annual_rows = []
