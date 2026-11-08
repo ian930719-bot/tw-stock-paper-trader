@@ -19,6 +19,7 @@ from historical_store import get_incremental_history, price_cache_summary
 from execution_engine import PaperExecutionEngine, OrderIntent, RiskLimits, Side, taiwan_regular_session, realized_pnl_from_trades
 from paper_account import PaperAccount
 from adaptive_exit_monitor import AdaptiveExitMonitor
+from paper_worker import read_worker_status
 from strategy_exits import PROFILES, initial_stop, risk_position_size
 from walk_forward import rolling_walk_forward, regime_performance, parameter_sensitivity
 from taiwan_market_rules import floor_board_lot
@@ -950,6 +951,19 @@ with t7:
     adaptive_monitor = AdaptiveExitMonitor(
         engine.db_path, max_age_seconds=staged_config.max_quote_age_seconds
     )
+    worker_status = read_worker_status(engine.db_path)
+    if worker_status:
+        heartbeat = datetime.fromisoformat(worker_status["heartbeat_at"])
+        heartbeat_age = max(0, (datetime.now(TZ) - heartbeat.astimezone(TZ)).total_seconds())
+        worker_label = "運作中" if heartbeat_age <= 120 and worker_status["status"] == "running" else "非活躍／待確認"
+        st.write(
+            f"常駐 Worker：{worker_label}｜最近心跳：{worker_status['heartbeat_at']} "
+            f"（{heartbeat_age:.0f} 秒前）"
+        )
+        if worker_status.get("summary"):
+            st.caption("Worker 最近一輪：" + json.dumps(worker_status["summary"], ensure_ascii=False))
+    else:
+        st.info("尚未偵測到常駐 Paper Worker。需在持久化主機啟動 Docker Compose 的 worker 服務。")
     account_snapshot = paper_account.snapshot()
     account_positions = {p["symbol"]: int(p["quantity"]) for p in account_snapshot["positions"]}
     account_costs = {p["symbol"]: float(p["average_cost"]) for p in account_snapshot["positions"]}
