@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 
 from research_engine import STRATEGIES, shared_capital_backtest
-from continuous_walk_forward import continuous_walk_forward
+from continuous_walk_forward import continuous_walk_forward, _make_windows
 
 
 def flat_frame(n=450):
@@ -19,6 +19,12 @@ def flat_frame(n=450):
 
 
 class ContinuousWalkForwardTests(unittest.TestCase):
+    def test_discards_trailing_incomplete_oos_window(self):
+        calendar = pd.bdate_range("2020-01-01", periods=500)
+        windows = _make_windows(calendar, 300, 60, 200, 40)
+        self.assertEqual(len(windows), 2)
+        self.assertEqual(windows[-1][1], pd.Timestamp(calendar[419]))
+
     def test_custom_strategy_overrides_run_through_shared_account(self):
         frame = flat_frame()
         entry = pd.Series(False, index=frame.index)
