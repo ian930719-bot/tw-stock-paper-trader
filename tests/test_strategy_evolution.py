@@ -23,14 +23,24 @@ def frame(n=620):
 class StrategyEvolutionTests(unittest.TestCase):
     def test_candidate_space_is_bounded_and_reproducible(self):
         candidates = list(candidate_grid())
-        self.assertEqual(len(candidates), 12)
-        self.assertEqual(len({tuple(sorted(x.items())) for x in candidates}), 12)
+        self.assertEqual(len(candidates), 18)
+        self.assertEqual(len({tuple(sorted(x.items())) for x in candidates}), 18)
 
     def test_signals_do_not_use_future_bars(self):
         original = frame()
         altered = original.copy()
         altered.loc[400:, ["open", "high", "low", "close", "volume"]] *= 4
         params = {"breakout": 20, "volume_multiple": 1.2, "trend_period": 50}
+        entry_a, exit_a = build_signals(original, params)
+        entry_b, exit_b = build_signals(altered, params)
+        pd.testing.assert_series_equal(entry_a.iloc[:400], entry_b.iloc[:400])
+        pd.testing.assert_series_equal(exit_a.iloc[:400], exit_b.iloc[:400])
+
+    def test_multifactor_candidate_signals_use_only_past_bars(self):
+        original = frame()
+        altered = original.copy()
+        altered.loc[400:, ["open", "high", "low", "close", "volume"]] *= 3
+        params = {"signal_family": "multifactor", "min_entry_score": 4, "max_atr_pct": 0.12}
         entry_a, exit_a = build_signals(original, params)
         entry_b, exit_b = build_signals(altered, params)
         pd.testing.assert_series_equal(entry_a.iloc[:400], entry_b.iloc[:400])
