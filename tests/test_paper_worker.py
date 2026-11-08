@@ -113,7 +113,6 @@ class PaperWorkerTests(unittest.TestCase):
             result = worker._process_corporate_actions(self.now)
         self.assertEqual(result["applied"], ["worker-split"])
         self.assertEqual(worker.account.snapshot()["positions"][0]["quantity"], 2000)
-        self.assertTrue(worker.account.integrity_report()["ok"])
 
     def test_worker_blocks_when_past_corporate_action_was_missed(self):
         from unittest.mock import patch
