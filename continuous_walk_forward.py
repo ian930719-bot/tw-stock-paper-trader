@@ -20,12 +20,14 @@ from walk_forward import rolling_walk_forward
 
 def _make_windows(calendar, lookback_days, test_days, warmup_bars, min_test_days):
     first_start = max(int(lookback_days), int(warmup_bars))
+    if int(test_days) < int(min_test_days):
+        raise ValueError("test_days 不得小於 min_test_days")
     windows = []
     start = first_start
-    while start < len(calendar):
-        end = min(start + int(test_days), len(calendar))
-        if end - start < int(min_test_days):
-            break
+    # Only complete, fixed-length OOS windows are admissible. A trailing
+    # fragment is discarded rather than silently counted as another test.
+    while start + int(test_days) <= len(calendar):
+        end = start + int(test_days)
         windows.append((pd.Timestamp(calendar[start]), pd.Timestamp(calendar[end - 1])))
         start += int(test_days)
     return windows
