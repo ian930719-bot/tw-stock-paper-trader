@@ -928,6 +928,41 @@ with t6:
 with t7:
     st.subheader("自動交易引擎｜模擬模式")
     st.warning("目前只建立與撮合模擬委託，不會連接券商或送出真實委託。實盤交易開關尚未實作，預設不存在。")
+    st.subheader("手動模擬委託（整股／盤中零股）")
+    manual_symbols = sorted([str(x) for x in stock_master["代號"].tolist()])
+    manual_symbol = st.selectbox("股票代號", manual_symbols, key="manual_paper_symbol")
+    manual_side_label = st.radio("買賣方向", ["買進", "賣出"], horizontal=True, key="manual_paper_side")
+    manual_mode = st.radio("委託單位", ["整股（1,000 股倍數）", "盤中零股（1–999 股）"], horizontal=True, key="manual_paper_mode")
+    manual_is_odd = manual_mode.startswith("盤中")
+    manual_qty = st.number_input("委託股數", min_value=1, max_value=999 if manual_is_odd else 1000000, value=100 if manual_is_odd else 1000, step=1 if manual_is_odd else 1000, key="manual_paper_qty")
+    manual_price = st.number_input("限價（元）", min_value=0.01, value=100.0, step=0.05, format="%.2f", key="manual_paper_price")
+    if st.button("送出手動模擬委託", key="submit_manual_paper"):
+        snap = paper_account.snapshot()
+        positions_now = {p["symbol"]: int(p["quantity"]) for p in snap["positions"]}
+        value_now = float(snap["cash"]) + sum(int(p["quantity"]) * float(p["average_cost"]) for p in snap["positions"])
+        orders_now = engine.list_orders()
+        today_now = session_now.strftime("%Y-%m-%d")
+        fills_now = [f for f in snap["fills"] if str(f["filled_at"]).startswith(today_now)]
+        pnl_now = sum(float(f["realized_pnl"]) for f in fills_now)
+        manual_intent = OrderIntent(
+            symbol=str(manual_symbol), side=Side.BUY if manual_side_label == "買進" else Side.SELL,
+            quantity=int(manual_qty), limit_price=float(manual_price),
+            reason="使用者手動建立模擬限價委託",
+            idempotency_key=f"manual-{manual_symbol}-{manual_side_label}-{manual_qty}-{manual_price}-{session_now.isoformat()}",
+            instrument_type="etf" if str(manual_symbol) in etf_codes else "stock",
+            odd_lot=manual_is_odd,
+        )
+        manual_result = engine.submit(
+            manual_intent, cash=float(snap["cash"]), positions=positions_now, equity=value_now,
+            daily_realized_pnl=pnl_now,
+            open_order_count=sum(x["status"] == "ACCEPTED" for x in orders_now),
+            daily_order_count=sum(str(x["created_at"]).startswith(today_now) for x in orders_now),
+            now=session_now,
+        )
+        if manual_result.status == "ACCEPTED":
+            st.success(f"模擬委託已接受：{manual_result.order_id}")
+        else:
+            st.error(f"委託遭拒：{manual_result.message}")
     st.markdown("**自動策略條件**：買進採用「多因子觀察」訊號，要求 AI 測試優於多數類基準至少 2 個百分點、五日預測分數至少 55%；賣出則檢查 EMA21、RSI 與 MACD 退出條件。買賣都必須取得盤中更新的參考報價。")
     limits = RiskLimits()
     engine = PaperExecutionEngine(limits=limits)
@@ -945,7 +980,7 @@ with t7:
     l2.metric("單一標的曝險上限",f"NTD {limits.max_symbol_exposure:,.0f}")
     l3.metric("投資組合曝險上限",f"NTD {limits.max_portfolio_exposure:,.0f}")
     l4.metric("每日虧損停手",f"NTD {limits.max_daily_loss:,.0f}")
-    st.caption("其他保護：不允許放空、必須在 09:00–13:25 建立委託、最多 5 筆未完成委託、每日最多 20 次委託、防重複委託識別碼、限價單。")
+    st.caption("整股委託限 09:00–13:25；盤中零股委託限 09:00–13:30、1–999 股，均採限價當日有效。模擬成交不重建交易所每 5 秒集合競價及真實排隊順位。")
     auto_candidates = []
     quote_lookup = {q["代號"]: q for q in quotes}
     row_lookup = {r["代號"]: r for r in rows}
@@ -1141,7 +1176,7 @@ with t7:
     if stop_events:
         st.dataframe(pd.DataFrame(stop_events),use_container_width=True,hide_index=True)
     st.subheader("用盤中報價自動撮合")
-    st.caption("只處理 Yahoo Finance 1 分鐘資料觸及限價的委託；以委託限價作保守模擬成交，不代表真實排隊成交或可成交深度。普通交易僅支援 1,000 股整數倍，且會依台股股票升降單位檢查。")
+    st.caption("只處理 Yahoo Finance 1 分鐘資料觸及限價的委託；以委託限價作保守模擬成交，不代表真實排隊成交或可成交深度。支援整股及 1–999 股盤中零股委託，並依台股升降單位檢查。")
     if st.button("使用目前新鮮盤中報價撮合等待委託", disabled=not session_open):
         fill_results=[]
         for q in quotes:
