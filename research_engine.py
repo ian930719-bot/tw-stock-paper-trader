@@ -170,6 +170,7 @@ def shared_capital_backtest(
     slippage: float = 0.001,
     warmup: int = 260,
     report_start_date=None,
+    trading_start_date=None,
     exit_profile: str = "baseline_atr2",
 ) -> dict:
     """Multi-symbol portfolio simulation with one shared cash balance.
@@ -289,6 +290,8 @@ def shared_capital_backtest(
             ix = z.index[pd.to_datetime(z["date"]) == d]
             i = int(ix[0])
             if i < warmup or code in positions:
+                continue
+            if trading_start_date is not None and pd.Timestamp(d) < pd.Timestamp(trading_start_date):
                 continue
             # Today's order may only use information available at the prior close.
             # Fill at today's open; never use today's close/high/low to create the entry.
