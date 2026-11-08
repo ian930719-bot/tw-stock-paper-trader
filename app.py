@@ -1402,4 +1402,4 @@ with t7:
             pd.DataFrame(order_rows).to_csv(index=False).encode("utf-8-sig"),
             "paper_order_log.csv","text/csv"
         )
-    st.caption("目前自動策略可產生模擬買進委託，並以 EMA21／RSI／MACD 訊號及 O'Neil、Minervini、ATR 動態保護停損管理模擬退出；動態停損需先同步最新已完成日線，再以新鮮盤中報價掃描。模擬成交仍需使用者觸發；尚未有常駐背景 Worker、券商真實成交回報或實盤 API，不得視為全天候自動交易。")
+    st.caption("已新增獨立常駐 Paper Worker：可按設定觀察清單掃描三種技術策略、處理新鮮盤中報價、模擬撮合及動態退出。需在持久化主機以 Docker Compose 啟動，並與網頁共用 SQLite 資料卷；預設禁止自動買進，需明確設定 PAPER_AUTO_ENTRIES=true。此 Worker 仍只做模擬交易，沒有券商 API 或真實委託能力。")
