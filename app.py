@@ -21,6 +21,7 @@ from paper_account import PaperAccount
 from stop_monitor import StopMonitor
 from strategy_exits import PROFILES, initial_stop, risk_position_size
 from walk_forward import rolling_walk_forward, regime_performance, parameter_sensitivity
+from taiwan_market_rules import floor_board_lot
 st.set_page_config(page_title="台股模擬交易",layout="wide")
 TZ=ZoneInfo("Asia/Taipei")
 from stock_universe import fetch_stock_universe, universe_summary, StockUniverseError
@@ -925,6 +926,7 @@ with t7:
     st.markdown("**自動策略條件**：買進採用「多因子觀察」訊號，要求 AI 測試優於多數類基準至少 2 個百分點、五日預測分數至少 55%；賣出則檢查 EMA21、RSI 與 MACD 退出條件。買賣都必須取得盤中更新的參考報價。")
     limits = RiskLimits()
     engine = PaperExecutionEngine(limits=limits)
+    expired_orders = engine.expire_day_orders(session_now)
     paper_account = PaperAccount(engine.db_path, initial_cash=float(capital))
     stop_monitor = StopMonitor(engine.db_path, stop_loss_pct=0.05, take_profit_pct=0.10, trailing_stop_pct=0.05)
     account_snapshot = paper_account.snapshot()
@@ -958,7 +960,7 @@ with t7:
             or (pd.notna(latest.macd) and pd.notna(latest.sig) and float(latest.macd) < float(latest.sig))
         )
         if held > 0 and exit_signal:
-            sell_qty = min(held, int(limits.max_order_notional / float(price)))
+            sell_qty = floor_board_lot(min(held, int(limits.max_order_notional / float(price))))
             if sell_qty > 0:
                 auto_candidates.append({
                     "方向":"賣出","代號":code,"名稱":row["名稱"],
@@ -974,7 +976,7 @@ with t7:
             notional_qty = int(limits.max_order_notional / float(price))
             cash_available = float(account_snapshot["cash"])
             cash_qty = int(cash_available / (float(price)*1.001425))
-            quantity = min(risk_qty, notional_qty, cash_qty)
+            quantity = floor_board_lot(min(risk_qty, notional_qty, cash_qty))
             if quantity > 0:
                 auto_candidates.append({
                     "方向":"買進","代號":code,"名稱":row["名稱"],
@@ -1132,7 +1134,7 @@ with t7:
     if stop_events:
         st.dataframe(pd.DataFrame(stop_events),use_container_width=True,hide_index=True)
     st.subheader("用盤中報價自動撮合")
-    st.caption("只處理報價狀態為「盤中更新」的標的；來源標記 Yahoo Finance 1 分鐘資料，並由引擎再次檢查報價時間、120 秒新鮮度及交易時段。")
+    st.caption("只處理 Yahoo Finance 1 分鐘資料觸及限價的委託；以委託限價作保守模擬成交，不代表真實排隊成交或可成交深度。普通交易僅支援 1,000 股整數倍，且會依台股股票升降單位檢查。")
     if st.button("使用目前新鮮盤中報價撮合等待委託", disabled=not session_open):
         fill_results=[]
         for q in quotes:
@@ -1151,6 +1153,8 @@ with t7:
         else:
             st.info("本次沒有符合限價、報價新鮮度及交易時段條件的成交。")
         st.rerun()
+    if expired_orders:
+        st.info(f"已將 {expired_orders} 筆前一交易日未成交委託標記為到期。")
     st.subheader("模擬委託佇列與成交狀態")
     order_rows = engine.list_orders()
     st.dataframe(pd.DataFrame(order_rows),use_container_width=True,hide_index=True)
