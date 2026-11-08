@@ -7,12 +7,37 @@ continuously held account.
 """
 from __future__ import annotations
 
+import hashlib
+from collections import OrderedDict
+from typing import Callable
+
 import numpy as np
 import pandas as pd
 
 from analytics import equity_risk_metrics, trade_statistics
 from research_engine import STRATEGIES, shared_capital_backtest
 from strategy_evolution import select_candidate, build_signals, candidate_grid
+
+
+_SELECTION_CACHE_MAX = 32
+
+
+def _frame_fingerprint(frames: dict[str, pd.DataFrame]) -> str:
+    """Hash exact training content; different revisions cannot share a selection."""
+    digest = hashlib.sha256()
+    for code in sorted(frames):
+        digest.update(str(code).encode("utf-8"))
+        digest.update(pd.util.hash_pandas_object(frames[code], index=True).values.tobytes())
+        digest.update(b"\\x1e")
+    return digest.hexdigest()
+
+
+def _selection_cache_key(frames, *, initial_capital, max_positions,
+                         risk_fraction, exit_profile, warmup, fee, sell_tax,
+                         slippage):
+    return (_frame_fingerprint(frames), float(initial_capital), int(max_positions),
+            float(risk_fraction), str(exit_profile), int(warmup), float(fee),
+            float(sell_tax), float(slippage))
 
 
 def rolling_walk_forward(
@@ -31,6 +56,8 @@ def rolling_walk_forward(
     slippage: float = 0.001,
     exit_profile: str = "baseline_atr2",
     min_test_days: int = 40,
+    progress_callback: Callable[[int, int, str], None] | None = None,
+    selection_cache: OrderedDict | None = None,
 ) -> dict:
     """Evaluate fixed rules across rolling, non-overlapping OOS windows.
 
@@ -59,7 +86,8 @@ def rolling_walk_forward(
     }
     if not valid:
         return {"windows": pd.DataFrame(), "equity": pd.DataFrame(),
-                "trades": pd.DataFrame(), "metrics": {}, "coverage": 0}
+                "trades": pd.DataFrame(), "metrics": {}, "coverage": 0,
+                "cache_hits": 0, "cache_misses": 0}
 
     calendar = sorted(set().union(*[
         set(pd.to_datetime(frame["date"])) for frame in valid.values()
@@ -67,6 +95,9 @@ def rolling_walk_forward(
     first_start = max(int(lookback_days), int(warmup_bars))
     window_rows, curves, trade_frames = [], [], []
     chained_equity = float(initial_capital)
+    local_selection_cache = selection_cache if selection_cache is not None else OrderedDict()
+    cache_hits = cache_misses = completed_windows = 0
+    total_windows = max(0, (len(calendar) - first_start - min_test_days) // step + 1)
 
     # Compute each candidate's causal indicator series once for the full input.
     # The selector later reindexes these series to pre-test history only.
@@ -113,23 +144,44 @@ def rolling_walk_forward(
                 for code, frame in valid.items()
                 if (pd.to_datetime(frame["date"]) < start_date).any()
             }
-            selection = select_candidate(
-                training_only,
-                initial_capital=float(initial_capital),
-                max_positions=int(max_positions),
-                risk_fraction=float(risk_fraction),
-                exit_profile=exit_profile,
-                warmup=int(warmup_bars),
-                signal_cache=candidate_signal_cache,
+            cache_key = _selection_cache_key(
+                training_only, initial_capital=initial_capital,
+                max_positions=max_positions, risk_fraction=risk_fraction,
+                exit_profile=exit_profile, warmup=warmup_bars,
+                fee=fee, sell_tax=sell_tax, slippage=slippage,
             )
+            selection = local_selection_cache.get(cache_key)
+            if selection is not None:
+                cache_hits += 1
+                local_selection_cache.move_to_end(cache_key)
+            else:
+                cache_misses += 1
+                selection = select_candidate(
+                    training_only, initial_capital=float(initial_capital),
+                    max_positions=int(max_positions), risk_fraction=float(risk_fraction),
+                    exit_profile=exit_profile, warmup=int(warmup_bars),
+                    signal_cache=candidate_signal_cache,
+                    fee=fee, sell_tax=sell_tax, slippage=slippage,
+                )
+                local_selection_cache[cache_key] = dict(selection)
+                while len(local_selection_cache) > _SELECTION_CACHE_MAX:
+                    local_selection_cache.popitem(last=False)
             selection_status = selection.get("status", "unknown")
             if selection_status == "ok":
                 selected_params = selection["selected_params"]
                 selection_score = selection.get("selection_score", np.nan)
-                signal_overrides = {
-                    code: build_signals(frame, selected_params)
-                    for code, frame in window_frames.items()
-                }
+                signal_overrides = {}
+                selected_key = tuple(sorted(selected_params.items()))
+                for code, frame in window_frames.items():
+                    cached = candidate_signal_cache.get((code, selected_key))
+                    if cached is None:
+                        signal_overrides[code] = build_signals(frame, selected_params)
+                    else:
+                        date_index = pd.DatetimeIndex(pd.to_datetime(frame["date"]))
+                        signal_overrides[code] = tuple(
+                            series.reindex(date_index).fillna(False).reset_index(drop=True)
+                            for series in cached
+                        )
             else:
                 # Fail closed: if history cannot validate a candidate, remain in cash.
                 signal_overrides = {
@@ -174,6 +226,12 @@ def rolling_walk_forward(
         if not trades.empty:
             trades.insert(0, "樣本外區段", len(window_rows))
             trade_frames.append(trades)
+        completed_windows += 1
+        if progress_callback is not None:
+            progress_callback(
+                completed_windows, max(total_windows, completed_windows),
+                f"完成樣本外區段 {completed_windows}/{max(total_windows, completed_windows)}：{start_date.date()} 至 {end_date.date()}",
+            )
         start_idx += step
 
     windows = pd.DataFrame(window_rows)
@@ -197,6 +255,7 @@ def rolling_walk_forward(
     return {
         "windows": windows, "equity": equity, "trades": trades,
         "metrics": metrics, "coverage": len(valid),
+        "cache_hits": cache_hits, "cache_misses": cache_misses,
         "note": ("AI 自適應模式：每個外層測試區段只用該區段之前的歷史資料，先做內部時間序列驗證再選候選；無合格候選則該段保持現金。各測試區段獨立重設本金並清空持倉，鏈結曲線不代表同一帳戶連續持倉。" if adaptive else "各測試區段獨立重設本金並清空持倉；鏈結曲線用於串接區段報酬，不代表同一帳戶連續持倉。"),
     }
 
