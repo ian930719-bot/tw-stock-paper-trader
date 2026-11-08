@@ -931,13 +931,13 @@ with t7:
     st.markdown("**自動策略條件**：買進採用「多因子觀察」訊號，要求 AI 測試優於多數類基準至少 2 個百分點、五日預測分數至少 55%；賣出則檢查 EMA21、RSI 與 MACD 退出條件。買賣都必須取得盤中更新的參考報價。")
     limits = RiskLimits()
     engine = PaperExecutionEngine(limits=limits)
-    expired_orders = engine.expire_day_orders(session_now)
     paper_account = PaperAccount(engine.db_path, initial_cash=float(capital))
     stop_monitor = StopMonitor(engine.db_path, stop_loss_pct=0.05, take_profit_pct=0.10, trailing_stop_pct=0.05)
     account_snapshot = paper_account.snapshot()
     account_positions = {p["symbol"]: int(p["quantity"]) for p in account_snapshot["positions"]}
     account_costs = {p["symbol"]: float(p["average_cost"]) for p in account_snapshot["positions"]}
     session_now = datetime.now(TZ)
+    expired_orders = engine.expire_day_orders(session_now)
     session_open = taiwan_regular_session(session_now)
     st.write("交易時段：", "台股一般盤中" if session_open else "非台股一般盤中時段")
     l1,l2,l3,l4=st.columns(4)
