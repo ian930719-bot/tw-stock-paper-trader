@@ -75,8 +75,7 @@ class RollingWalkForwardTests(unittest.TestCase):
             return (pd.Series(False, index=z.index),
                     pd.Series(False, index=z.index))
 
-        with patch("walk_forward.select_candidate", side_effect=selector), \\
-             patch("walk_forward.build_signals", side_effect=signals):
+        with patch("walk_forward.select_candidate", side_effect=selector), patch("walk_forward.build_signals", side_effect=signals):
             result = rolling_walk_forward(
                 {"A": frame}, "AI 自適應策略",
                 initial_capital=100_000, lookback_days=300,
