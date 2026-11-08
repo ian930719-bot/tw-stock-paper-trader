@@ -89,6 +89,6 @@ python -m unittest discover -s tests -v
 
 ## Portfolio risk and multi-strategy research
 
-- Five distinct daily-OHLCV strategy families are available, including long-term trend structure, volume breakout, momentum continuation, trend-filtered mean reversion, and volatility-squeeze breakout. Signals are evaluated at the close and simulated no earlier than the next session. New entries are capped at 1% of prior-known 20-session average daily dollar turnover; current-session volume is never used to size an opening fill.
+- Five distinct daily-OHLCV strategy families are available, including long-term trend structure, volume breakout, momentum continuation, trend-filtered mean reversion, and volatility-squeeze breakout. Signals are evaluated at the close and simulated no earlier than the next session. New entries in both historical simulation and the paper worker are capped at 1% of prior-known 20-session average daily dollar turnover; current-session volume is never used to size an opening fill.
 - Current cross-sectional risk snapshots use common-date close-to-close returns, covariance shrinkage, capped long-only risk-parity weights, and explicit cash reserve. These weights are not retroactively injected into historical OOS results.
 - The optional strategy ensemble combines each fixed strategy's OOS equity curve using rolling risk estimates. Rebalance weights for each date use only returns observed before that date; the first 60 sessions use equal weights. It is a separate research curve, not the paper account ledger.
