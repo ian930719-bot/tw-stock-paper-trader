@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from analytics import equity_risk_metrics, trade_statistics
+from analytics import equity_risk_metrics, trade_statistics, strategy_decay_report
 
 
 class AnalyticsTests(unittest.TestCase):
@@ -17,6 +17,24 @@ class AnalyticsTests(unittest.TestCase):
         self.assertLess(result["Calmar"], 0)
         self.assertGreaterEqual(result["平均曝險"], 0)
         self.assertLessEqual(result["平均曝險"], 1)
+
+    def test_strategy_decay_report_flags_recent_reversal(self):
+        dates = pd.bdate_range("2024-01-02", periods=140)
+        returns = np.r_[np.full(77, 0.002), np.full(63, -0.003)]
+        curve = pd.DataFrame({
+            "日期": dates,
+            "資產": 100000 * np.cumprod(1 + returns),
+        })
+        report = strategy_decay_report({"測試策略": curve}, 100000, recent_window=63)
+        self.assertEqual(len(report), 1)
+        self.assertEqual(report.iloc[0]["狀態"], "退化警示")
+        self.assertLess(float(report.iloc[0]["近期Sharpe"]), 0)
+
+    def test_strategy_decay_report_requires_minimum_observations(self):
+        dates = pd.bdate_range("2024-01-02", periods=25)
+        curve = pd.DataFrame({"日期": dates, "資產": np.linspace(100000, 101000, 25)})
+        report = strategy_decay_report({"短資料": curve}, 100000)
+        self.assertEqual(report.iloc[0]["狀態"], "樣本不足")
 
     def test_trade_statistics(self):
         trades = pd.DataFrame({
