@@ -32,7 +32,6 @@ from historical_store import (
 from market_trading_calendar import market_trading_day_status
 from paper_account import PaperAccount
 from research_engine import STRATEGIES, strategy_signals
-from stock_universe import StockUniverseError
 from strategy_exits import initial_stop, risk_position_size
 from taiwan_market_rules import floor_board_lot, stock_tick_size
 from taiwan_price_limits import get_official_price_limit
@@ -293,7 +292,7 @@ class PaperWorker:
             conn.commit()
         getattr(LOG, level.lower(), LOG.info)("%s %s", event, details)
 
-    def acquire_lease(self, now: datetime | None = None, lease_seconds: int = 120) -> bool:
+    def acquire_lease(self, now: datetime | None = None, lease_seconds: int = 600) -> bool:
         current = parse_timestamp(now or self.now_provider())
         expiry = (current + timedelta(seconds=lease_seconds)).isoformat()
         with closing(self._connect()) as conn:
@@ -312,7 +311,7 @@ class PaperWorker:
             conn.execute("COMMIT")
         return True
 
-    def renew_lease(self, now: datetime | None = None, lease_seconds: int = 120):
+    def renew_lease(self, now: datetime | None = None, lease_seconds: int = 600):
         current = parse_timestamp(now or self.now_provider())
         expiry = (current + timedelta(seconds=lease_seconds)).isoformat()
         with closing(self._connect()) as conn:
@@ -450,16 +449,23 @@ class PaperWorker:
 
     def _submit(self, intent: OrderIntent, quotes: dict[str, dict], now: datetime):
         context = self._account_context(quotes, now)
-        result = self.engine.submit(
-            intent,
-            cash=context["cash"],
-            positions=context["positions"],
-            equity=context["equity"],
-            daily_realized_pnl=context["daily_pnl"],
-            open_order_count=context["open_count"],
-            daily_order_count=context["daily_order_count"],
-            now=now,
-        )
+        try:
+            result = self.engine.submit(
+                intent,
+                cash=context["cash"],
+                positions=context["positions"],
+                equity=context["equity"],
+                daily_realized_pnl=context["daily_pnl"],
+                open_order_count=context["open_count"],
+                daily_order_count=context["daily_order_count"],
+                now=now,
+            )
+        except Exception as exc:
+            self._event(
+                "error", "模擬委託建立失敗",
+                symbol=intent.symbol, side=intent.side.value, reason=str(exc),
+            )
+            return None
         self._event(
             "info" if result.status == "ACCEPTED" else "warning",
             "模擬委託結果",
@@ -571,7 +577,7 @@ class PaperWorker:
                 break
             if context["positions"].get(symbol, 0) > 0:
                 continue
-            if any(o["symbol"] == symbol and o["side"] == "BUY" for o in context["pending"]):
+            if any(o["symbol"] == symbol for o in context["pending"]):
                 continue
             frame = candidate["frame"]
             try:
@@ -631,7 +637,8 @@ class PaperWorker:
                     odd_lot=odd_lot, market=market,
                 )
                 result = self._submit(intent, quotes, now)
-                results.append(result.status)
+                if result is not None:
+                    results.append(result.status)
             except (ValueError, KeyError, TypeError) as exc:
                 self._event("warning", "進場候選略過", symbol=symbol, reason=str(exc))
         return results
@@ -797,3 +804,23 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def read_worker_status(db_path: str) -> dict | None:
+    """Read the latest worker heartbeat from the shared paper ledger."""
+    if not db_path or not Path(db_path).exists():
+        return None
+    try:
+        with closing(sqlite3.connect(db_path, timeout=5)) as conn:
+            row = conn.execute(
+                "SELECT heartbeat_at,status,last_summary FROM paper_worker_status WHERE id=1"
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "heartbeat_at": row[0],
+            "status": row[1],
+            "summary": json.loads(row[2]) if row[2] else {},
+        }
+    except (sqlite3.Error, ValueError, TypeError):
+        return None
