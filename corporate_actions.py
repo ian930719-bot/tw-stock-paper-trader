@@ -190,9 +190,8 @@ def _fetch_dataset(dataset: str, start_date: str, end_date: str | None,
         params["end_date"] = end_date
     if symbol:
         params["data_id"] = str(symbol)
-    if token:
-        params["token"] = token
-    response = requests.get(API_URL, params=params, timeout=timeout)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    response = requests.get(API_URL, params=params, headers=headers, timeout=timeout)
     response.raise_for_status()
     payload = response.json()
     if not isinstance(payload, dict) or str(payload.get("status", "200")) not in {"200", "success", "Success"}:
