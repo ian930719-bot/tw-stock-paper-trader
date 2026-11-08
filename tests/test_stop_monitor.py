@@ -23,10 +23,10 @@ class StopMonitorTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def buy_position(self, quantity=10, price=100):
+    def buy_position(self, quantity=1000, price=100):
         order = self.engine.submit(
             OrderIntent("2330", Side.BUY, quantity, price, "seed", "seed-buy"),
-            cash=100000, positions={}, equity=100000, now=NOW)
+            cash=200000, positions={}, equity=200000, now=NOW)
         self.account.process_quote("2330", price, NOW.isoformat(), "test", now=NOW)
         self.assertEqual(self.engine.get_order(order.order_id).status, "FILLED")
 
@@ -38,7 +38,7 @@ class StopMonitorTests(unittest.TestCase):
         self.buy_position()
         signal = self.evaluate(94)
         self.assertEqual(signal["reason"], "STOP_LOSS")
-        self.assertEqual(signal["quantity"], 10)
+        self.assertEqual(signal["quantity"], 1000)
 
     def test_take_profit_signal(self):
         self.buy_position()
