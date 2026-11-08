@@ -508,6 +508,57 @@ with t5:
         st.dataframe(st.session_state["single_master_trades"][chosen],use_container_width=True,hide_index=True)
     elif "single_master_results" in st.session_state:
         st.info("標的、期間或本金已變更；請重新執行策略比較。")
+    st.markdown("**同一進場策略的出場規則比較**")
+    st.caption("固定同一標的、進場訊號、初始本金、持倉上限與交易成本，只改變初始停損規則。Minervini 以最近 10 根已完成日 K 最低價作結構失效代理；O’Neil 以 8% 參考值呈現。此處尚未加入移動停利或 20–25% 強勢股延長持有判斷。")
+    exit_entry_strategy=st.selectbox("固定進場策略",STRATEGIES,key="exit_compare_entry")
+    exit_profiles=[
+        ("baseline_atr2","原始 ATR × 2"),
+        ("oneil_8pct","O’Neil 8% 參考停損"),
+        ("minervini_structure","Minervini 10 日結構低點代理"),
+        ("atr_1_5","ATR × 1.5"),
+        ("atr_2","ATR × 2"),
+        ("atr_2_5","ATR × 2.5"),
+        ("atr_3","ATR × 3"),
+    ]
+    if st.button("比較不同出場規則",key="run_exit_profile_compare"):
+        profile_rows=[]; profile_curves={}; profile_trades={}
+        for profile_key,profile_label in exit_profiles:
+            result=shared_capital_backtest(
+                {bs:frame},exit_entry_strategy,initial_capital=float(initial),
+                max_positions=1,risk_fraction=min(max(float(risk)/float(initial),0.0001),0.10),
+                warmup=0,exit_profile=profile_key
+            )
+            m=result["metrics"].copy()
+            m.update(equity_risk_metrics(result["equity"],float(initial)))
+            m.update(trade_statistics(result["trades"]))
+            m["出場規則"]=profile_label
+            m["交易筆數"]=len(result["trades"])
+            profile_rows.append(m)
+            profile_curves[profile_label]=result["equity"]
+            profile_trades[profile_label]=result["trades"]
+        st.session_state["exit_profile_results"]=pd.DataFrame(profile_rows)
+        st.session_state["exit_profile_curves"]=profile_curves
+        st.session_state["exit_profile_trades"]=profile_trades
+        st.session_state["exit_profile_config"]=(bs,exit_entry_strategy,float(initial),period)
+    exit_config=(bs,exit_entry_strategy,float(initial),period)
+    if st.session_state.get("exit_profile_config")==exit_config:
+        profile_df=st.session_state["exit_profile_results"]
+        cols=["出場規則","期末資產","總報酬","年化報酬","最大回撤","Sharpe","年化波動率","交易筆數","勝率","Profit Factor","期望值"]
+        st.dataframe(profile_df[cols].style.format({
+            "期末資產":"{:,.0f}","總報酬":"{:.1%}","年化報酬":"{:.1%}",
+            "最大回撤":"{:.1%}","Sharpe":"{:.2f}","年化波動率":"{:.1%}",
+            "勝率":"{:.1%}","Profit Factor":lambda x:"∞" if np.isinf(x) else f"{x:.2f}",
+            "期望值":"{:,.0f}",
+        }),use_container_width=True,hide_index=True)
+        profile_fig=go.Figure()
+        for label,equity in st.session_state["exit_profile_curves"].items():
+            if not equity.empty:
+                profile_fig.add_trace(go.Scatter(x=equity["日期"],y=equity["資產"],name=label))
+        profile_fig.add_hline(y=initial,line_dash="dash")
+        profile_fig.update_layout(title="固定進場訊號：不同出場規則資產曲線",yaxis_title="新台幣")
+        st.plotly_chart(profile_fig,use_container_width=True)
+        selected_profile=st.selectbox("查看出場規則交易明細",list(st.session_state["exit_profile_trades"]),key="exit_profile_detail")
+        st.dataframe(st.session_state["exit_profile_trades"][selected_profile],use_container_width=True,hide_index=True)
     st.warning("Minervini、O’Neil、Livermore 為公開理念的技術代理，不是完整複製原策略。回測仍未完整處理除權息、停牌、漲跌停排隊、流動性衝擊及下市股偏誤。");
 
 
