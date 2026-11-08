@@ -1,4 +1,7 @@
 import json
+import os
+import tempfile
+from pathlib import Path
 import streamlit as st
 import yfinance as yf
 import requests
@@ -19,7 +22,7 @@ from historical_store import get_incremental_history, price_cache_summary
 from execution_engine import PaperExecutionEngine, OrderIntent, RiskLimits, Side, taiwan_regular_session, realized_pnl_from_trades
 from paper_account import PaperAccount
 from adaptive_exit_monitor import AdaptiveExitMonitor
-from paper_worker import read_worker_status
+from paper_worker import PaperWorker, read_worker_status
 from strategy_exits import PROFILES, initial_stop, risk_position_size
 from walk_forward import rolling_walk_forward, regime_performance, parameter_sensitivity
 from taiwan_market_rules import floor_board_lot
@@ -950,6 +953,82 @@ with t7:
     paper_account = PaperAccount(engine.db_path, initial_cash=staged_config.initial_capital)
     adaptive_monitor = AdaptiveExitMonitor(
         engine.db_path, max_age_seconds=staged_config.max_quote_age_seconds
+    )
+    st.divider()
+    st.subheader("瀏覽器雲端模擬 Worker｜免安裝模式")
+    st.caption(
+        "此模式直接在目前的 Streamlit 網頁工作階段執行單輪模擬 Worker。"
+        "只有網頁保持開啟且工作階段仍存活時，才能依設定自動刷新；"
+        "關閉頁面、服務休眠、重啟或網路中斷時不會持續監控。"
+    )
+    browser_symbols = st.multiselect(
+        "雲端監控標的（最多 5 檔，先從少量標的驗證）",
+        options=ss,
+        default=ss[:min(5, len(ss))],
+        format_func=lambda code: f"{code} {W.get(code, code)}",
+        key="browser_worker_symbols",
+    )
+    browser_auto_entries = st.checkbox(
+        "允許自動建立買進模擬委託（預設關閉）",
+        value=False,
+        key="browser_worker_auto_entries",
+        help="只會建立模擬委託，不會連接券商或動用真實資金。",
+    )
+    browser_auto_refresh = st.checkbox(
+        "網頁開啟期間每 30 秒自動執行一輪",
+        value=False,
+        key="browser_worker_auto_refresh",
+        help="僅在此網頁工作階段存活時執行，不是 24 小時常駐服務。",
+    )
+    if len(browser_symbols) > 5:
+        st.error("瀏覽器免安裝模式目前最多選擇 5 檔，避免免費雲端環境超時或觸及行情來源限制。")
+    elif not browser_symbols:
+        st.warning("請至少選擇一檔監控標的。")
+    else:
+        market_db_path = os.getenv(
+            "MARKET_DB_PATH",
+            str(Path(tempfile.gettempdir()) / "tw_stock_market.sqlite3"),
+        )
+
+        @st.fragment(run_every="30s" if browser_auto_refresh else None)
+        def browser_worker_panel():
+            should_run = browser_auto_refresh or st.button(
+                "立即執行一輪模擬監控", key="browser_worker_run_once"
+            )
+            if should_run:
+                try:
+                    browser_worker = PaperWorker(
+                        db_path=engine.db_path,
+                        market_db_path=market_db_path,
+                        watchlist={
+                            code: market_by_symbol.get(str(code), "上市")
+                            for code in browser_symbols
+                        },
+                        config=TradingConfig(initial_capital=float(capital)),
+                        auto_entries=browser_auto_entries,
+                    )
+                    with st.spinner("正在取得新鮮報價、檢查交易日曆及執行模擬風控…"):
+                        cycle_summary = browser_worker.run_once()
+                    st.write("最近一輪執行結果")
+                    st.json(cycle_summary)
+                except Exception as exc:
+                    st.error(f"瀏覽器模擬 Worker 執行失敗：{exc}")
+            else:
+                st.info("自動刷新目前關閉。可按「立即執行一輪模擬監控」手動測試。")
+            latest_status = read_worker_status(engine.db_path)
+            if latest_status:
+                st.caption(
+                    "最近心跳：" + str(latest_status["heartbeat_at"])
+                    + "｜狀態：" + str(latest_status["status"])
+                )
+                st.json(latest_status.get("summary", {}))
+            if browser_auto_refresh:
+                st.caption("自動刷新已啟用；每輪仍會重新檢查交易日曆、報價時間及風控條件。")
+        browser_worker_panel()
+    st.warning(
+        "免費雲端限制：Streamlit Community Cloud 的執行環境可能休眠或重啟，"
+        "本機 SQLite 也可能在重新部署／重啟後遺失。請定期下載帳本備份；"
+        "此模式不能保證 24/7、無限執行或永久保存資料。"
     )
     worker_status = read_worker_status(engine.db_path)
     if worker_status:
