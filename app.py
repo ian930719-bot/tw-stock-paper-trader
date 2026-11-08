@@ -797,7 +797,7 @@ with t4:
 
 
 with t5:
-    st.subheader("投資大師策略：單股策略比較")
+    st.subheader("通用策略訊號：單股策略比較")
     st.caption("比較三種技術策略代理。所有策略共用研究引擎，訊號在收盤後形成、下一交易日開盤成交，包含估算成本與 ATR 停損。")
     bs=st.selectbox("策略回測標的",list(data),format_func=lambda z:z+" "+W.get(z,z),key="master_bt")
     initial=st.number_input("策略回測本金",100000,10000000,1000000,100000,key="master_capital")
@@ -893,7 +893,7 @@ with t5:
         st.plotly_chart(profile_fig,use_container_width=True)
         selected_profile=st.selectbox("查看出場規則交易明細",list(st.session_state["exit_profile_trades"]),key="exit_profile_detail")
         st.dataframe(st.session_state["exit_profile_trades"][selected_profile],use_container_width=True,hide_index=True)
-    st.warning("策略訊號為通用技術條件組合，不依附特定投資大師；回測仍未完整處理除權息、停牌、漲跌停排隊、流動性衝擊及下市股偏誤。回測仍未完整處理除權息、停牌、漲跌停排隊、流動性衝擊及下市股偏誤。");
+    st.warning("策略訊號為通用技術條件組合，不依附特定投資大師；回測仍未完整處理除權息、停牌、漲跌停排隊、流動性衝擊及下市股偏誤。");
 
 
 with t6:
@@ -1659,8 +1659,8 @@ with t7:
     )
     st.caption(
         "不再把固定 5% 停損／10% 停利當成預設操盤規則。"
-        "ATR 策略以波動度移動保護停損；O'Neil 20% 僅進入獲利檢視，不強制賣出；"
-        "Minervini 依結構失效價，達 2R 移至成本保護、達 3R 啟動 ATR 追蹤。"
+        "ATR 策略以波動度移動保護停損；固定獲利檢視門檻只作風險管理提示，不強制賣出；"
+        "結構失效規則依技術失效價，達設定 R 倍數後提高保護停損。"
         "所有 ATR／R 倍數均為待樣本外驗證的候選參數。"
     )
     if st.button("依最新已完成日線同步持倉停損", key="sync_adaptive_stops"):
