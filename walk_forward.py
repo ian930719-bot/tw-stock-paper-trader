@@ -12,7 +12,7 @@ import pandas as pd
 
 from analytics import equity_risk_metrics, trade_statistics
 from research_engine import STRATEGIES, shared_capital_backtest
-from strategy_evolution import select_candidate, build_signals
+from strategy_evolution import select_candidate, build_signals, candidate_grid
 
 
 def rolling_walk_forward(
@@ -68,6 +68,23 @@ def rolling_walk_forward(
     window_rows, curves, trade_frames = [], [], []
     chained_equity = float(initial_capital)
 
+    # Compute each candidate's causal indicator series once for the full input.
+    # The selector later reindexes these series to pre-test history only.
+    candidate_signal_cache = {}
+    if adaptive:
+        for code, frame in valid.items():
+            dated = frame.copy()
+            dated["date"] = pd.to_datetime(dated["date"])
+            dated = dated.drop_duplicates("date", keep="last").sort_values("date")
+            date_index = pd.DatetimeIndex(dated["date"])
+            for params in candidate_grid():
+                key = tuple(sorted(params.items()))
+                entry, exit_signal = build_signals(dated, params)
+                candidate_signal_cache[(code, key)] = (
+                    pd.Series(entry.to_numpy(), index=date_index),
+                    pd.Series(exit_signal.to_numpy(), index=date_index),
+                )
+
     start_idx = first_start
     while start_idx < len(calendar):
         end_idx = min(start_idx + int(test_days), len(calendar))
@@ -103,6 +120,7 @@ def rolling_walk_forward(
                 risk_fraction=float(risk_fraction),
                 exit_profile=exit_profile,
                 warmup=int(warmup_bars),
+                signal_cache=candidate_signal_cache,
             )
             selection_status = selection.get("status", "unknown")
             if selection_status == "ok":
