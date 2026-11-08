@@ -94,3 +94,8 @@ python -m unittest discover -s tests -v
 - Five distinct daily-OHLCV strategy families are available, including long-term trend structure, volume breakout, momentum continuation, trend-filtered mean reversion, and volatility-squeeze breakout. The adaptive search evaluates 30 predeclared candidates spanning breakout, multifactor, mean-reversion, and squeeze-breakout families. Signals are evaluated at the close and simulated no earlier than the next session. New entries in both historical simulation and the paper worker are capped at 1% of prior-known 20-session average daily dollar turnover; current-session volume is never used to size an opening fill.
 - Current cross-sectional risk snapshots use common-date close-to-close returns, covariance shrinkage, capped long-only risk-parity weights, and explicit cash reserve. These weights are not retroactively injected into historical OOS results.
 - The optional strategy ensemble combines each fixed strategy's OOS equity curve using rolling risk estimates. Rebalance weights for each date use only returns observed before that date; the first 60 sessions use equal weights. It is a separate research curve, not the paper account ledger.
+
+
+## Paper ledger integrity checks
+
+The paper-account dashboard runs SQLite `integrity_check` and reconciles cash and per-symbol positions against the fill ledger. It also verifies filled-order/fill-row consistency and checks that fill price multiplied by quantity matches gross notional. Any discrepancy is surfaced as a warning; stop creating new paper orders and export a backup before attempting recovery. Each fill performs one fresh official price-band verification before account mutation to avoid redundant exchange API requests.
