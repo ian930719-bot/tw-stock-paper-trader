@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import sqlite3
 import math
 from contextlib import closing
+import pandas as pd
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -162,7 +163,7 @@ class PaperAccount:
         current = as_of if isinstance(as_of, datetime) else datetime.fromisoformat(str(as_of))
         action_day = current.date().isoformat()
         frame = validate_action_frame(
-            events if isinstance(events, __import__("pandas").DataFrame) else __import__("pandas").DataFrame(events),
+            events if isinstance(events, pd.DataFrame) else pd.DataFrame(events),
             "",
         )
         applied, paid, missed = [], [], []
@@ -230,7 +231,7 @@ class PaperAccount:
                     cash_amount,cash_in_lieu,applied_at,paid_at
                 ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
                     str(event.event_id), str(event.symbol), str(event.action_type),
-                    effective, event.payment_date.date().isoformat() if not __import__("pandas").isna(event.payment_date) else None,
+                    effective, event.payment_date.date().isoformat() if not pd.isna(event.payment_date) else None,
                     float(event.share_multiplier), float(event.cash_per_share),
                     float(event.reference_price) if event.reference_price is not None and math.isfinite(float(event.reference_price)) else None,
                     quantity, cash_amount, cash_in_lieu, stamp, None,
@@ -270,7 +271,12 @@ class PaperAccount:
             if not math.isfinite(initial_cash) or not math.isfinite(actual_cash):
                 return {"ok": False, "status": "異常", "issues": ["帳戶現金含非有限數值"]}
             fills = conn.execute(
-                "SELECT symbol,side,quantity,price,gross,fees,tax FROM paper_fills ORDER BY filled_at,fill_id"
+                "SELECT symbol,side,quantity,price,gross,fees,tax,filled_at FROM paper_fills ORDER BY filled_at,fill_id"
+            ).fetchall()
+            action_rows = conn.execute(
+                "SELECT symbol,action_type,effective_date,share_multiplier,entitled_quantity,"
+                "cash_amount,cash_in_lieu,paid_at FROM paper_corporate_actions "
+                "ORDER BY effective_date,applied_at,event_id"
             ).fetchall()
             actual_positions = {
                 str(symbol): int(quantity)
@@ -291,7 +297,8 @@ class PaperAccount:
 
         expected_cash = initial_cash
         expected_positions: dict[str, int] = {}
-        for symbol, side, quantity, price, gross, fees, tax in fills:
+        timeline = []
+        for symbol, side, quantity, price, gross, fees, tax, filled_at in fills:
             quantity = int(quantity)
             amounts = [float(price), float(gross), float(fees), float(tax)]
             if (
@@ -300,14 +307,42 @@ class PaperAccount:
                 or abs(amounts[1] - amounts[0] * quantity) > 0.02
             ):
                 return {"ok": False, "status": "異常", "issues": ["成交紀錄含不合法數量、價格或金額"]}
-            if side == Side.BUY.value:
-                expected_cash -= float(gross) + float(fees)
-                expected_positions[str(symbol)] = expected_positions.get(str(symbol), 0) + quantity
-            elif side == Side.SELL.value:
-                expected_cash += float(gross) - float(fees) - float(tax)
-                expected_positions[str(symbol)] = expected_positions.get(str(symbol), 0) - quantity
-            else:
-                return {"ok": False, "status": "異常", "issues": [f"未知成交方向：{side}"]}
+            timeline.append((datetime.fromisoformat(str(filled_at)), "fill", (
+                str(symbol), side, quantity, float(gross), float(fees), float(tax)
+            )))
+        for symbol, action_type, effective_date, multiplier, entitled_quantity, cash_amount, cash_in_lieu, paid_at in action_rows:
+            amounts = [float(multiplier), float(cash_amount), float(cash_in_lieu)]
+            if not all(math.isfinite(x) for x in amounts) or amounts[0] <= 0 or min(amounts[1:]) < 0:
+                return {"ok": False, "status": "異常", "issues": ["公司行動帳含不合法比例或金額"]}
+            effective_stamp = datetime.fromisoformat(str(effective_date) + "T00:00:00+08:00")
+            timeline.append((effective_stamp, "action", (
+                str(symbol), str(action_type), amounts[0], int(entitled_quantity),
+                amounts[1], amounts[2],
+            )))
+            if str(action_type) == "cash_dividend" and paid_at:
+                timeline.append((datetime.fromisoformat(str(paid_at)), "dividend_payment", (
+                    str(symbol), amounts[1],
+                )))
+        timeline.sort(key=lambda item: item[0])
+        for _, event_type, payload in timeline:
+            if event_type == "fill":
+                symbol, side, quantity, gross, fees, tax = payload
+                if side == Side.BUY.value:
+                    expected_cash -= gross + fees
+                    expected_positions[symbol] = expected_positions.get(symbol, 0) + quantity
+                elif side == Side.SELL.value:
+                    expected_cash += gross - fees - tax
+                    expected_positions[symbol] = expected_positions.get(symbol, 0) - quantity
+                else:
+                    return {"ok": False, "status": "異常", "issues": [f"未知成交方向：{side}"]}
+            elif event_type == "action":
+                symbol, action_type, multiplier, entitled_quantity, cash_amount, cash_in_lieu = payload
+                if action_type in {"stock_dividend", "stock_split", "capital_reduction", "par_value_change"}:
+                    current_quantity = expected_positions.get(symbol, 0)
+                    expected_positions[symbol] = int(math.floor(current_quantity * multiplier + 1e-9))
+                expected_cash += cash_in_lieu
+            elif event_type == "dividend_payment":
+                expected_cash += float(payload[1])
 
         expected_positions = {k: v for k, v in expected_positions.items() if v != 0}
         issues = []
