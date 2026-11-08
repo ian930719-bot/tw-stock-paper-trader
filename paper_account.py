@@ -101,8 +101,9 @@ class PaperAccount:
             raise ValueError("報價必須是有限正數")
         if isinstance(max_age_seconds, bool) or int(max_age_seconds) < 0:
             raise ValueError("報價有效秒數設定不合法")
-        if not taiwan_regular_session(current):
-            raise ValueError("非台股一般盤中時段，拒絕撮合")
+        clock = current.time().replace(tzinfo=None)
+        if current.weekday() >= 5 or not (datetime.strptime("09:00", "%H:%M").time() <= clock <= datetime.strptime("13:30", "%H:%M").time()):
+            raise ValueError("非台股盤中交易時段，拒絕撮合")
 
         completed = []
         with closing(sqlite3.connect(self.db_path, timeout=15)) as conn:
@@ -110,11 +111,13 @@ class PaperAccount:
             conn.execute("BEGIN IMMEDIATE")
             try:
                 orders = conn.execute(
-                    "SELECT order_id,side,quantity,limit_price FROM paper_orders "
+                    "SELECT order_id,side,quantity,limit_price,odd_lot FROM paper_orders "
                     "WHERE UPPER(symbol)=? AND status=? ORDER BY created_at",
                     (symbol.upper(), OrderStatus.ACCEPTED.value),
                 ).fetchall()
-                for order_id, side, quantity, limit_price in orders:
+                for order_id, side, quantity, limit_price, odd_lot in orders:
+                    if (odd_lot and clock > datetime.strptime("13:30", "%H:%M").time()) or (not odd_lot and clock > datetime.strptime("13:25", "%H:%M").time()):
+                        continue
                     crossed = price <= limit_price if side == Side.BUY.value else price >= limit_price
                     if not crossed:
                         continue
