@@ -1387,4 +1387,4 @@ with t7:
             pd.DataFrame(order_rows).to_csv(index=False).encode("utf-8-sig"),
             "paper_order_log.csv","text/csv"
         )
-    st.caption("目前自動策略可產生模擬買進與賣出委託：買進依 AI 多因子訊號與 ATR 風險距離控量；賣出依 EMA21、RSI、MACD 退出條件。已加入 SQLite 模擬帳戶成交後現金／持股同步及新鮮報價觸發撮合；目前仍需使用者按鈕觸發每輪報價撮合，尚未有背景常駐即時監控、撤單重送或券商真實成交回報；不得視為已具備實盤自動交易能力。")
+    st.caption("目前自動策略可產生模擬買進委託，並以 EMA21／RSI／MACD 訊號及 O'Neil、Minervini、ATR 動態保護停損管理模擬退出；動態停損需先同步最新已完成日線，再以新鮮盤中報價掃描。模擬成交仍需使用者觸發；尚未有常駐背景 Worker、券商真實成交回報或實盤 API，不得視為全天候自動交易。")
