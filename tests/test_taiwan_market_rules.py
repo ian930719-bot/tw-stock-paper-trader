@@ -23,6 +23,9 @@ class TaiwanMarketRulesTests(unittest.TestCase):
         self.assertFalse(is_valid_stock_tick(99.95))
         self.assertTrue(is_valid_stock_tick(1000))
         self.assertFalse(is_valid_stock_tick(1001))
+        self.assertEqual(stock_tick_size(60, "etf"), Decimal("0.05"))
+        self.assertTrue(is_valid_stock_tick(60.05, "etf"))
+        self.assertFalse(is_valid_stock_tick(60.05, "stock"))
 
     def test_floor_board_lot(self):
         self.assertEqual(floor_board_lot(2999), 2000)
