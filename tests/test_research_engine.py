@@ -85,14 +85,14 @@ class ResearchEngineTests(unittest.TestCase):
 
         def controlled_signals(z):
             entry = pd.Series(False, index=z.index)
-            entry.iloc[0] = True
+            entry.iloc[20] = True
             return {STRATEGIES[0]: (entry, pd.Series(False, index=z.index))}
 
         with patch("research_engine._signals", side_effect=controlled_signals):
             result = shared_capital_backtest(
                 {"ENTRY": frame}, STRATEGIES[0],
                 initial_capital=1_000_000, max_positions=1, warmup=0,
-                report_start_date=frame["date"].iloc[1],
+                report_start_date=frame["date"].iloc[21],
             )
 
         first_equity = float(result["equity"]["資產"].iloc[0])
