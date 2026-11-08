@@ -77,6 +77,6 @@ pip install streamlit yfinance pandas numpy plotly requests scikit-learn
 ## 自動測試
 
 ```bash
-python -m py_compile app.py research_engine.py walk_forward.py market_data.py analytics.py stock_universe.py historical_store.py execution_engine.py paper_account.py stop_monitor.py strategy_exits.py taiwan_market_rules.py
+python -m py_compile app.py research_engine.py walk_forward.py market_data.py analytics.py stock_universe.py historical_store.py execution_engine.py paper_account.py stop_monitor.py strategy_exits.py taiwan_market_rules.py taiwan_trading_calendar.py market_trading_calendar.py taiwan_price_limits.py
 python -m unittest discover -s tests -v
 ```
