@@ -60,7 +60,11 @@ pip install streamlit yfinance pandas numpy plotly requests scikit-learn
 - 樣本外區段應保留作最終檢驗，不得依其結果反覆調參。樣本外表現不保證未來獲利。
 - JSON 備份可跨裝置手動還原，但目前沒有雲端自動同步；匯入會覆蓋當前帳本。
 
-## 資料庫持久化設定\n\n可設定 `MARKET_DB_PATH`（歷史行情快取）與 `EXECUTION_DB_PATH`（模擬委託及帳本）指向持久化磁碟上的 SQLite 檔案。若未設定，預設使用系統暫存目錄。Streamlit Community Cloud 的本機檔案不保證跨重啟／重新部署保存；正式長期使用應連接外部持久化資料庫或定期下載備份。\n\n## 自動測試
+## 資料庫持久化設定
+
+可設定 `MARKET_DB_PATH`（歷史行情快取）與 `EXECUTION_DB_PATH`（模擬委託及帳本）指向持久化磁碟上的 SQLite 檔案。若未設定，預設使用系統暫存目錄。Streamlit Community Cloud 的本機檔案不保證跨重啟／重新部署保存；正式長期使用應連接外部持久化資料庫或定期下載備份。
+
+## 自動測試
 
 ```bash
 python -m py_compile app.py research_engine.py walk_forward.py market_data.py analytics.py stock_universe.py historical_store.py execution_engine.py paper_account.py stop_monitor.py strategy_exits.py taiwan_market_rules.py
