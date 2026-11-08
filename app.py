@@ -283,37 +283,158 @@ with t1:
     f=go.Figure(); f.add_trace(go.Scatter(x=d.date,y=d.close,name="還原收盤")); f.add_trace(go.Scatter(x=d.date,y=d.ema21,name="EMA21")); f.add_trace(go.Scatter(x=d.date,y=d.ema50,name="EMA50")); st.plotly_chart(f,use_container_width=True)
     st.download_button("下載行情指標 CSV",pd.concat([v.assign(代號=k) for k,v in data.items()]).to_csv(index=False).encode("utf-8-sig"),"tw_stock.csv","text/csv")
 with t2:
-    s=st.selectbox("回測標的",list(data),key="bt"); x=data[s].copy().reset_index(drop=True)
-    x["entry"]=(x.close>x.ema21)&x.up&x.rsi.between(50,70)&(x.macd>x.sig)&(x.volume>1.5*x.v20)&(x.close>x.h20)
-    x["exit"]=(x.close<x.ema21)|(x.rsi>75)|(x.macd<x.sig)
-    cash=float(capital); qty=0; stop=0; trades=[]
-    curve=[{"日期":x.iloc[0].date,"資產":float(capital)}]
-    for i in range(len(x)-1):
-        r,n=x.iloc[i],x.iloc[i+1]; op=float(n.open)
-        if qty and (r.exit or n.low<=stop):
-            px=min(op,stop) if n.low<=stop else op; gross=qty*px*.999
-            cash+=gross*(1-.001425-.003); trades[-1]["損益"]=cash-trades[-1]["投入前現金"]; trades[-1]["出場日"]=str(n.date.date()); qty=0
-        if qty==0 and r.entry:
-            px=op*1.001; stop=px-2*(r.atr if pd.notna(r.atr) else px*.04)
-            q=max(0,min(int(risk/max(px-stop,.01)),int(cash/(px*1.001425))))
-            if q: trades.append({"進場日":str(n.date.date()),"股數":q,"進場價":px,"投入前現金":cash}); cash-=q*px*1.001425; qty=q
-        curve.append({"日期":n.date,"資產":cash+qty*float(n.close)})
-    if qty:
-        px=float(x.iloc[-1].close)*.999; cash+=qty*px*(1-.001425-.003); trades[-1]["損益"]=cash-trades[-1]["投入前現金"]; trades[-1]["備註"]="期末平倉"
-        curve[-1]["資產"]=cash
-    simple_equity=pd.DataFrame(curve)
-    simple_risk=equity_risk_metrics(simple_equity,float(capital))
-    simple_trade=trade_statistics(pd.DataFrame(trades))
-    a,b,c,dcol,ecol=st.columns(5)
-    a.metric("期末資產",f"NTD {cash:,.0f}")
-    b.metric("交易筆數",len(trades))
-    c.metric("勝率",f"{simple_trade['勝率']:.1%}" if trades else "無交易")
-    dcol.metric("最大回撤",f"{simple_risk['最大回撤']:.1%}")
-    ecol.metric("Profit Factor","∞" if np.isinf(simple_trade["Profit Factor"]) else f"{simple_trade['Profit Factor']:.2f}")
-    st.warning("簡化回測：收盤產生訊號、次日開盤成交，含估算手續費、證交稅及滑價；未完整處理除權息、停牌、漲跌停、流動性與下市股偏誤。")
-    if curve:
-        f=go.Figure(go.Scatter(x=[z["日期"] for z in curve],y=[z["資產"] for z in curve])); f.add_hline(y=capital,line_dash="dash"); st.plotly_chart(f,use_container_width=True)
-    st.dataframe(pd.DataFrame(trades).drop(columns=["投入前現金"],errors="ignore"),use_container_width=True)
+    st.subheader("歷史回測｜單股與多股票投資組合")
+    backtest_mode = st.radio(
+        "回測模式", ["多股票共享資金組合", "單一股票"],
+        horizontal=True, key="historical_backtest_mode",
+        help="多股票模式會讓所選股票共用同一筆本金、持倉上限及風險預算。",
+    )
+    if backtest_mode == "多股票共享資金組合":
+        portfolio_symbols = st.multiselect(
+            "選擇要一起回測的股票", options=list(data), default=list(data),
+            format_func=lambda code: f"{code} {W.get(code, code)}",
+            key="historical_portfolio_symbols",
+        )
+        p1, p2, p3 = st.columns(3)
+        portfolio_strategy = p1.selectbox("投資策略", STRATEGIES, key="historical_portfolio_strategy")
+        portfolio_max_positions = p2.slider(
+            "最多同時持有檔數", 1, min(10, max(1, len(portfolio_symbols))),
+            min(5, max(1, len(portfolio_symbols))), key="historical_portfolio_max_positions"
+        )
+        default_risk_pct = min(2.0, max(0.1, float(risk) / max(float(capital), 1) * 100))
+        portfolio_risk_pct = p3.slider(
+            "單筆風險預算（資產百分比）", 0.1, 2.0, float(default_risk_pct), 0.1,
+            key="historical_portfolio_risk_pct"
+        ) / 100
+        portfolio_exit = st.selectbox(
+            "出場／停損規則",
+            [
+                ("baseline_atr2", "ATR × 2（基準）"),
+                ("oneil_8pct", "O’Neil 8% 參考停損"),
+                ("minervini_structure", "Minervini 結構低點代理"),
+                ("atr_1_5", "ATR × 1.5"),
+                ("atr_2_5", "ATR × 2.5"),
+                ("atr_3", "ATR × 3"),
+            ],
+            format_func=lambda item: item[1], key="historical_portfolio_exit",
+        )
+        st.caption(
+            f"共選取 {len(portfolio_symbols)} 檔；共用本金 NTD {capital:,.0f}。"
+            "訊號只使用當時已完成的歷史日線，下一交易日開盤模擬成交。"
+        )
+        portfolio_config = (
+            tuple(sorted(portfolio_symbols)), portfolio_strategy, float(capital),
+            int(portfolio_max_positions), float(portfolio_risk_pct), portfolio_exit[0], period,
+        )
+        if st.button("執行多股票組合回測", key="run_historical_multi_portfolio", disabled=not portfolio_symbols):
+            selected_frames = {code: data[code].copy() for code in portfolio_symbols if code in data}
+            with st.spinner("使用共享資金池逐日模擬所有股票…"):
+                result = shared_capital_backtest(
+                    selected_frames, portfolio_strategy,
+                    initial_capital=float(capital), max_positions=int(portfolio_max_positions),
+                    risk_fraction=float(portfolio_risk_pct), warmup=200,
+                    exit_profile=portfolio_exit[0],
+                )
+            st.session_state["historical_multi_result"] = result
+            st.session_state["historical_multi_config"] = portfolio_config
+        if st.session_state.get("historical_multi_config") == portfolio_config:
+            result = st.session_state["historical_multi_result"]
+            coverage = result.get("coverage", {})
+            st.write(
+                f"實際納入：{coverage.get('symbols_used', 0)} / "
+                f"{coverage.get('symbols_requested', len(portfolio_symbols))} 檔"
+            )
+            if result["equity"].empty:
+                st.warning("沒有足夠歷史資料可回測。請選擇較長期間（建議 5y），並確認所選股票至少有 203 個有效交易日。")
+            else:
+                metrics = result["metrics"]
+                risk_metrics = equity_risk_metrics(result["equity"], float(capital))
+                trade_metrics = trade_statistics(result["trades"])
+                m1, m2, m3, m4, m5 = st.columns(5)
+                m1.metric("期末資產", f"NTD {metrics['期末資產']:,.0f}")
+                m2.metric("總報酬", f"{metrics['總報酬']:.1%}")
+                m3.metric("年化報酬", f"{metrics['年化報酬']:.1%}")
+                m4.metric("最大回撤", f"{metrics['最大回撤']:.1%}")
+                m5.metric("交易筆數", str(trade_metrics["交易筆數"]))
+                m6, m7, m8, m9 = st.columns(4)
+                m6.metric("勝率", f"{trade_metrics['勝率']:.1%}")
+                m7.metric("Profit Factor", "∞" if np.isinf(trade_metrics["Profit Factor"]) else f"{trade_metrics['Profit Factor']:.2f}")
+                m8.metric("Sharpe", f"{metrics.get('Sharpe', 0):.2f}")
+                m9.metric("Sortino", f"{risk_metrics.get('Sortino', 0):.2f}")
+                st.subheader("共享資金組合資產曲線")
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=result["equity"]["日期"], y=result["equity"]["資產"], name="組合總資產"))
+                fig.add_hline(y=float(capital), line_dash="dash")
+                fig.update_layout(yaxis_title="新台幣")
+                st.plotly_chart(fig, use_container_width=True)
+                trades = result["trades"]
+                if not trades.empty:
+                    st.subheader("各股票交易貢獻")
+                    per_symbol = trades.groupby("代號").agg(
+                        交易筆數=("損益", "count"), 累計損益=("損益", "sum"),
+                        平均報酬=("報酬率", "mean"),
+                        獲利筆數=("損益", lambda values: int((values > 0).sum())),
+                    ).reset_index()
+                    per_symbol["名稱"] = per_symbol["代號"].map(W).fillna(per_symbol["代號"])
+                    st.dataframe(per_symbol[["代號", "名稱", "交易筆數", "累計損益", "平均報酬", "獲利筆數"]].sort_values("累計損益", ascending=False), use_container_width=True, hide_index=True)
+                    st.subheader("完整模擬交易紀錄")
+                    st.dataframe(trades, use_container_width=True, hide_index=True)
+                    st.download_button("下載多股票回測交易 CSV", trades.to_csv(index=False).encode("utf-8-sig"), "multi_stock_backtest_trades.csv", "text/csv")
+                else:
+                    st.info("此期間沒有符合策略條件的成交訊號。")
+                st.download_button("下載組合每日資產 CSV", result["equity"].to_csv(index=False).encode("utf-8-sig"), "multi_stock_backtest_equity.csv", "text/csv")
+        elif "historical_multi_result" in st.session_state:
+            st.info("回測條件已變更；請重新執行，避免沿用舊結果。")
+        st.warning("回測限制：採日線訊號、次日開盤成交及估算手續費／證交稅／滑價；仍未完整涵蓋歷史下市股、歷史成分股、除權息現金流、停牌與漲跌停排隊。結果不是未來獲利保證。")
+    else:
+        s = st.selectbox("回測標的", list(data), key="bt")
+        x = data[s].copy().reset_index(drop=True)
+        x["entry"] = (x.close > x.ema21) & x.up & x.rsi.between(50, 70) & (x.macd > x.sig) & (x.volume > 1.5 * x.v20) & (x.close > x.h20)
+        x["exit"] = (x.close < x.ema21) | (x.rsi > 75) | (x.macd < x.sig)
+        cash = float(capital)
+        qty = 0
+        stop = 0
+        trades = []
+        curve = [{"日期": x.iloc[0].date, "資產": float(capital)}]
+        for i in range(len(x) - 1):
+            r, n = x.iloc[i], x.iloc[i + 1]
+            op = float(n.open)
+            if qty and (r.exit or n.low <= stop):
+                px = min(op, stop) if n.low <= stop else op
+                gross = qty * px * .999
+                cash += gross * (1 - .001425 - .003)
+                trades[-1]["損益"] = cash - trades[-1]["投入前現金"]
+                trades[-1]["出場日"] = str(n.date.date())
+                qty = 0
+            if qty == 0 and r.entry:
+                px = op * 1.001
+                stop = px - 2 * (r.atr if pd.notna(r.atr) else px * .04)
+                q = max(0, min(int(risk / max(px - stop, .01)), int(cash / (px * 1.001425))))
+                if q:
+                    trades.append({"進場日": str(n.date.date()), "股數": q, "進場價": px, "投入前現金": cash})
+                    cash -= q * px * 1.001425
+                    qty = q
+            curve.append({"日期": n.date, "資產": cash + qty * float(n.close)})
+        if qty:
+            px = float(x.iloc[-1].close) * .999
+            cash += qty * px * (1 - .001425 - .003)
+            trades[-1]["損益"] = cash - trades[-1]["投入前現金"]
+            trades[-1]["備註"] = "期末平倉"
+            curve[-1]["資產"] = cash
+        simple_equity = pd.DataFrame(curve)
+        simple_risk = equity_risk_metrics(simple_equity, float(capital))
+        simple_trade = trade_statistics(pd.DataFrame(trades))
+        a, b, c, dcol, ecol = st.columns(5)
+        a.metric("期末資產", f"NTD {cash:,.0f}")
+        b.metric("交易筆數", len(trades))
+        c.metric("勝率", f"{simple_trade['勝率']:.1%}" if trades else "無交易")
+        dcol.metric("最大回撤", f"{simple_risk['最大回撤']:.1%}")
+        ecol.metric("Profit Factor", "∞" if np.isinf(simple_trade["Profit Factor"]) else f"{simple_trade['Profit Factor']:.2f}")
+        st.warning("簡化回測：收盤產生訊號、次日開盤成交，含估算手續費、證交稅及滑價；未完整處理除權息、停牌、漲跌停、流動性與下市股偏誤。")
+        fig = go.Figure(go.Scatter(x=[item["日期"] for item in curve], y=[item["資產"] for item in curve]))
+        fig.add_hline(y=capital, line_dash="dash")
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(pd.DataFrame(trades).drop(columns=["投入前現金"], errors="ignore"), use_container_width=True)
 with t3:
     st.subheader("純模擬交易帳本")
     st.caption("目前帳本存在 Streamlit 工作階段，不會連接券商；工作階段或服務重啟時可能清空。請使用下方 JSON 備份功能保存與跨裝置還原。")
