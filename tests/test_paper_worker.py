@@ -98,6 +98,22 @@ class PaperWorkerTests(unittest.TestCase):
         self.assertTrue(worker_b.acquire_lease(self.now))
         worker_b.release_lease()
 
+    def test_worker_blocks_all_trading_when_account_ledger_is_corrupt(self):
+        import sqlite3
+        worker = PaperWorker(
+            db_path=self.db, market_db_path=self.market_db,
+            watchlist={"2330": "上市"}, auto_entries=True,
+            now_provider=lambda: self.now,
+            quote_fetcher=lambda symbol, market: self.fail("corrupt ledger must block quote requests"),
+        )
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("UPDATE paper_account SET cash=cash-1 WHERE id=1")
+        result = worker.run_once(self.now)
+        self.assertEqual(result["status"], "帳本完整性異常，已停止交易")
+        self.assertFalse(result["ledger_integrity"]["ok"])
+        self.assertEqual(result["entries"], 0)
+        self.assertEqual(result["fills"], 0)
+
     def test_worker_skips_stale_quotes_without_loading_history(self):
         worker = PaperWorker(
             db_path=self.db, market_db_path=self.market_db,
