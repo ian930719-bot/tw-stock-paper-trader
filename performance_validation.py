@@ -325,6 +325,14 @@ def main():
             "oos_window_sessions": TEST_DAYS, "warmup_sessions": WARMUP_BARS,
             "exit_profile": "baseline_atr2",
             "continuous_portfolio": True,
+            "high_conviction_breakout": {
+                "entry": "55-session high breakout; top 20% 126-session momentum; close above SMA50>SMA200; volume >= 1.5x prior 20-session average",
+                "exit": "close below EMA21 or prior 20-session low or negative 63-session momentum",
+                "risk_fraction_per_trade": 0.025,
+                "max_positions": MAX_POSITIONS,
+                "exit_profile": "atr_2_5",
+                "leverage": 1.0,
+            },
         },
         "limitations": [
             "Yahoo Finance is not an exchange-certified source; its historical bars and corporate-action coverage may be revised or incomplete.",
