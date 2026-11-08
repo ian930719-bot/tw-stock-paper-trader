@@ -23,6 +23,7 @@ from strategy_exits import PROFILES, initial_stop, risk_position_size
 from walk_forward import rolling_walk_forward, regime_performance, parameter_sensitivity
 from taiwan_market_rules import floor_board_lot
 from taiwan_trading_calendar import trading_day_status
+from taiwan_price_limits import get_official_price_limit
 st.set_page_config(page_title="台股模擬交易",layout="wide")
 TZ=ZoneInfo("Asia/Taipei")
 from stock_universe import fetch_stock_universe, universe_summary, StockUniverseError
@@ -55,6 +56,7 @@ except Exception as exc:
     ])
     universe_source = "內建備援清單（非完整資料庫）"
 W = dict(zip(stock_master["代號"], stock_master["名稱"]))
+market_by_symbol = dict(zip(stock_master["代號"].astype(str), stock_master["市場"].astype(str)))
 etf_mask = (
     stock_master["產業"].astype(str).str.contains("ETF|指數股票型基金", case=False, na=False)
     | stock_master["名稱"].astype(str).str.contains("ETF", case=False, na=False)
@@ -931,7 +933,12 @@ with t7:
     st.warning("目前只建立與撮合模擬委託，不會連接券商或送出真實委託。實盤交易開關尚未實作，預設不存在。")
     st.markdown("**自動策略條件**：買進採用「多因子觀察」訊號，要求 AI 測試優於多數類基準至少 2 個百分點、五日預測分數至少 55%；賣出則檢查 EMA21、RSI 與 MACD 退出條件。買賣都必須取得盤中更新的參考報價。")
     limits = RiskLimits()
-    engine = PaperExecutionEngine(limits=limits)
+    engine = PaperExecutionEngine(
+        limits=limits,
+        price_limit_provider=lambda symbol, market: get_official_price_limit(
+            symbol, market, expected_date=session_now.date()
+        ),
+    )
     paper_account = PaperAccount(engine.db_path, initial_cash=float(capital))
     stop_monitor = StopMonitor(engine.db_path, stop_loss_pct=0.05, take_profit_pct=0.10, trailing_stop_pct=0.05)
     account_snapshot = paper_account.snapshot()
@@ -982,6 +989,7 @@ with t7:
             idempotency_key=f"manual-{manual_symbol}-{manual_side_label}-{manual_qty}-{manual_price}-{session_now.isoformat()}",
             instrument_type="etf" if str(manual_symbol) in etf_codes else "stock",
             odd_lot=manual_is_odd,
+            market=market_by_symbol.get(str(manual_symbol), "上市"),
         )
         manual_result = engine.submit(
             manual_intent, cash=cash_for_new_order, positions=positions_now, equity=value_now,
@@ -1091,6 +1099,7 @@ with t7:
                 idempotency_key=f"auto-{side.value.lower()}-{candidate['代號']}-{today_text}-{signal_row['日線日期']}",
                 instrument_type="etf" if candidate["代號"] in etf_codes else "stock",
                 odd_lot=bool(candidate.get("零股", False)),
+                market=market_by_symbol.get(str(candidate["代號"]), "上市"),
             )
             result = engine.submit(
                 intent, cash=cash_available, positions=positions,
@@ -1183,7 +1192,8 @@ with t7:
                 symbol=signal["symbol"], side=Side.SELL, quantity=qty,
                 limit_price=float(signal["price"]), reason=signal["reason"],
                 idempotency_key=f"stop-{signal['symbol']}-{signal['reason']}-{today_for_risk}-{signal['quote_time']}",
-                instrument_type="etf" if signal["symbol"] in etf_codes else "stock")
+                instrument_type="etf" if signal["symbol"] in etf_codes else "stock",
+                market=market_by_symbol.get(str(signal["symbol"]), "上市"))
             result = engine.submit(
                 intent, cash=float(account_snapshot["cash"]),
                 positions=account_positions, equity=current_equity,
