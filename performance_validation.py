@@ -245,7 +245,7 @@ def main():
         minimum_universe=MIN_SYMBOLS,
     )
     aggressive_overrides = build_high_conviction_breakout_overrides(
-        frames, corporate_actions=actions, relative_strength_quantile=0.80,
+        frames, corporate_actions=actions, relative_strength_quantile=0.90,
         minimum_universe=MIN_SYMBOLS, volume_multiple=1.50,
     )
     strategies = list(STRATEGIES) + [
@@ -259,7 +259,7 @@ def main():
             frames, strategy,
             initial_capital=INITIAL_CAPITAL,
             max_positions=MAX_POSITIONS,
-            risk_fraction=0.025 if is_aggressive else RISK_FRACTION,
+            risk_fraction=RISK_FRACTION,
             lookback_days=LOOKBACK_DAYS,
             test_days=TEST_DAYS,
             warmup_bars=WARMUP_BARS,
@@ -274,7 +274,7 @@ def main():
         )
         if len(result["windows"]) < 4:
             raise RuntimeError(f"{strategy} 僅完成 {len(result['windows'])} 個樣本外區段")
-        summaries.append(summarize_result(strategy, result, 0.025 if is_aggressive else RISK_FRACTION))
+        summaries.append(summarize_result(strategy, result, RISK_FRACTION))
         if not result["windows"].empty:
             part = result["windows"].copy()
             part.insert(0, "策略", strategy)
@@ -326,15 +326,15 @@ def main():
         "settings": {
             "initial_capital_NTD": INITIAL_CAPITAL, "fee_rate": FEE,
             "sell_tax_rate": SELL_TAX, "one_way_slippage": SLIPPAGE,
-            "risk_fraction": RISK_FRACTION, "aggressive_breakout_risk_fraction": 0.025, "max_positions": MAX_POSITIONS,
+            "risk_fraction": RISK_FRACTION, "aggressive_breakout_risk_fraction": RISK_FRACTION, "max_positions": MAX_POSITIONS,
             "max_participation_rate": 0.01, "lookback_sessions": LOOKBACK_DAYS,
             "oos_window_sessions": TEST_DAYS, "warmup_sessions": WARMUP_BARS,
             "exit_profile": "baseline_atr2",
             "continuous_portfolio": True,
             "high_conviction_breakout": {
-                "entry": "55-session high breakout; top 20% 126-session momentum; close above SMA50>SMA200; volume >= 1.5x prior 20-session average",
+                "entry": "55-session high breakout; top 10% 126-session momentum; positive 63/126-session momentum; rising SMA50 and SMA200 over 20 sessions; close above SMA50>SMA200; breakout extension capped at 8%; volume >= 1.5x prior 20-session average",
                 "exit": "close below EMA21 or prior 20-session low or negative 63-session momentum",
-                "risk_fraction_per_trade": 0.025,
+                "risk_fraction_per_trade": RISK_FRACTION,
                 "max_positions": MAX_POSITIONS,
                 "exit_profile": "atr_2_5",
                 "leverage": 1.0,
