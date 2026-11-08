@@ -42,9 +42,14 @@ def _connect(path: str | None = None):
             volume REAL NOT NULL,
             source TEXT NOT NULL,
             fetched_at TEXT NOT NULL,
+            price_basis TEXT NOT NULL DEFAULT 'unknown',
             PRIMARY KEY(symbol, date)
         )
     """)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(daily_bars)").fetchall()}
+    if "price_basis" not in columns:
+        # Legacy TaiwanStockPriceAdj rows are marked unknown and excluded.
+        conn.execute("ALTER TABLE daily_bars ADD COLUMN price_basis TEXT NOT NULL DEFAULT 'unknown'")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_daily_bars_symbol_date ON daily_bars(symbol, date)")
     return conn
 
@@ -80,9 +85,9 @@ def normalize_daily_bars(records, symbol: str) -> pd.DataFrame:
 
 def fetch_finmind_daily(symbol: str, start_date: str, end_date: str | None = None,
                         token: str = "", timeout: int = 20) -> pd.DataFrame:
-    """Fetch one symbol's adjusted daily OHLCV from FinMind."""
+    """Fetch raw, executable daily OHLCV (not retrospectively adjusted prices)."""
     params = {
-        "dataset": "TaiwanStockPriceAdj",
+        "dataset": "TaiwanStockPrice",
         "data_id": str(symbol),
         "start_date": start_date,
     }
@@ -106,24 +111,27 @@ def fetch_finmind_daily(symbol: str, start_date: str, end_date: str | None = Non
 
 
 def upsert_daily_bars(symbol: str, frame: pd.DataFrame, source: str,
-                      path: str | None = None) -> int:
+                      path: str | None = None, price_basis: str = "raw") -> int:
+    if price_basis != "raw":
+        raise ValueError("歷史成交回測只接受 raw 原始成交價；不可寫入回溯還原價")
     clean = normalize_daily_bars(frame, symbol)
     if clean.empty:
         return 0
     fetched_at = datetime.now(TZ).isoformat()
     values = [
         (str(symbol), row.date, float(row.open), float(row.high), float(row.low),
-         float(row.close), float(row.volume), str(source), fetched_at)
+         float(row.close), float(row.volume), str(source), fetched_at, price_basis)
         for row in clean.itertuples(index=False)
     ]
     with closing(_connect(path)) as conn:
         conn.executemany("""
-            INSERT INTO daily_bars(symbol,date,open,high,low,close,volume,source,fetched_at)
-            VALUES(?,?,?,?,?,?,?,?,?)
+            INSERT INTO daily_bars(symbol,date,open,high,low,close,volume,source,fetched_at,price_basis)
+            VALUES(?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(symbol,date) DO UPDATE SET
               open=excluded.open, high=excluded.high, low=excluded.low,
               close=excluded.close, volume=excluded.volume,
-              source=excluded.source, fetched_at=excluded.fetched_at
+              source=excluded.source, fetched_at=excluded.fetched_at,
+              price_basis=excluded.price_basis
         """, values)
         conn.commit()
     return len(values)
@@ -134,12 +142,12 @@ def read_daily_bars(symbol: str, start_date: str | None = None,
     with closing(_connect(path)) as conn:
         if start_date:
             rows = conn.execute(
-                "SELECT date,open,high,low,close,volume FROM daily_bars WHERE symbol=? AND date>=? ORDER BY date",
+                "SELECT date,open,high,low,close,volume FROM daily_bars WHERE symbol=? AND price_basis='raw' AND date>=? ORDER BY date",
                 (str(symbol), start_date),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT date,open,high,low,close,volume FROM daily_bars WHERE symbol=? ORDER BY date",
+                "SELECT date,open,high,low,close,volume FROM daily_bars WHERE symbol=? AND price_basis='raw' ORDER BY date",
                 (str(symbol),),
             ).fetchall()
     frame = pd.DataFrame(rows, columns=COLUMNS)
@@ -151,7 +159,7 @@ def read_daily_bars(symbol: str, start_date: str | None = None,
 def price_cache_summary(path: str | None = None) -> dict:
     with closing(_connect(path)) as conn:
         count, symbols, latest = conn.execute(
-            "SELECT COUNT(*), COUNT(DISTINCT symbol), MAX(date) FROM daily_bars"
+            "SELECT COUNT(*), COUNT(DISTINCT symbol), MAX(date) FROM daily_bars WHERE price_basis='raw'"
         ).fetchone()
     return {"資料列數": int(count), "已快取標的": int(symbols), "最新交易日": latest}
 
@@ -175,12 +183,12 @@ def get_incremental_history(symbol: str, period: str, token: str = "",
         overlap = (cached_all["date"].max() - pd.Timedelta(days=10)).strftime("%Y-%m-%d")
         fetch_start = max(requested_start, overlap)
 
-    source_status = "FinMind 還原日線"
+    source_status = "FinMind 原始成交日線"
     refresh_error = None
     try:
         fresh = fetch_finmind_daily(symbol, fetch_start, token=token)
         if not fresh.empty:
-            upsert_daily_bars(symbol, fresh, "FinMind TaiwanStockPriceAdj", path)
+            upsert_daily_bars(symbol, fresh, "FinMind TaiwanStockPrice", path)
     except Exception as exc:
         refresh_error = str(exc)
 
@@ -189,9 +197,9 @@ def get_incremental_history(symbol: str, period: str, token: str = "",
         try:
             fallback = fallback_fetcher(symbol, period)
             if fallback is not None and not fallback.empty:
-                upsert_daily_bars(symbol, fallback, "Yahoo Finance auto-adjusted", path)
+                upsert_daily_bars(symbol, fallback, "Yahoo Finance raw OHLCV", path)
                 cached = read_daily_bars(symbol, requested_start, path)
-                source_status = "Yahoo Finance 備援（還原價）"
+                source_status = "Yahoo Finance 備援（原始成交價）"
         except Exception as exc:
             refresh_error = (refresh_error + "；" if refresh_error else "") + str(exc)
 
