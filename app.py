@@ -129,7 +129,7 @@ def fetch_yahoo_history(code, period):
     for suffix in [".TW", ".TWO"]:
         try:
             frame = yf.Ticker(str(code) + suffix).history(
-                period=period, interval="1d", auto_adjust=True
+                period=period, interval="1d", auto_adjust=False
             )
             if not frame.empty:
                 frame = frame.reset_index().rename(columns={
@@ -490,7 +490,7 @@ with t2:
         walkforward_strategy = "AI 自適應策略" if adaptive_walkforward else portfolio_strategy
         if st.button("執行 Walk-forward＋0050 基準比較", key="run_walkforward_benchmark", disabled=not portfolio_symbols):
             wf_frames = {code: data[code].copy() for code in portfolio_symbols if code in data}
-            with st.spinner("執行多段樣本外驗證，並取得 0050 還原日線作基準…"):
+            with st.spinner("執行多段樣本外驗證，並取得 0050 原始價格日線作基準…"):
                 wf_result = cached_rolling_walk_forward(
                     wf_frames, walkforward_strategy,
                     initial_capital=float(capital),
@@ -829,7 +829,7 @@ with t4:
     c1.metric("SQLite 快取日線",f"{cache_stats['資料列數']:,}")
     c2.metric("已快取標的",f"{cache_stats['已快取標的']:,}")
     c3.metric("資料庫最新交易日",cache_stats["最新交易日"] or "尚無資料")
-    st.caption("歷史日線優先使用 FinMind TaiwanStockPriceAdj（還原日線），每檔以最近 10 個日曆日重疊區間增量更新；API 失敗時使用可用快取，首次無快取才以 Yahoo Finance 還原日線備援。")
+    st.caption("歷史日線使用 FinMind TaiwanStockPrice 原始成交價，每檔以最近 10 個日曆日重疊區間增量更新；API 失敗時使用可用原始價快取，首次無快取才以 Yahoo Finance 未還原 OHLCV 備援。")
     status_rows=[]
     for code,info in history_status.items():
         status_rows.append({"代號":code,"來源狀態":info.get("來源狀態"),
@@ -967,7 +967,7 @@ with t6:
     st.subheader("整合研究中心")
 
     st.markdown("**市場基準比較與成本敏感度**")
-    st.caption("以 0050 還原價格（可投資 ETF）及加權指數價格指數作比較。策略與基準使用相同的完整歷史或樣本外日期區間；基準未扣交易成本、股息稅務與追蹤誤差，加權指數為價格報酬、不含股息。")
+    st.caption("以 0050 原始價格（可投資 ETF）及加權指數價格指數作比較。策略與基準使用相同的完整歷史或樣本外日期區間；基準未扣交易成本、股息稅務與追蹤誤差，加權指數為價格報酬、不含股息。")
     benchmark_period=st.selectbox("分析區間",["樣本外區段","完整歷史期間"],index=0,key="benchmark_period")
     benchmark_button=st.button("執行基準比較與成本敏感度",key="run_benchmark_cost")
     if benchmark_button:
@@ -1007,7 +1007,7 @@ with t6:
                     if code=="0050":
                         raw_b=getdata("0050",period)
                     else:
-                        raw_b=yf.Ticker("^TWII").history(period=period,interval="1d",auto_adjust=True)
+                        raw_b=yf.Ticker("^TWII").history(period=period,interval="1d",auto_adjust=False)
                         if not raw_b.empty:
                             raw_b=raw_b.reset_index().rename(columns={"Date":"date","Datetime":"date","Close":"close"})
                             raw_b["date"]=pd.to_datetime(raw_b["date"]).dt.tz_localize(None)
