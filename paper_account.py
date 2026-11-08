@@ -217,6 +217,7 @@ class PaperAccount:
             market_open, calendar_note = self.calendar_checker(current.date())
         if not market_open:
             raise ValueError(f"官方交易日曆再次確認失敗，拒絕撮合：{calendar_note}")
+        from taiwan_price_limits import get_official_price_limit, validate_limit_price
         completed = []
         with closing(sqlite3.connect(self.db_path, timeout=15)) as conn:
             conn.isolation_level = None
