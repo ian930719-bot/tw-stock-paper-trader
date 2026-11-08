@@ -352,7 +352,7 @@ def shared_capital_backtest(
                             reference = float(todays[code]["open"])
                         cash_in_lieu = fractional_shares * reference
                         cash += cash_in_lieu
-                        p["dividends"] = float(p.get("dividends", 0.0)) + cash_in_lieu
+                        p["cash_in_lieu"] = float(p.get("cash_in_lieu", 0.0)) + cash_in_lieu
                     p["shares"] = whole_shares
                     for key in ("entry_price", "stop", "high_water", "atr", "initial_risk"):
                         p[key] = float(p[key]) / multiplier
@@ -385,12 +385,14 @@ def shared_capital_backtest(
                 fill = raw_fill * (1.0 - slip_rate)
                 proceeds = p["shares"] * fill * (1.0 - fee_rate - tax_rate)
                 dividend_income = float(p.get("dividends", 0.0))
-                pnl = proceeds + dividend_income - p["entry_cost"]
+                cash_in_lieu_income = float(p.get("cash_in_lieu", 0.0))
+                pnl = proceeds + dividend_income + cash_in_lieu_income - p["entry_cost"]
                 trades.append({
                     "代號": code, "訊號日": p["signal_date"], "進場日": p["entry_date"],
                     "出場日": str(pd.Timestamp(d).date()), "股數": p["shares"],
                     "進場成本": p["entry_cost"], "出場收入": proceeds,
                     "股利收入": dividend_income,
+                    "零股權利現金結算": cash_in_lieu_income,
                     "損益": pnl, "報酬率": pnl / p["entry_cost"] if p["entry_cost"] else 0.0,
                     "出場原因": "策略出場" if prior_exit else "停損／移動停損",
                     "曾觸發獲利檢視": bool(p.get("profit_review_triggered", False)),
@@ -483,7 +485,7 @@ def shared_capital_backtest(
                     "management": management, "trail_multiple": trail_multiple,
                     "profit_review_triggered": False, "exit_next": False,
                     "adv20": adv20, "max_participation_rate": max_participation_rate,
-                    "dividends": 0.0,
+                    "dividends": 0.0, "cash_in_lieu": 0.0,
                 }
                 # If the stop is touched later on the entry day, simulate the
                 # stop fill rather than waiting until the following session.
@@ -491,13 +493,15 @@ def shared_capital_backtest(
                     fill = min(float(row["open"]), stop) * (1.0 - slip_rate)
                     proceeds = shares * fill * (1.0 - fee_rate - tax_rate)
                     dividend_income = float(positions[code].get("dividends", 0.0))
-                    pnl = proceeds + dividend_income - entry_cost
+                    cash_in_lieu_income = float(positions[code].get("cash_in_lieu", 0.0))
+                    pnl = proceeds + dividend_income + cash_in_lieu_income - entry_cost
                     trades.append({
                         "代號": code, "訊號日": positions[code]["signal_date"],
                         "進場日": positions[code]["entry_date"],
                         "出場日": str(pd.Timestamp(d).date()), "股數": shares,
                         "進場成本": entry_cost, "出場收入": proceeds,
                         "股利收入": dividend_income,
+                        "零股權利現金結算": cash_in_lieu_income,
                         "損益": pnl, "報酬率": pnl / entry_cost if entry_cost else 0.0,
                         "出場原因": "進場日觸及初始停損",
                         "曾觸發獲利檢視": False, "最高風險倍數": 0.0,
@@ -528,12 +532,14 @@ def shared_capital_backtest(
             fill = float(todays[code]["close"]) * (1.0 - slip_rate)
             proceeds = p["shares"] * fill * (1.0 - fee_rate - tax_rate)
             dividend_income = float(p.get("dividends", 0.0))
-            pnl = proceeds + dividend_income - p["entry_cost"]
+            cash_in_lieu_income = float(p.get("cash_in_lieu", 0.0))
+            pnl = proceeds + dividend_income + cash_in_lieu_income - p["entry_cost"]
             trades.append({
                 "代號": code, "訊號日": p["signal_date"], "進場日": p["entry_date"],
                 "出場日": str(pd.Timestamp(d).date()), "股數": p["shares"],
                 "進場成本": p["entry_cost"], "出場收入": proceeds,
                 "股利收入": dividend_income,
+                "零股權利現金結算": cash_in_lieu_income,
                 "損益": pnl, "報酬率": pnl / p["entry_cost"] if p["entry_cost"] else 0.0,
                 "出場原因": "該標的資料期末平倉",
                 "曾觸發獲利檢視": bool(p.get("profit_review_triggered", False)),
