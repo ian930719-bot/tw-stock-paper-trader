@@ -132,6 +132,7 @@ def shared_capital_backtest(
     slippage: float = 0.001,
     warmup: int = 260,
     report_start_date=None,
+    exit_profile: str = "baseline_atr2",
 ) -> dict:
     """Multi-symbol portfolio simulation with one shared cash balance.
 
@@ -141,6 +142,10 @@ def shared_capital_backtest(
     leverage, shorting, or fractional shares. Risk sizing is capped by an
     ATR-based stop distance, while total exposure is limited by available cash.
     """
+    exit_profiles = {"baseline_atr2", "oneil_8pct", "minervini_structure", "atr_1_5", "atr_2", "atr_2_5", "atr_3"}
+    if exit_profile not in exit_profiles:
+        raise ValueError(f"未知出場設定：{exit_profile}；可用值：{sorted(exit_profiles)}")
+
     initial_capital = float(initial_capital)
     risk_fraction = float(risk_fraction)
     if not np.isfinite(initial_capital) or initial_capital <= 0:
@@ -169,6 +174,8 @@ def shared_capital_backtest(
         z["_entry"] = entry.fillna(False).to_numpy()
         z["_exit"] = exit_.fillna(False).to_numpy()
         z["_momentum"] = z["close"].pct_change(20).fillna(-999).to_numpy()
+        # Lowest low of the prior 10 completed bars: transparent structural-stop proxy.
+        z["_structure_low"] = z["low"].rolling(10, min_periods=10).min().to_numpy()
         if "atr" in z:
             z["_atr"] = pd.to_numeric(z["atr"], errors="coerce").fillna(z["close"] * .04).to_numpy()
         else:
@@ -257,7 +264,21 @@ def shared_capital_backtest(
                 allocation = cash / slots_left
                 open_px = float(row["open"]) * (1.0 + slip_rate)
                 atr = max(float(signal_row["_atr"]), open_px * .005)
-                stop = open_px - 2.0 * atr
+                if exit_profile in ("baseline_atr2", "atr_2"):
+                    stop = open_px - 2.0 * atr
+                elif exit_profile == "oneil_8pct":
+                    # Commonly cited 7–8% discipline represented at 8% for comparison.
+                    stop = open_px * 0.92
+                elif exit_profile == "minervini_structure":
+                    structure_low = float(signal_row["_structure_low"])
+                    if not np.isfinite(structure_low) or structure_low <= 0 or structure_low >= open_px:
+                        continue  # no valid structural stop => no trade
+                    stop = structure_low
+                else:
+                    multiple = {"atr_1_5": 1.5, "atr_2_5": 2.5, "atr_3": 3.0}[exit_profile]
+                    stop = open_px - multiple * atr
+                if not np.isfinite(stop) or stop <= 0 or stop >= open_px:
+                    continue
                 prior_equity = cash + sum(
                     p["shares"] * float(prepared[k].loc[
                         pd.to_datetime(prepared[k]["date"]) < d, "close"
@@ -374,6 +395,8 @@ def shared_capital_backtest(
         "equity": eq,
         "trades": pd.DataFrame(trades),
         "coverage": {"symbols_requested": len(frames), "symbols_used": len(prepared)},
+        "exit_profile": exit_profile,
+        "exit_profile_note": ("Minervini 使用前 10 根已完成日 K 最低價作為結構失效代理；不是完整 SEPA 型態辨識。" if exit_profile == "minervini_structure" else "出場設定僅作候選比較，尚未證明任何一組參數具有樣本外優勢。"),
     }
 
 
