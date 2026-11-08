@@ -102,6 +102,7 @@ def select_candidate(
     exit_profile="baseline_atr2",
     warmup=260,
     min_validation_trades=8,
+    signal_cache=None,
 ):
     """Choose a candidate using an inner chronological validation slice only.
 
@@ -127,7 +128,21 @@ def select_candidate(
     rows = []
     best_params, best_score = None, -np.inf
     for params in candidate_grid():
-        overrides = _prepare_overrides(clean, params)
+        if signal_cache is None:
+            overrides = _prepare_overrides(clean, params)
+        else:
+            key = tuple(sorted(params.items()))
+            overrides = {}
+            for code, frame in clean.items():
+                cached = signal_cache.get((code, key))
+                if cached is None:
+                    overrides[code] = build_signals(frame, params)
+                else:
+                    dates_index = pd.DatetimeIndex(pd.to_datetime(frame["date"]))
+                    overrides[code] = tuple(
+                        series.reindex(dates_index).fillna(False).reset_index(drop=True)
+                        for series in cached
+                    )
         result = shared_capital_backtest(
             clean, "AI 候選內部驗證",
             initial_capital=initial_capital,
