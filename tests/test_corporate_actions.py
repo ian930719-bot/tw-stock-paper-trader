@@ -22,6 +22,16 @@ class CorporateActionTests(unittest.TestCase):
         self.assertAlmostEqual(float(cash["cash_per_share"]), 4.0)
         self.assertEqual(str(cash["payment_date"]), "2026-08-01")
 
+    def test_unknown_cash_payment_date_remains_unsettled(self):
+        events = normalize_corporate_actions("2330", dividends=[{
+            "CashExDividendTradingDate":"2026-07-01",
+            "CashEarningsDistribution":2.0,
+        }])
+        cash = events.loc[events["action_type"]=="cash_dividend"].iloc[0]
+        self.assertTrue(pd.isna(cash["payment_date"]))
+        clean = validate_action_frame(events, "2330")
+        self.assertTrue(pd.isna(clean.iloc[0]["payment_date"]))
+
     def test_split_capital_reduction_and_par_value_ratios(self):
         events = normalize_corporate_actions(
             "0050",
