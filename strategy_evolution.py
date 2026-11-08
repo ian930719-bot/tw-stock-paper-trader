@@ -43,13 +43,13 @@ def candidate_grid():
         yield {
             "signal_family": "mean_reversion",
             "breakout": 0, "volume_multiple": 0.0, "trend_period": 200,
-            "min_entry_score": rsi_floor, "max_atr_pct": band_multiple,
+            "rsi_floor": rsi_floor, "band_multiple": band_multiple,
         }
     for squeeze_quantile, breakout in product((0.15, 0.20, 0.25), (20, 40)):
         yield {
             "signal_family": "squeeze_breakout",
             "breakout": breakout, "volume_multiple": 1.2, "trend_period": 50,
-            "min_entry_score": int(squeeze_quantile * 100), "max_atr_pct": 0.12,
+            "squeeze_quantile": squeeze_quantile,
         }
 
 
@@ -69,13 +69,13 @@ def build_signals(frame: pd.DataFrame, params: Mapping[str, float]):
         sma20 = close.rolling(20, min_periods=20).mean()
         sma200 = close.rolling(200, min_periods=200).mean()
         std20 = close.rolling(20, min_periods=20).std(ddof=0)
-        lower = sma20 - float(params["max_atr_pct"]) * std20
+        lower = sma20 - float(params["band_multiple"]) * std20
         delta = close.diff()
         gain = delta.clip(lower=0).ewm(alpha=1/14, adjust=False, min_periods=14).mean()
         loss = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False, min_periods=14).mean()
         rsi = 100 - 100 / (1 + gain / loss.replace(0, np.nan))
         entry = ((close > sma200) & (close < lower) &
-                 (rsi < int(params["min_entry_score"]))).fillna(False)
+                 (rsi < int(params["rsi_floor"]))).fillna(False)
         exit_signal = ((close > sma20) | (rsi > 55)).fillna(False)
         return entry, exit_signal
     if family == "squeeze_breakout":
@@ -83,7 +83,7 @@ def build_signals(frame: pd.DataFrame, params: Mapping[str, float]):
         sma20 = close.rolling(20, min_periods=20).mean()
         std20 = close.rolling(20, min_periods=20).std(ddof=0)
         bandwidth = 4 * std20 / sma20.replace(0, np.nan)
-        quantile = int(params["min_entry_score"]) / 100.0
+        quantile = float(params["squeeze_quantile"])
         threshold = bandwidth.shift(2).rolling(120, min_periods=60).quantile(quantile)
         recent_squeeze = (bandwidth.shift(1) <= threshold).rolling(10, min_periods=1).max().fillna(0).astype(bool)
         prior_high = high.shift(1).rolling(breakout, min_periods=breakout).max()
