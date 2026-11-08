@@ -20,7 +20,18 @@ from research_engine import STRATEGIES
 from continuous_walk_forward import continuous_walk_forward
 from analytics import trade_statistics
 
-SYMBOLS = {"2330.TW": "2330", "2454.TW": "2454", "2603.TW": "2603"}
+# Exploratory broad universe: top 20 names from the 0050 holdings snapshot
+# dated 2026-08-10, plus 2603 for the prior shipping-sector test. This is NOT
+# a point-in-time historical constituent universe and retains survivorship bias.
+SYMBOLS = {
+    f"{code}.TW": code for code in (
+        "2330", "2454", "2308", "2317", "3711", "2383", "2303",
+        "3037", "2891", "2881", "2345", "2882", "1303", "2327",
+        "3017", "2887", "2382", "2885", "2360", "2059", "2603",
+    )
+}
+UNIVERSE_DESCRIPTION = "2026-08-10 0050 holdings top 20 + 2603; exploratory, survivorship-biased"
+MIN_SYMBOLS = 15
 INITIAL_CAPITAL = 100_000.0
 FEE = 0.001425
 SELL_TAX = 0.003
@@ -194,10 +205,22 @@ def main():
     os.makedirs("performance-artifacts", exist_ok=True)
     frames, actions, quality = {}, {}, []
     for ticker, symbol in SYMBOLS.items():
-        frame, action_frame, row = fetch_history(ticker, symbol)
-        frames[symbol] = frame
-        actions[symbol] = action_frame
-        quality.append(row)
+        try:
+            frame, action_frame, row = fetch_history(ticker, symbol)
+            frames[symbol] = frame
+            actions[symbol] = action_frame
+            row["資料狀態"] = "已納入"
+            quality.append(row)
+        except Exception as exc:
+            quality.append({
+                "代號": symbol, "資料來源": "Yahoo Finance",
+                "資料狀態": "略過", "錯誤": str(exc),
+            })
+            print(f"略過資料不足或下載失敗標的 {symbol}：{exc}", flush=True)
+    if len(frames) < MIN_SYMBOLS:
+        raise RuntimeError(
+            f"有效股票僅 {len(frames)} 檔，低於最低要求 {MIN_SYMBOLS}；停止回測避免樣本過窄"
+        )
 
     all_dates = sorted(set().union(*[
         set(pd.to_datetime(frame["date"])) for frame in frames.values()
@@ -271,7 +294,10 @@ def main():
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "data_source": "Yahoo Finance chart data via yfinance; raw OHLCV with dividend/split actions; 0050 benchmark uses auto-adjusted daily close",
         "benchmark": benchmark,
-        "symbols": list(SYMBOLS.values()),
+        "symbols": list(frames.keys()),
+        "universe_description": UNIVERSE_DESCRIPTION,
+        "universe_requested": len(SYMBOLS),
+        "universe_loaded": len(frames),
         "common_calendar_days": len(all_dates),
         "settings": {
             "initial_capital_NTD": INITIAL_CAPITAL, "fee_rate": FEE,
@@ -285,7 +311,7 @@ def main():
         "limitations": [
             "Yahoo Finance is not an exchange-certified source; its historical bars and corporate-action coverage may be revised or incomplete.",
             "Dividend and split events are sourced from Yahoo Finance; cash-dividend payment dates and some capital-reduction/par-value events are not fully modeled.",
-            "The current universe contains only three currently listed symbols; this does not remove survivorship bias.",
+            "Exploratory universe uses the top 20 constituents from a 2026-08-10 0050 holdings snapshot plus 2603; historical membership is not point-in-time and survivorship bias remains.",
             "Portfolio cash and open positions carry continuously across OOS boundaries; adaptive candidates are selected only from pre-window history.",
             "Daily OHLCV cannot reconstruct intraday queue position, limit-up/down execution, halts, partial fills, or market impact.",
             "Results are paper research only and are not a prediction or guarantee of future returns.",
