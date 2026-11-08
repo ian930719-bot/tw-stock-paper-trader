@@ -42,7 +42,7 @@ def equity_risk_metrics(equity: pd.DataFrame, initial_capital: float) -> dict:
 def trade_statistics(trades: pd.DataFrame) -> dict:
     """Summarize closed trades only; open positions are not included."""
     empty = {
-        "勝率": 0.0, "平均獲利": 0.0, "平均虧損": 0.0,
+        "交易筆數": 0, "勝率": 0.0, "平均獲利": 0.0, "平均虧損": 0.0,
         "Profit Factor": 0.0, "期望值": 0.0, "平均持有日數": 0.0,
     }
     if trades is None or trades.empty or "損益" not in trades:
@@ -60,6 +60,7 @@ def trade_statistics(trades: pd.DataFrame) -> dict:
     else:
         holding = pd.Series(dtype=float)
     return {
+        "交易筆數": int(len(pnl)),
         "勝率": float((pnl > 0).mean()),
         "平均獲利": float(wins.mean()) if not wins.empty else 0.0,
         "平均虧損": float(losses.mean()) if not losses.empty else 0.0,
