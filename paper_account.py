@@ -56,6 +56,23 @@ class PaperAccount:
                 "INSERT OR IGNORE INTO paper_account(id,initial_cash,cash,created_at) VALUES(1,?,?,?)",
                 (float(initial_cash), float(initial_cash), datetime.now(TZ).isoformat()),
             )
+            # Apply a changed starting-capital setting only to a genuinely unused
+            # paper account. Never overwrite balances after any order, fill or position.
+            existing_fills = conn.execute("SELECT COUNT(*) FROM paper_fills").fetchone()[0]
+            existing_positions = conn.execute(
+                "SELECT COUNT(*) FROM paper_positions WHERE quantity > 0"
+            ).fetchone()[0]
+            tables = {row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )}
+            existing_orders = 0
+            if "paper_orders" in tables:
+                existing_orders = conn.execute("SELECT COUNT(*) FROM paper_orders").fetchone()[0]
+            if not existing_fills and not existing_positions and not existing_orders:
+                conn.execute(
+                    "UPDATE paper_account SET initial_cash=?,cash=? WHERE id=1",
+                    (float(initial_cash), float(initial_cash)),
+                )
             conn.commit()
 
     def snapshot(self) -> dict:
