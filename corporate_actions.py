@@ -306,7 +306,7 @@ def point_in_time_recalculate(frame: pd.DataFrame, actions: pd.DataFrame | None,
         if official_factors:
             # A dividend-result row may be attached to both cash and stock
             # entitlements on the same date; apply that official factor once.
-            price_factor = float(np.prod(official_factors))
+            price_factor = float(math.prod(official_factors))
         for event in group.itertuples(index=False):
             if event.action_type == "cash_dividend":
                 if not official_factors:
