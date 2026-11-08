@@ -21,7 +21,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from market_data import quote_freshness
 from analytics import equity_risk_metrics, trade_statistics
-from portfolio_risk import portfolio_risk_report
+from portfolio_risk import portfolio_risk_report, dynamic_strategy_ensemble
 from historical_store import get_incremental_history, price_cache_summary
 from execution_engine import PaperExecutionEngine, OrderIntent, RiskLimits, Side, taiwan_regular_session, realized_pnl_from_trades
 from paper_account import PaperAccount
@@ -1240,6 +1240,35 @@ with t6:
                 "勝率":"{:.1%}","Profit Factor":lambda x:"∞" if np.isinf(x) else f"{x:.2f}",
                 "期望值":"{:,.0f}","平均持有日數":"{:.1f}",
             }),use_container_width=True,hide_index=True)
+            if st.button("執行多策略動態資金配置", key="run_dynamic_strategy_ensemble"):
+                oos_curves = {
+                    strategy: st.session_state["portfolio_curves"].get((strategy, "樣本外"), pd.DataFrame())
+                    for strategy in STRATEGIES
+                }
+                ensemble = dynamic_strategy_ensemble(
+                    oos_curves, initial_capital=float(pc), lookback=60,
+                    rebalance_frequency=20, max_weight=0.40, target_exposure=0.90,
+                )
+                st.session_state["dynamic_strategy_ensemble"] = ensemble
+                st.session_state["dynamic_strategy_ensemble_config"] = current_portfolio_config
+            if st.session_state.get("dynamic_strategy_ensemble_config") == current_portfolio_config:
+                ensemble = st.session_state["dynamic_strategy_ensemble"]
+                if ensemble["status"] != "ok":
+                    st.info("樣本外資料不足以建立動態策略組合；需要至少 60 個共同歷史日及兩個有效策略。")
+                else:
+                    st.subheader("多策略動態資金配置（僅使用過去報酬）")
+                    st.caption(ensemble["method"] + "。前 60 日採等權重暖機；此組合是獨立研究曲線，不代表實際帳戶成交。")
+                    latest_weights = ensemble["weights"].iloc[-1].sort_values(ascending=False).rename("目前策略權重").to_frame()
+                    st.dataframe(latest_weights.style.format("{:.1%}"), use_container_width=True)
+                    ensemble_fig = go.Figure()
+                    ensemble_fig.add_trace(go.Scatter(
+                        x=ensemble["equity"]["日期"], y=ensemble["equity"]["資產"],
+                        name="動態策略組合",
+                    ))
+                    ensemble_fig.add_hline(y=float(pc), line_dash="dash")
+                    ensemble_fig.update_layout(title="動態策略組合樣本外曲線", yaxis_title="新台幣")
+                    st.plotly_chart(ensemble_fig, use_container_width=True)
+                    st.metric("動態組合總報酬", f"{float(ensemble['equity']['資產'].iloc[-1]) / float(pc) - 1:.1%}")
             strategy_pick=st.selectbox("查看策略資產曲線",STRATEGIES,key="portfolio_curve_strategy")
             period_pick=st.selectbox("查看驗證區段",["訓練","驗證","樣本外"],index=2,key="portfolio_curve_period")
             curve=st.session_state["portfolio_curves"].get((strategy_pick,period_pick),pd.DataFrame())
