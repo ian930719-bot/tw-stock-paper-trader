@@ -21,7 +21,23 @@ def equity_risk_metrics(equity: pd.DataFrame, initial_capital: float) -> dict:
     peaks = pd.concat([pd.Series([float(initial_capital)]), values.reset_index(drop=True)]).cummax().iloc[1:].reset_index(drop=True)
     drawdowns = values.reset_index(drop=True) / peaks - 1.0
     max_dd = float(drawdowns.min()) if len(drawdowns) else 0.0
-    years = max(len(values) / 252.0, 1.0 / 252.0)
+    if "日期" in equity.columns:
+        dates = pd.to_datetime(equity["日期"], errors="coerce").dropna()
+    elif isinstance(equity.index, pd.DatetimeIndex):
+        dates = pd.to_datetime(equity.index, errors="coerce").dropna()
+    else:
+        dates = pd.Series(dtype="datetime64[ns]")
+    if len(dates) >= 2:
+        first_date, last_date = pd.Timestamp(dates.iloc[0]), pd.Timestamp(dates.iloc[-1])
+        if first_date.tzinfo is not None:
+            first_date = first_date.tz_localize(None)
+        if last_date.tzinfo is not None:
+            last_date = last_date.tz_localize(None)
+        elapsed_years = (last_date - first_date).total_seconds() / (365.25 * 86400)
+        years = max(elapsed_years, 1.0 / 252.0)
+    else:
+        # Backward-compatible fallback for undated synthetic/unit-test curves.
+        years = max(len(values) / 252.0, 1.0 / 252.0)
     ending = float(values.iloc[-1])
     cagr = (ending / float(initial_capital)) ** (1.0 / years) - 1.0 if ending > 0 else -1.0
     calmar = float(cagr / abs(max_dd)) if max_dd < 0 else 0.0
