@@ -34,7 +34,8 @@ def _day(value):
 
 
 def _event(symbol, effective_date, action_type, *, share_multiplier=1.0,
-           cash_per_share=0.0, payment_date=None, reference_price=None, source=""):
+           cash_per_share=0.0, payment_date=None, reference_price=None,
+           price_adjustment_factor=None, source=""):
     effective = _day(effective_date)
     if not effective:
         return None
@@ -50,7 +51,14 @@ def _event(symbol, effective_date, action_type, *, share_multiplier=1.0,
             reference = ref
     except (TypeError, ValueError):
         pass
-    identity = "|".join((str(symbol), effective, action_type, str(ratio), str(cash), payment or ""))
+    factor = None
+    try:
+        candidate = float(price_adjustment_factor)
+        if math.isfinite(candidate) and candidate > 0:
+            factor = candidate
+    except (TypeError, ValueError):
+        pass
+    identity = "|".join((str(symbol), effective, action_type, str(ratio), str(cash), payment or "", str(factor)))
     return {
         "symbol": str(symbol),
         "effective_date": effective,
@@ -59,6 +67,7 @@ def _event(symbol, effective_date, action_type, *, share_multiplier=1.0,
         "cash_per_share": cash,
         "payment_date": payment,
         "reference_price": reference,
+        "price_adjustment_factor": factor,
         "source": source,
         "event_id": hashlib.sha256(identity.encode("utf-8")).hexdigest(),
     }
@@ -85,8 +94,13 @@ def normalize_corporate_actions(symbol: str, *, dividends=None, dividend_results
     result_prices = {}
     for result in _records(dividend_results):
         key = _day(result.get("date"))
-        if key:
-            result_prices[key] = _number(result, "reference_price", "after_price")
+        before = _number(result, "before_price")
+        after = _number(result, "after_price")
+        if key and before > 0 and after > 0:
+            result_prices[key] = {
+                "reference_price": _number(result, "reference_price", "after_price"),
+                "price_factor": after / before,
+            }
     for row in _records(dividends):
         stock_rate = (
             _number(row, "StockEarningsDistribution")
@@ -102,7 +116,8 @@ def normalize_corporate_actions(symbol: str, *, dividends=None, dividend_results
             item = _event(
                 symbol, stock_date, "stock_dividend",
                 share_multiplier=1.0 + stock_rate,
-                reference_price=result_prices.get(stock_date) or row.get("reference_price"),
+                reference_price=(result_prices.get(stock_date) or {}).get("reference_price") or row.get("reference_price"),
+                price_adjustment_factor=(result_prices.get(stock_date) or {}).get("price_factor"),
                 source="TaiwanStockDividend",
             )
             if item:
@@ -112,6 +127,8 @@ def normalize_corporate_actions(symbol: str, *, dividends=None, dividend_results
                 symbol, cash_date, "cash_dividend",
                 cash_per_share=cash_amount,
                 payment_date=row.get("CashDividendPaymentDate"),
+                reference_price=(result_prices.get(cash_date) or {}).get("reference_price"),
+                price_adjustment_factor=(result_prices.get(cash_date) or {}).get("price_factor"),
                 source="TaiwanStockDividend",
             )
             if item:
@@ -125,6 +142,7 @@ def normalize_corporate_actions(symbol: str, *, dividends=None, dividend_results
                 symbol, row.get("date"), "stock_split",
                 share_multiplier=before / after,
                 reference_price=after,
+                price_adjustment_factor=after / before,
                 source="TaiwanStockSplitPrice",
             )
             if item:
@@ -138,6 +156,7 @@ def normalize_corporate_actions(symbol: str, *, dividends=None, dividend_results
                 symbol, row.get("date"), "capital_reduction",
                 share_multiplier=before / after,
                 reference_price=after,
+                price_adjustment_factor=after / before,
                 source="TaiwanStockCapitalReductionReferencePrice",
             )
             if item:
@@ -151,6 +170,7 @@ def normalize_corporate_actions(symbol: str, *, dividends=None, dividend_results
                 symbol, row.get("date"), "par_value_change",
                 share_multiplier=before / after,
                 reference_price=after,
+                price_adjustment_factor=after / before,
                 source="TaiwanStockParValueChange",
             )
             if item:
@@ -208,7 +228,8 @@ def fetch_symbol_corporate_actions(symbol: str, start_date: str, end_date: str |
 def validate_action_frame(actions: pd.DataFrame | None, symbol: str) -> pd.DataFrame:
     """Validate a supplied action frame and normalize date/order columns."""
     columns = ["symbol", "effective_date", "action_type", "share_multiplier",
-               "cash_per_share", "payment_date", "reference_price", "source", "event_id"]
+               "cash_per_share", "payment_date", "reference_price",
+               "price_adjustment_factor", "source", "event_id"]
     if actions is None or actions.empty:
         return pd.DataFrame(columns=columns)
     frame = actions.copy()
@@ -226,6 +247,11 @@ def validate_action_frame(actions: pd.DataFrame | None, symbol: str) -> pd.DataF
         frame["payment_date"] = pd.NaT
     frame["share_multiplier"] = pd.to_numeric(frame["share_multiplier"], errors="coerce")
     frame["cash_per_share"] = pd.to_numeric(frame["cash_per_share"], errors="coerce")
+    if "price_adjustment_factor" not in frame:
+        frame["price_adjustment_factor"] = np.nan
+    frame["price_adjustment_factor"] = pd.to_numeric(
+        frame["price_adjustment_factor"], errors="coerce"
+    )
     frame = frame.dropna(subset=["effective_date", "share_multiplier", "cash_per_share"])
     frame = frame[
         (frame["share_multiplier"] > 0)
@@ -273,17 +299,26 @@ def point_in_time_recalculate(frame: pd.DataFrame, actions: pd.DataFrame | None,
             continue
         price_factor = 1.0
         volume_factor = 1.0
+        official_factors = sorted({
+            float(value) for value in group["price_adjustment_factor"].dropna()
+            if math.isfinite(float(value)) and float(value) > 0
+        })
+        if official_factors:
+            # A dividend-result row may be attached to both cash and stock
+            # entitlements on the same date; apply that official factor once.
+            price_factor = float(np.prod(official_factors))
         for event in group.itertuples(index=False):
             if event.action_type == "cash_dividend":
-                cash = float(event.cash_per_share)
-                if cash >= previous_close:
-                    continue
-                price_factor *= (previous_close - cash) / previous_close
+                if not official_factors:
+                    cash = float(event.cash_per_share)
+                    if cash < previous_close:
+                        price_factor *= (previous_close - cash) / previous_close
             elif event.action_type in {
                 "stock_dividend", "stock_split", "capital_reduction", "par_value_change"
             }:
                 multiplier = float(event.share_multiplier)
-                price_factor /= multiplier
+                if not official_factors:
+                    price_factor /= multiplier
                 volume_factor *= multiplier
         if not math.isfinite(price_factor) or price_factor <= 0:
             continue
