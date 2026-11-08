@@ -99,6 +99,25 @@ class ExecutionEngineTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "等待中"):
             self.engine.cancel_order(order.order_id, now=OPEN)
 
+    def test_reject_invalid_tick_and_non_board_lot(self):
+        with self.assertRaisesRegex(ValueError, "升降單位"):
+            validate_order(self.intent(limit_price=10.02), cash=100000,
+                           positions={}, equity=100000, daily_realized_pnl=0,
+                           open_order_count=0, daily_order_count=0,
+                           limits=self.engine.limits, now=OPEN)
+        with self.assertRaisesRegex(ValueError, "1,000 股"):
+            validate_order(self.intent(quantity=999), cash=100000,
+                           positions={}, equity=100000, daily_realized_pnl=0,
+                           open_order_count=0, daily_order_count=0,
+                           limits=self.engine.limits, now=OPEN)
+
+    def test_expire_previous_day_accepted_orders(self):
+        order = self.engine.submit(self.intent(), cash=100000, positions={},
+                                   equity=100000, now=OPEN)
+        next_day = datetime(2026, 11, 10, 10, 0, tzinfo=TZ)
+        self.assertEqual(self.engine.expire_day_orders(next_day), 1)
+        self.assertEqual(self.engine.get_order(order.order_id).status, "EXPIRED")
+
 
 if __name__ == "__main__":
     unittest.main()
