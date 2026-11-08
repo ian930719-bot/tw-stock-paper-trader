@@ -91,15 +91,18 @@ class AdaptiveExitMonitor:
         stamp = (now or datetime.now(TZ)).astimezone(TZ).isoformat()
         with closing(sqlite3.connect(self.db_path)) as conn:
             existing = conn.execute(
-                "SELECT position_version,stop_price,high_water FROM adaptive_exit_state WHERE symbol=?",
+                "SELECT position_version,stop_price,high_water,initial_risk FROM adaptive_exit_state WHERE symbol=?",
                 (code,),
             ).fetchone()
             if existing and int(existing[0]) == int(position_version):
-                # Refresh ATR and quantity without loosening an already-protective stop.
+                # Refresh ATR and quantity without loosening the stop or resetting
+                # the original R denominator after protection has moved above entry.
                 stop = max(stop, float(existing[1]))
                 high = max(entry, float(existing[2]))
+                initial_risk = float(existing[3])
             else:
                 high = entry
+                initial_risk = max(entry - stop, 0.01)
             conn.execute("""
                 INSERT INTO adaptive_exit_state(
                     symbol,quantity,position_version,entry_price,initial_risk,
@@ -121,7 +124,7 @@ class AdaptiveExitMonitor:
                         THEN adaptive_exit_state.profit_review_triggered ELSE 0 END,
                     updated_at=excluded.updated_at
             """, (code, int(quantity), int(position_version), entry,
-                  max(entry - stop, 0.01), high, volatility, multiple,
+                  initial_risk, high, volatility, multiple,
                   profile, stop, stamp))
             conn.commit()
         return {"symbol": code, "profile": profile, "stop_price": stop,
