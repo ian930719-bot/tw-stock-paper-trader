@@ -959,6 +959,13 @@ with t7:
         positions_now = {p["symbol"]: int(p["quantity"]) for p in snap["positions"]}
         value_now = float(snap["cash"]) + sum(int(p["quantity"]) * float(p["average_cost"]) for p in snap["positions"])
         orders_now = engine.list_orders()
+        pending_now = [x for x in orders_now if x["status"] == "ACCEPTED"]
+        reserved_buy_cash = sum(float(x["quantity"]) * float(x["limit_price"]) * 1.001425
+                                for x in pending_now if x["side"] == "BUY")
+        for pending in pending_now:
+            if pending["side"] == "SELL":
+                positions_now[pending["symbol"]] = max(0, positions_now.get(pending["symbol"], 0) - int(pending["quantity"]))
+        cash_for_new_order = max(0.0, float(snap["cash"]) - reserved_buy_cash)
         today_now = session_now.strftime("%Y-%m-%d")
         fills_now = [f for f in snap["fills"] if str(f["filled_at"]).startswith(today_now)]
         pnl_now = sum(float(f["realized_pnl"]) for f in fills_now)
@@ -971,7 +978,7 @@ with t7:
             odd_lot=manual_is_odd,
         )
         manual_result = engine.submit(
-            manual_intent, cash=float(snap["cash"]), positions=positions_now, equity=value_now,
+            manual_intent, cash=cash_for_new_order, positions=positions_now, equity=value_now,
             daily_realized_pnl=pnl_now,
             open_order_count=sum(x["status"] == "ACCEPTED" for x in orders_now),
             daily_order_count=sum(str(x["created_at"]).startswith(today_now) for x in orders_now),
@@ -984,7 +991,17 @@ with t7:
     auto_candidates = []
     quote_lookup = {q["代號"]: q for q in quotes}
     row_lookup = {r["代號"]: r for r in rows}
-    paper_positions = account_positions
+    existing_orders_for_candidates = engine.list_orders()
+    pending_for_candidates = [x for x in existing_orders_for_candidates if x["status"] == "ACCEPTED"]
+    reserved_buy_cash_for_candidates = sum(float(x["quantity"]) * float(x["limit_price"]) * 1.001425
+                                           for x in pending_for_candidates if x["side"] == "BUY")
+    pending_sell_by_symbol = {}
+    for pending in pending_for_candidates:
+        if pending["side"] == "SELL":
+            pending_sell_by_symbol[pending["symbol"]] = pending_sell_by_symbol.get(pending["symbol"], 0) + int(pending["quantity"])
+    paper_positions = {code: max(0, qty - pending_sell_by_symbol.get(code, 0))
+                       for code, qty in account_positions.items()}
+    cash_after_reservations = max(0.0, float(account_snapshot["cash"]) - reserved_buy_cash_for_candidates)
     for code, row in row_lookup.items():
         quote = quote_lookup.get(code, {})
         price = quote.get("盤中參考價")
@@ -1019,7 +1036,7 @@ with t7:
             stop_distance = max(2.0*atr_value, float(price)*0.01)
             risk_qty = int(float(risk) / stop_distance)
             notional_qty = int(limits.max_order_notional / float(price))
-            cash_available = float(account_snapshot["cash"])
+            cash_available = cash_after_reservations
             cash_qty = int(cash_available / (float(price)*1.001425))
             quantity = floor_board_lot(min(risk_qty, notional_qty, cash_qty))
             if quantity > 0:
@@ -1047,7 +1064,7 @@ with t7:
         st.caption(f"今日模擬已實現損益：NTD {daily_pnl:,.0f}")
     if st.button("依策略訊號建立模擬委託",disabled=(not enable_paper_auto or not session_open or not auto_candidates or daily_pnl is None)):
         positions = dict(account_positions)
-        cash_available = float(account_snapshot["cash"])
+        cash_available = max(0.0, float(account_snapshot["cash"]) - reserved_buy_cash_for_candidates)
         market_value = sum(
             int(qty)*float(data[code].iloc[-1]["close"])
             for code,qty in positions.items() if code in data
