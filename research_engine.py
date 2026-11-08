@@ -354,6 +354,8 @@ def shared_capital_backtest(
                         cash += cash_in_lieu
                         p["cash_in_lieu"] = float(p.get("cash_in_lieu", 0.0)) + cash_in_lieu
                     p["shares"] = whole_shares
+                    if code in last_closes:
+                        last_closes[code] = float(last_closes[code]) / multiplier
                     for key in ("entry_price", "stop", "high_water", "atr", "initial_risk"):
                         p[key] = float(p[key]) / multiplier
                 processed_actions.add(event_id)
