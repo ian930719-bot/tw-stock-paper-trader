@@ -169,7 +169,9 @@ def evolve_strategy(
         "split_date": split_date,
         "train_rows": pd.DataFrame(rows).sort_values("研究分數", ascending=False),
         "holdout": holdout,
-        "holdout_stats": holdout_stats,\n        "annual_performance": annual_performance,\n        "annual_100pct_years": int(annual_performance["100%目標達成"].sum()) if not annual_performance.empty else 0,
+        "holdout_stats": holdout_stats,
+        "annual_performance": annual_performance,
+        "annual_100pct_years": int(annual_performance["100%目標達成"].sum()) if not annual_performance.empty else 0,
         "search_count": len(rows),
         "symbols": len(clean),
     }
