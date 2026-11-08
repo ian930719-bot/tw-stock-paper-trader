@@ -1023,7 +1023,7 @@ with t5:
         st.plotly_chart(profile_fig,use_container_width=True)
         selected_profile=st.selectbox("查看出場規則交易明細",list(st.session_state["exit_profile_trades"]),key="exit_profile_detail")
         st.dataframe(st.session_state["exit_profile_trades"][selected_profile],use_container_width=True,hide_index=True)
-    st.warning("策略訊號為通用技術條件組合，不依附特定投資大師；回測仍未完整處理除權息、停牌、漲跌停排隊、流動性衝擊及下市股偏誤。");
+    st.warning("策略訊號為通用技術條件組合，不依附特定投資大師；主要組合回測已納入生效日公司行動調整，仍未完整處理停牌、漲跌停排隊、流動性衝擊及下市股偏誤。");
 
 
 with t6:
@@ -1410,7 +1410,7 @@ with t6:
                     st.caption(snapshot["method"] + "。權重上限 30%，總曝險上限 90%；不代表預期報酬或獲利保證。")
         elif "portfolio_summary" in st.session_state:
             st.info("回測參數或觀察清單已變更；請重新執行，避免沿用舊結果。")
-            st.warning("這是歷史研究，不是投資建議。仍未完整納入股息再投資、除權息、漲跌停排隊、停牌、流動性衝擊、下市股及歷史成分股偏誤；樣本外結果不能回頭用於調參。")
+            st.warning("這是歷史研究，不是投資建議。主要組合回測已納入公司行動與股利應收；仍未完整納入漲跌停排隊、停牌、流動性衝擊、下市股及歷史成分股偏誤；樣本外結果不能回頭用於調參。")
 
 
     st.divider()
