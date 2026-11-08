@@ -54,6 +54,7 @@ class AdaptiveExitMonitor:
                     quote_source TEXT NOT NULL,
                     quote_time TEXT NOT NULL,
                     created_at TEXT NOT NULL,
+                    position_version INTEGER NOT NULL DEFAULT 1,
                     UNIQUE(symbol, position_version, quote_time)
                 )
             """)
