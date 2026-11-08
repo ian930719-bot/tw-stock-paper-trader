@@ -19,7 +19,7 @@ _lock = RLock()
 _cache: dict[tuple[str, str], tuple[float, dict]] = {}
 
 
-class PriceLimitUnavailable(RuntimeError):
+class PriceLimitUnavailable(ValueError):
     """Official daily price limits could not be verified."""
 
 
