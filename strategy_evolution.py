@@ -14,6 +14,7 @@ import pandas as pd
 
 from research_engine import shared_capital_backtest
 from analytics import trade_statistics
+from multifactor_engine import multifactor_signals
 
 
 def candidate_grid():
@@ -22,9 +23,21 @@ def candidate_grid():
         (20, 40, 60), (1.2, 1.5), (50, 100)
     ):
         yield {
+            "signal_family": "breakout",
             "breakout": breakout,
             "volume_multiple": volume_multiple,
             "trend_period": trend_period,
+            "min_entry_score": 4,
+            "max_atr_pct": 0.12,
+        }
+    for min_score, atr_cap in product((3, 4, 5), (0.08, 0.12)):
+        yield {
+            "signal_family": "multifactor",
+            "breakout": 0,
+            "volume_multiple": 0.0,
+            "trend_period": 50,
+            "min_entry_score": min_score,
+            "max_atr_pct": atr_cap,
         }
 
 
@@ -33,6 +46,13 @@ def build_signals(frame: pd.DataFrame, params: Mapping[str, float]):
     close = pd.to_numeric(z["close"], errors="coerce")
     high = pd.to_numeric(z["high"], errors="coerce")
     volume = pd.to_numeric(z["volume"], errors="coerce")
+    if params.get("signal_family", "breakout") == "multifactor":
+        entry, exit_signal, _ = multifactor_signals(
+            z,
+            min_entry_score=int(params["min_entry_score"]),
+            max_atr_pct=float(params["max_atr_pct"]),
+        )
+        return entry, exit_signal
     breakout = int(params["breakout"])
     trend_period = int(params["trend_period"])
     prior_high = high.shift(1).rolling(breakout, min_periods=breakout).max()
@@ -154,12 +174,20 @@ def evolve_strategy(
             start_value = float(group["資產"].iloc[0])
             end_value = float(group["資產"].iloc[-1])
             annual_return = end_value / start_value - 1.0 if start_value > 0 else -1.0
+            year_start = pd.Timestamp(f"{int(year)}-01-01")
+            year_end = pd.Timestamp(f"{int(year)}-12-31")
+            observed_start = pd.Timestamp(group["日期"].iloc[0])
+            observed_end = pd.Timestamp(group["日期"].iloc[-1])
+            full_year = observed_start <= year_start + pd.Timedelta(days=7) and observed_end >= year_end - pd.Timedelta(days=7)
             annual_rows.append({
                 "年度": int(year),
+                "期間完整": bool(full_year),
+                "樣本外起日": observed_start.date().isoformat(),
+                "樣本外迄日": observed_end.date().isoformat(),
                 "年初資產（樣本外首日）": start_value,
                 "年底資產": end_value,
                 "年度報酬": annual_return,
-                "100%目標達成": bool(annual_return >= 1.0),
+                "100%目標達成": bool(full_year and annual_return >= 1.0),
             })
     annual_performance = pd.DataFrame(annual_rows)
     return {
@@ -172,6 +200,7 @@ def evolve_strategy(
         "holdout_stats": holdout_stats,
         "annual_performance": annual_performance,
         "annual_100pct_years": int(annual_performance["100%目標達成"].sum()) if not annual_performance.empty else 0,
+        "complete_years": int(annual_performance["期間完整"].sum()) if not annual_performance.empty else 0,
         "search_count": len(rows),
         "symbols": len(clean),
     }
