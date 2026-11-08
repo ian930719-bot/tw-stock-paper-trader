@@ -570,9 +570,14 @@ class PaperWorker:
             symbol = candidate["symbol"]
             quote = quotes.get(symbol)
             market = market_map.get(symbol)
-            if quote is None or market is None:
+            decision_now = parse_timestamp(self.now_provider())
+            if (
+                quote is None or market is None
+                or not quote_is_fresh(quote, decision_now, self.config.max_quote_age_seconds)
+                or not taiwan_regular_session(decision_now)
+            ):
                 continue
-            context = self._account_context(quotes, now)
+            context = self._account_context(quotes, decision_now)
             if context["open_count"] >= self.config.max_open_orders:
                 break
             if context["daily_order_count"] >= self.config.max_order_count_per_day:
@@ -631,7 +636,7 @@ class PaperWorker:
                 if quantity <= 0:
                     continue
                 key = (
-                    f"worker-entry-{symbol}-{now.date().isoformat()}-"
+                    f"worker-entry-{symbol}-{decision_now.date().isoformat()}-"
                     f"{candidate['signal_date']}-{candidate['agreement']}"
                 )
                 intent = OrderIntent(
@@ -641,7 +646,7 @@ class PaperWorker:
                     idempotency_key=key, instrument_type=instrument,
                     odd_lot=odd_lot, market=market,
                 )
-                result = self._submit(intent, quotes, now)
+                result = self._submit(intent, quotes, decision_now)
                 if result is not None:
                     results.append(result.status)
             except (ValueError, KeyError, TypeError) as exc:
