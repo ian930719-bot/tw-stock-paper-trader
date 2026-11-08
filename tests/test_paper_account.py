@@ -33,6 +33,31 @@ class PaperAccountTests(unittest.TestCase):
         return self.account.process_quote(
             "2330", price, at.isoformat(), source, now=NOW)
 
+    def test_odd_lot_order_fills_and_updates_account(self):
+        order = self.engine.submit(
+            OrderIntent("2330", Side.BUY, 37, 10, "odd lot", "odd-buy", odd_lot=True),
+            cash=100000, positions={}, equity=100000, now=NOW)
+        self.assertEqual(order.status, "ACCEPTED")
+        fills = self.quote()
+        self.assertEqual(len(fills), 1)
+        self.assertEqual(fills[0]["quantity"], 37)
+        self.assertEqual(self.account.snapshot()["positions"][0]["quantity"], 37)
+
+    def test_whole_lot_order_does_not_fill_after_regular_close(self):
+        order = self.order(Side.BUY, 1000, "after-close")
+        late = datetime(2026, 11, 9, 13, 27, tzinfo=TZ)
+        result = self.account.process_quote("2330", 9, late.isoformat(), "test-feed", now=late)
+        self.assertEqual(result, [])
+        self.assertEqual(self.engine.get_order(order.order_id).status, "ACCEPTED")
+
+    def test_odd_lot_order_can_fill_until_1330(self):
+        self.engine.submit(
+            OrderIntent("2330", Side.BUY, 37, 10, "odd lot", "odd-late", odd_lot=True),
+            cash=100000, positions={}, equity=100000, now=NOW)
+        late = datetime(2026, 11, 9, 13, 29, tzinfo=TZ)
+        result = self.account.process_quote("2330", 9, late.isoformat(), "test-feed", now=late)
+        self.assertEqual(len(result), 1)
+
     def test_buy_fill_updates_cash_and_average_cost(self):
         order = self.order(Side.BUY, 1000, "buy-1")
         fills = self.quote()
