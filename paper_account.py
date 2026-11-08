@@ -209,6 +209,10 @@ class PaperAccount:
             today_frame = due_frame.loc[
                 due_frame["effective_date"].dt.date == current.date()
             ]
+            if missed:
+                # Do not partially apply today's actions when an earlier entitlement
+                # is missing; require reconciliation before any account mutation.
+                today_frame = today_frame.iloc[0:0]
             for (symbol, effective_date), group in today_frame.groupby(
                 ["symbol", "effective_date"], sort=True
             ):
