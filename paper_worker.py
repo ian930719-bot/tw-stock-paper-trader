@@ -452,7 +452,12 @@ class PaperWorker:
             )
             for item in snapshot["positions"]
         )
-        equity = float(snapshot["cash"]) + marked_value
+        dividend_receivables = sum(
+            float(item.get("cash_amount", 0.0))
+            for item in snapshot.get("corporate_actions", [])
+            if item.get("action_type") == "cash_dividend" and not item.get("paid_at")
+        )
+        equity = float(snapshot["cash"]) + marked_value + dividend_receivables
         daily_pnl = sum(
             float(fill["realized_pnl"])
             for fill in snapshot["fills"]
