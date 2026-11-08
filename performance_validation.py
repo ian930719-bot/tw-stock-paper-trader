@@ -20,6 +20,7 @@ from research_engine import STRATEGIES
 from continuous_walk_forward import continuous_walk_forward
 from analytics import trade_statistics
 from cross_sectional_momentum import build_cross_sectional_overrides
+from high_conviction_breakout import build_high_conviction_breakout_overrides
 
 # Exploratory broad universe: top 20 names from the 0050 holdings snapshot
 # dated 2026-08-10, plus 2603 for the prior shipping-sector test. This is NOT
@@ -237,24 +238,32 @@ def main():
         entry_quantile=0.80, exit_quantile=0.45,
         minimum_universe=MIN_SYMBOLS,
     )
-    strategies = list(STRATEGIES) + ["AI 自適應策略", "橫斷面動能輪動"]
+    aggressive_overrides = build_high_conviction_breakout_overrides(
+        frames, corporate_actions=actions, relative_strength_quantile=0.80,
+        minimum_universe=MIN_SYMBOLS, volume_multiple=1.50,
+    )
+    strategies = list(STRATEGIES) + [
+        "AI 自適應策略", "橫斷面動能輪動", "高攻擊55日突破",
+    ]
     summaries, all_windows, all_trades, all_equity = [], [], [], []
     for strategy in strategies:
         print(f"開始樣本外測試：{strategy}", flush=True)
+        is_aggressive = strategy == "高攻擊55日突破"
         result = continuous_walk_forward(
             frames, strategy,
             initial_capital=INITIAL_CAPITAL,
             max_positions=MAX_POSITIONS,
-            risk_fraction=RISK_FRACTION,
+            risk_fraction=0.025 if is_aggressive else RISK_FRACTION,
             lookback_days=LOOKBACK_DAYS,
             test_days=TEST_DAYS,
             warmup_bars=WARMUP_BARS,
             fee=FEE, sell_tax=SELL_TAX, slippage=SLIPPAGE,
-            exit_profile="baseline_atr2",
+            exit_profile="atr_2_5" if is_aggressive else "baseline_atr2",
             min_test_days=40,
             corporate_actions=actions,
             custom_signal_overrides=(
-                rotation_overrides if strategy == "橫斷面動能輪動" else None
+                rotation_overrides if strategy == "橫斷面動能輪動"
+                else aggressive_overrides if is_aggressive else None
             ),
         )
         if len(result["windows"]) < 4:
@@ -311,7 +320,7 @@ def main():
         "settings": {
             "initial_capital_NTD": INITIAL_CAPITAL, "fee_rate": FEE,
             "sell_tax_rate": SELL_TAX, "one_way_slippage": SLIPPAGE,
-            "risk_fraction": RISK_FRACTION, "max_positions": MAX_POSITIONS,
+            "risk_fraction": RISK_FRACTION, "aggressive_breakout_risk_fraction": 0.025, "max_positions": MAX_POSITIONS,
             "max_participation_rate": 0.01, "lookback_sessions": LOOKBACK_DAYS,
             "oos_window_sessions": TEST_DAYS, "warmup_sessions": WARMUP_BARS,
             "exit_profile": "baseline_atr2",
