@@ -17,6 +17,7 @@ from market_data import quote_freshness
 from analytics import equity_risk_metrics, trade_statistics
 from historical_store import get_incremental_history, price_cache_summary
 from execution_engine import PaperExecutionEngine, OrderIntent, RiskLimits, Side, taiwan_regular_session, realized_pnl_from_trades
+from paper_account import PaperAccount
 st.set_page_config(page_title="台股模擬交易",layout="wide")
 TZ=ZoneInfo("Asia/Taipei")
 from stock_universe import fetch_stock_universe, universe_summary, StockUniverseError
@@ -763,6 +764,10 @@ with t7:
     st.markdown("**自動策略條件**：買進採用「多因子觀察」訊號，要求 AI 測試優於多數類基準至少 2 個百分點、五日預測分數至少 55%；賣出則檢查 EMA21、RSI 與 MACD 退出條件。買賣都必須取得盤中更新的參考報價。")
     limits = RiskLimits()
     engine = PaperExecutionEngine(limits=limits)
+    paper_account = PaperAccount(engine.db_path, initial_cash=float(capital))
+    account_snapshot = paper_account.snapshot()
+    account_positions = {p["symbol"]: int(p["quantity"]) for p in account_snapshot["positions"]}
+    account_costs = {p["symbol"]: float(p["average_cost"]) for p in account_snapshot["positions"]}
     session_now = datetime.now(TZ)
     session_open = taiwan_regular_session(session_now)
     st.write("交易時段：", "台股一般盤中" if session_open else "非台股一般盤中時段")
@@ -775,7 +780,7 @@ with t7:
     auto_candidates = []
     quote_lookup = {q["代號"]: q for q in quotes}
     row_lookup = {r["代號"]: r for r in rows}
-    paper_positions = st.session_state.get("paper_positions", {})
+    paper_positions = account_positions
     for code, row in row_lookup.items():
         quote = quote_lookup.get(code, {})
         price = quote.get("盤中參考價")
@@ -805,7 +810,7 @@ with t7:
             stop_distance = max(2.0*atr_value, float(price)*0.01)
             risk_qty = int(float(risk) / stop_distance)
             notional_qty = int(limits.max_order_notional / float(price))
-            cash_available = float(st.session_state.get("paper_cash", capital))
+            cash_available = float(account_snapshot["cash"])
             cash_qty = int(cash_available / (float(price)*1.001425))
             quantity = min(risk_qty, notional_qty, cash_qty)
             if quantity > 0:
@@ -824,16 +829,15 @@ with t7:
         st.info("目前沒有同時符合 AI 條件與新鮮盤中報價的標的；不會使用舊收盤價代替盤中價格建立自動委託。")
     enable_paper_auto = st.checkbox("啟用本輪自動模擬委託（不是真實下單）",value=False)
     today_for_risk = session_now.strftime("%Y-%m-%d")
-    daily_pnl = realized_pnl_from_trades(
-        st.session_state.get("paper_trades", []), today_for_risk
-    )
+    today_fills = [f for f in account_snapshot["fills"] if str(f["filled_at"]).startswith(today_for_risk)]
+    daily_pnl = sum(float(f["realized_pnl"]) for f in today_fills)
     if daily_pnl is None:
         st.error("無法由完整模擬成交紀錄核對每日已實現損益（可能有匯入持倉缺少成本）；自動委託已鎖定。")
     else:
         st.caption(f"今日模擬已實現損益：NTD {daily_pnl:,.0f}")
     if st.button("依策略訊號建立模擬委託",disabled=(not enable_paper_auto or not session_open or not auto_candidates or daily_pnl is None)):
-        positions = dict(st.session_state.get("paper_positions", {}))
-        cash_available = float(st.session_state.get("paper_cash", capital))
+        positions = dict(account_positions)
+        cash_available = float(account_snapshot["cash"])
         market_value = sum(
             int(qty)*float(data[code].iloc[-1]["close"])
             for code,qty in positions.items() if code in data
@@ -871,6 +875,42 @@ with t7:
                 else:
                     positions[candidate["代號"]] = max(0, positions.get(candidate["代號"], 0) - candidate["股數"])
         st.success(f"本輪建立 {created_count} 筆模擬委託。重複訊號會由識別碼阻擋。")
+    st.subheader("模擬帳戶資產")
+    position_value = sum(
+        int(p["quantity"]) * float(quote_lookup.get(p["symbol"], {}).get("盤中參考價") or p["average_cost"])
+        for p in account_snapshot["positions"]
+    )
+    equity_now = float(account_snapshot["cash"]) + position_value
+    m1,m2,m3,m4=st.columns(4)
+    m1.metric("可用現金",f"NTD {account_snapshot['cash']:,.0f}")
+    m2.metric("持股市值估算",f"NTD {position_value:,.0f}")
+    m3.metric("帳戶資產估算",f"NTD {equity_now:,.0f}")
+    m4.metric("今日已實現損益",f"NTD {daily_pnl:,.0f}")
+    if account_snapshot["positions"]:
+        st.dataframe(pd.DataFrame(account_snapshot["positions"]),use_container_width=True,hide_index=True)
+    else:
+        st.info("目前模擬帳戶沒有持股。")
+    st.caption("持股市值使用當前可取得報價；若無報價則暫以平均成本估算。帳戶資料存在執行環境 SQLite，雲端重啟可能清除。")
+    st.subheader("用盤中報價自動撮合")
+    st.caption("只處理報價狀態為「盤中更新」的標的；來源標記 Yahoo Finance 1 分鐘資料，並由引擎再次檢查報價時間、120 秒新鮮度及交易時段。")
+    if st.button("使用目前新鮮盤中報價撮合等待委託", disabled=not session_open):
+        fill_results=[]
+        for q in quotes:
+            if q.get("報價狀態") != "盤中更新" or q.get("盤中參考價") is None:
+                continue
+            try:
+                fill_results.extend(paper_account.process_quote(
+                    q["代號"], float(q["盤中參考價"]), str(q.get("報價時間") or ""),
+                    "Yahoo Finance 1-minute", now=session_now
+                ))
+            except ValueError:
+                continue
+        if fill_results:
+            st.success(f"本次完成 {len(fill_results)} 筆模擬成交，已同步現金與持股。")
+            st.dataframe(pd.DataFrame(fill_results),use_container_width=True,hide_index=True)
+        else:
+            st.info("本次沒有符合限價、報價新鮮度及交易時段條件的成交。")
+        st.rerun()
     st.subheader("模擬委託佇列與成交狀態")
     order_rows = engine.list_orders()
     st.dataframe(pd.DataFrame(order_rows),use_container_width=True,hide_index=True)
@@ -887,10 +927,19 @@ with t7:
         if st.button("取消選取的模擬委託"):
             cancelled = engine.cancel_order(cancel_id)
             st.success(f"已取消 {cancelled.order_id}")
+    current_snapshot = paper_account.snapshot()
+    if current_snapshot["fills"]:
+        st.subheader("模擬成交明細")
+        st.dataframe(pd.DataFrame(current_snapshot["fills"]),use_container_width=True,hide_index=True)
+        st.download_button(
+            "下載模擬成交紀錄 CSV",
+            pd.DataFrame(current_snapshot["fills"]).to_csv(index=False).encode("utf-8-sig"),
+            "paper_fills.csv","text/csv"
+        )
     if order_rows:
         st.download_button(
             "下載模擬委託紀錄 CSV",
             pd.DataFrame(order_rows).to_csv(index=False).encode("utf-8-sig"),
             "paper_order_log.csv","text/csv"
         )
-    st.caption("目前自動策略可產生模擬買進與賣出委託：買進依 AI 多因子訊號與 ATR 風險距離控量；賣出依 EMA21、RSI、MACD 退出條件。尚未實作成交後帳本同步、即時停損監控、撤單重送或券商真實成交回報；不得視為已具備實盤自動交易能力。")
+    st.caption("目前自動策略可產生模擬買進與賣出委託：買進依 AI 多因子訊號與 ATR 風險距離控量；賣出依 EMA21、RSI、MACD 退出條件。已加入 SQLite 模擬帳戶成交後現金／持股同步及新鮮報價觸發撮合；目前仍需使用者按鈕觸發每輪報價撮合，尚未有背景常駐即時監控、停損監控、撤單重送或券商真實成交回報；不得視為已具備實盤自動交易能力。")
