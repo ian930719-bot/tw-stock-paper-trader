@@ -26,8 +26,8 @@ class ExecutionEngineTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def intent(self, **kw):
-        base = dict(symbol="2330", side=Side.BUY, quantity=10,
-                    limit_price=100, reason="unit test", idempotency_key="test-001")
+        base = dict(symbol="2330", side=Side.BUY, quantity=1000,
+                    limit_price=10, reason="unit test", idempotency_key="test-001")
         base.update(kw)
         return OrderIntent(**base)
 
@@ -76,7 +76,7 @@ class ExecutionEngineTests(unittest.TestCase):
             self.engine.match_limit(order.order_id, 11, now=OPEN)
         filled = self.engine.match_limit(order.order_id, 9, now=OPEN)
         self.assertEqual(filled.status, "FILLED")
-        self.assertEqual(filled.filled_quantity, 10)
+        self.assertEqual(filled.filled_quantity, 1000)
         self.assertEqual(filled.average_fill_price, 10)
 
     def test_reject_order_notional_cap(self):
