@@ -332,7 +332,7 @@ with t2:
                 result = shared_capital_backtest(
                     selected_frames, portfolio_strategy,
                     initial_capital=float(capital), max_positions=int(portfolio_max_positions),
-                    risk_fraction=float(portfolio_risk_pct), warmup=200,
+                    risk_fraction=float(portfolio_risk_pct), warmup=260,
                     exit_profile=portfolio_exit[0],
                 )
             st.session_state["historical_multi_result"] = result
