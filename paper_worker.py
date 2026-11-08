@@ -131,6 +131,23 @@ def completed_daily_bars(frame: pd.DataFrame, today) -> pd.DataFrame:
     return z
 
 
+def max_shares_for_participation(frame: pd.DataFrame, price: float, rate: float = 0.01) -> int:
+    """Cap an order using the last 20 completed daily bars' average dollar turnover."""
+    if not np.isfinite(float(price)) or float(price) <= 0:
+        return 0
+    if not np.isfinite(float(rate)) or not 0 < float(rate) <= 0.10:
+        raise ValueError("參與率必須介於 0 與 10%")
+    if frame is None or frame.empty or not {"close", "volume"}.issubset(frame.columns):
+        return 0
+    close = pd.to_numeric(frame["close"], errors="coerce")
+    volume = pd.to_numeric(frame["volume"], errors="coerce")
+    turnover = (close * volume).replace([np.inf, -np.inf], np.nan).dropna().tail(20)
+    if len(turnover) < 20:
+        return 0
+    adv20 = float(turnover.mean())
+    return max(0, int(adv20 * float(rate) / float(price)))
+
+
 def rank_entry_candidates(frames: dict[str, pd.DataFrame], today) -> list[dict]:
     """Use completed daily bars only; rank by strategy agreement then momentum."""
     candidates = []
@@ -629,7 +646,10 @@ class PaperWorker:
                     context["cash"] / 1.001425,
                 )
                 max_by_value = max(0, int(remaining / entry_price))
-                quantity = min(int(sizing["shares"]), max_by_value)
+                max_by_liquidity = max_shares_for_participation(
+                    frame, entry_price, self.config.max_participation_rate,
+                )
+                quantity = min(int(sizing["shares"]), max_by_value, max_by_liquidity)
                 if quantity >= 1000:
                     quantity = floor_board_lot(quantity)
                 odd_lot = quantity < 1000
