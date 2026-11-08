@@ -1223,14 +1223,24 @@ with t7:
         st.info(f"已將 {expired_orders} 筆前一交易日未成交委託標記為到期。")
     st.subheader("模擬委託佇列與成交狀態")
     order_rows = engine.list_orders()
-    st.dataframe(pd.DataFrame(order_rows),use_container_width=True,hide_index=True)
+    if order_rows:
+        order_display = pd.DataFrame(order_rows)
+        order_display["委託類型"] = order_display["odd_lot"].map({True: "盤中零股", False: "整股"})
+        order_display["方向"] = order_display["side"].map({"BUY": "買進", "SELL": "賣出"})
+        order_display["狀態"] = order_display["status"].map({
+            "ACCEPTED": "等待中", "FILLED": "已模擬成交", "CANCELLED": "已取消",
+            "REJECTED": "遭拒", "EXPIRED": "已到期"
+        }).fillna(order_display["status"])
+        st.dataframe(order_display, use_container_width=True, hide_index=True)
+    else:
+        st.info("目前沒有模擬委託紀錄。")
     pending_orders = [order for order in order_rows if order["status"] == "ACCEPTED"]
     if pending_orders:
         pending_ids = [order["order_id"] for order in pending_orders]
         cancel_id = st.selectbox(
             "選擇要取消的等待委託", pending_ids,
             format_func=lambda oid: next(
-                f"{item['symbol']} {item['side']} {item['quantity']} 股 @ {item['limit_price']}"
+                f"{item['symbol']} {'零股' if item.get('odd_lot') else '整股'} {'買進' if item['side'] == 'BUY' else '賣出'} {item['quantity']} 股 @ {item['limit_price']}"
                 for item in pending_orders if item["order_id"] == oid
             ),
         )
