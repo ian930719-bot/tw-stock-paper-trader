@@ -91,6 +91,14 @@ class ExecutionEngineTests(unittest.TestCase):
         self.assertFalse(taiwan_regular_session(
             datetime(2026, 11, 9, 14, 0, tzinfo=TZ)))
 
+    def test_cancel_pending_order(self):
+        order = self.engine.submit(self.intent(), cash=100000, positions={},
+                                   equity=100000, now=OPEN)
+        cancelled = self.engine.cancel_order(order.order_id, now=OPEN)
+        self.assertEqual(cancelled.status, "CANCELLED")
+        with self.assertRaisesRegex(ValueError, "等待中"):
+            self.engine.cancel_order(order.order_id, now=OPEN)
+
 
 if __name__ == "__main__":
     unittest.main()
