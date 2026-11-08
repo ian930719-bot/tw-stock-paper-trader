@@ -470,6 +470,7 @@ def shared_capital_backtest(
                 "出場原因": "該標的資料期末平倉",
                 "曾觸發獲利檢視": bool(p.get("profit_review_triggered", False)),
                 "最高風險倍數": round((p.get("high_water", p["entry_price"]) - p["entry_price"]) / max(p.get("initial_risk", 0.01), 0.01), 2),
+                "估計ADV20參與率": (p["shares"] * p["entry_price"] / p["adv20"]) if p.get("adv20", 0) else np.nan,
             })
             cash += proceeds
             del positions[code]
