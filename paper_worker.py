@@ -36,6 +36,7 @@ from strategy_exits import initial_stop, risk_position_size
 from taiwan_market_rules import floor_board_lot, stock_tick_size
 from taiwan_price_limits import get_official_price_limit
 from trading_config import TradingConfig
+from corporate_actions import fetch_symbol_corporate_actions
 
 LOG = logging.getLogger("paper_worker")
 QUOTE_SOURCE = "Yahoo Finance 1-minute"
@@ -281,6 +282,14 @@ class PaperWorker:
                     symbol TEXT PRIMARY KEY,
                     attempted_at TEXT NOT NULL,
                     status TEXT NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS paper_worker_corporate_action_cache (
+                    symbol TEXT PRIMARY KEY,
+                    refreshed_at TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    events_json TEXT NOT NULL
                 )
             """)
             conn.execute("""
@@ -673,6 +682,79 @@ class PaperWorker:
                 self._event("warning", "進場候選略過", symbol=symbol, reason=str(exc))
         return results
 
+    def _load_corporate_actions(self, symbol: str, now: datetime) -> pd.DataFrame:
+        """Refresh and load point-in-time events for one currently held symbol."""
+        position_start = self.account.position_start_date(symbol)
+        if not position_start:
+            raise RuntimeError(f"{symbol} 持倉缺少可追溯的買進成交紀錄，無法確認公司行動權利")
+        start_date = parse_timestamp(position_start).date().isoformat()
+        with closing(self._connect()) as conn:
+            row = conn.execute(
+                "SELECT refreshed_at,status,events_json FROM paper_worker_corporate_action_cache WHERE symbol=?",
+                (str(symbol),),
+            ).fetchone()
+        refresh = row is None
+        if row:
+            refresh = now - parse_timestamp(row[0]) >= timedelta(hours=6)
+        if refresh:
+            try:
+                end_date = (now.date() + timedelta(days=365)).isoformat()
+                events = fetch_symbol_corporate_actions(
+                    symbol, start_date, end_date,
+                    token=os.getenv("FINMIND_TOKEN", ""),
+                )
+                payload = events.to_json(orient="records", date_format="iso")
+                status = "公司行動事件已更新"
+            except Exception as exc:
+                raise RuntimeError(f"{symbol} 公司行動資料更新失敗：{exc}") from exc
+            with closing(self._connect()) as conn:
+                conn.execute("""
+                    INSERT INTO paper_worker_corporate_action_cache(symbol,refreshed_at,status,events_json)
+                    VALUES(?,?,?,?)
+                    ON CONFLICT(symbol) DO UPDATE SET
+                        refreshed_at=excluded.refreshed_at,
+                        status=excluded.status,
+                        events_json=excluded.events_json
+                """, (str(symbol), now.isoformat(), status, payload))
+                conn.commit()
+        else:
+            payload = row[2]
+        try:
+            events = pd.read_json(payload, orient="records")
+        except ValueError as exc:
+            raise RuntimeError(f"{symbol} 公司行動快取格式錯誤：{exc}") from exc
+        if events.empty:
+            return events
+        events["effective_date"] = pd.to_datetime(events["effective_date"], errors="coerce")
+        events = events.loc[
+            events["effective_date"].dt.date >= parse_timestamp(position_start).date()
+        ].copy()
+        return events
+
+    def _process_corporate_actions(self, now: datetime) -> dict:
+        """Apply today's events and settle due dividends before matching orders."""
+        snapshot = self.account.snapshot()
+        held = [str(item["symbol"]) for item in snapshot["positions"]]
+        batches = []
+        for symbol in held:
+            events = self._load_corporate_actions(symbol, now)
+            if not events.empty:
+                batches.append(events)
+        combined = pd.concat(batches, ignore_index=True) if batches else pd.DataFrame()
+        result = self.account.apply_corporate_actions(combined, now)
+        if result["missed"]:
+            raise RuntimeError(
+                "偵測到未處理的過去除權息事件；為避免錯算持股權利，已停止模擬交易，"
+                "需要人工核對帳本。事件：" + "、".join(result["missed"])
+            )
+        if result["applied"] or result["paid"]:
+            self._event(
+                "info", "公司行動已入帳",
+                applied=result["applied"], paid=result["paid"],
+                cash_dividends_paid=result["cash_dividends_paid"],
+            )
+        return result
+
     def run_cycle(self, now: datetime | None = None) -> dict:
         current = parse_timestamp(now or self.now_provider())
         self.renew_lease(current)
@@ -696,6 +778,14 @@ class PaperWorker:
             summary["status"] = "等待設定 PAPER_WATCHLIST"
             self._set_status("idle", summary)
             self._event("warning", "Worker 未啟動交易：觀察清單為空")
+            return summary
+        try:
+            summary["corporate_actions"] = self._process_corporate_actions(current)
+        except Exception as exc:
+            summary["status"] = "公司行動資料或帳務未確認，已停止交易"
+            summary["corporate_action_error"] = str(exc)
+            self._event("error", "公司行動驗證失敗，停止所有模擬交易", reason=str(exc))
+            self._set_status("blocked", summary)
             return summary
         if current.weekday() >= 5 or not (
             time(9, 0) <= current.time().replace(tzinfo=None) <= time(13, 30)
