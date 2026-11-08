@@ -24,9 +24,9 @@ class TaiwanPriceLimitTests(unittest.TestCase):
         rows = [{
             "SecuritiesCompanyCode": "6488",
             "Date": "1151106",
-            "NextDayReferencePrice": "100",
-            "NextDayLimitUpPrice": "110",
-            "NextDayLimitDownPrice": "90",
+            "NextReferencePrice": "100",
+            "NextLimitUp": "110",
+            "NextLimitDown": "90",
         }]
         band = _parse_rows(rows, "6488", date(2026, 11, 9), "上櫃")
         self.assertEqual(band["upper_limit"], 110)
@@ -36,9 +36,9 @@ class TaiwanPriceLimitTests(unittest.TestCase):
         rows = [{
             "SecuritiesCompanyCode": "00679B",
             "Date": "1151106",
-            "NextDayReferencePrice": "26.9",
-            "NextDayLimitUpPrice": "9999.95",
-            "NextDayLimitDownPrice": "0.01",
+            "NextReferencePrice": "26.9",
+            "NextLimitUp": "9999.95",
+            "NextLimitDown": "0.01",
         }]
         band = _parse_rows(rows, "00679B", date(2026, 11, 9), "上櫃")
         self.assertTrue(band["no_price_limit"])
