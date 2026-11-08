@@ -9,15 +9,17 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from execution_engine import OrderStatus, Side, TZ, taiwan_regular_session
+from taiwan_trading_calendar import trading_day_status
 
 
 class PaperAccount:
     """Atomic paper fills and account ledger sharing execution_engine's database."""
 
-    def __init__(self, db_path: str, initial_cash: float = 1_000_000):
+    def __init__(self, db_path: str, initial_cash: float = 1_000_000, *, calendar_checker=trading_day_status):
         if initial_cash <= 0:
             raise ValueError("初始資金必須大於零")
         self.db_path = str(db_path)
+        self.calendar_checker = calendar_checker
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         with closing(sqlite3.connect(self.db_path)) as conn:
             conn.execute("""CREATE TABLE IF NOT EXISTS paper_account (
@@ -104,6 +106,9 @@ class PaperAccount:
         clock = current.time().replace(tzinfo=None)
         if current.weekday() >= 5 or not (datetime.strptime("09:00", "%H:%M").time() <= clock <= datetime.strptime("13:30", "%H:%M").time()):
             raise ValueError("非台股盤中交易時段，拒絕撮合")
+        market_open, calendar_note = self.calendar_checker(current.date())
+        if not market_open:
+            raise ValueError(f"官方交易日曆確認休市或無法確認，拒絕撮合：{calendar_note}")
 
         completed = []
         with closing(sqlite3.connect(self.db_path, timeout=15)) as conn:
