@@ -20,7 +20,7 @@ def flat_frame(n=450):
 
 class ContinuousWalkForwardTests(unittest.TestCase):
     def test_discards_trailing_incomplete_oos_window(self):
-        calendar = pd.bdate_range("2020-01-01", periods=500)
+        calendar = pd.bdate_range("2020-01-01", periods=470)
         windows = _make_windows(calendar, 300, 60, 200, 40)
         self.assertEqual(len(windows), 2)
         self.assertEqual(windows[-1][1], pd.Timestamp(calendar[419]))
