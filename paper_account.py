@@ -148,7 +148,7 @@ class PaperAccount:
             issues.append(f"SQLite 完整性檢查失敗：{integrity}")
         cash_difference = actual_cash - expected_cash
         if abs(cash_difference) > 0.01:
-            issues.append(f"現金帳差異 NT$\{cash_difference:,.2f}")
+            issues.append(f"現金帳差異 NT${cash_difference:,.2f}")
         if expected_positions != actual_positions:
             issues.append("持股數量與成交紀錄不一致")
         if broken_fill_links:
