@@ -82,6 +82,23 @@ class PaperWorkerTests(unittest.TestCase):
         self.assertTrue(worker_b.acquire_lease(self.now))
         worker_b.release_lease()
 
+    def test_worker_skips_stale_quotes_without_loading_history(self):
+        worker = PaperWorker(
+            db_path=self.db, market_db_path=self.market_db,
+            watchlist={"2330": "上市"}, auto_entries=True,
+            now_provider=lambda: self.now,
+            calendar_checker=lambda day, market: (True, "test calendar"),
+            quote_fetcher=lambda symbol, market: {
+                "price": 100.0,
+                "timestamp": (self.now - timedelta(seconds=61)).isoformat(),
+                "source": "test",
+            },
+            history_loader=lambda symbol, market, now: self.fail("stale quote must stop before history scan"),
+        )
+        result = worker.run_once(self.now)
+        self.assertEqual(result["status"], "沒有可用的新鮮報價")
+        self.assertEqual(result["entries"], 0)
+
     def test_empty_watchlist_fails_closed_without_market_data(self):
         worker = PaperWorker(
             db_path=self.db, market_db_path=self.market_db,
