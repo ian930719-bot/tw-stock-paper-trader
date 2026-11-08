@@ -113,6 +113,12 @@ class PaperAccount:
         if not market_open:
             raise ValueError(f"官方交易日曆確認休市或無法確認，拒絕撮合：{calendar_note}")
 
+        # Verify the exchange calendar and official price band again for this
+        # quote-processing pass. Fail closed before opening the fill transaction.
+        market_open, calendar_note = market_trading_day_status(current.date(), market)
+        if not market_open:
+            raise ValueError(f"官方交易日曆再次確認失敗，拒絕撮合：{calendar_note}")
+        from taiwan_price_limits import get_official_price_limit, validate_limit_price
         completed = []
         with closing(sqlite3.connect(self.db_path, timeout=15)) as conn:
             conn.isolation_level = None
@@ -157,6 +163,21 @@ class PaperAccount:
                         (symbol.upper(),),
                     ).fetchone()
                     held, avg_cost = (int(pos[0]), float(pos[1])) if pos else (0, 0.0)
+                    # Recheck each accepted order immediately before applying account
+                    # cash/position changes; never let stale acceptance bypass today's band.
+                    try:
+                        band = get_official_price_limit(
+                            symbol.upper(), market, expected_date=current.date(), force_refresh=True
+                        )
+                        validate_limit_price(float(limit_price), band)
+                    except Exception as exc:
+                        conn.execute(
+                            "UPDATE paper_orders SET status=?,message=?,updated_at=? WHERE order_id=? AND status=?",
+                            (OrderStatus.REJECTED.value,
+                             f"成交前官方漲跌停驗證失敗，拒絕撮合：{exc}",
+                             current.isoformat(), order_id, OrderStatus.ACCEPTED.value),
+                        )
+                        continue
                     # Last-trade data confirms only that a limit was touched; it does not
                     # reveal queue priority or executable depth. Use the submitted
                     # limit as the conservative simulated fill price.
