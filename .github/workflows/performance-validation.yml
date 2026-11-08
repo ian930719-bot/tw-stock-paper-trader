@@ -9,6 +9,7 @@ on:
       - "research_engine.py"
       - "walk_forward.py"
       - "continuous_walk_forward.py"
+      - "cross_sectional_momentum.py"
       - "strategy_evolution.py"
       - "corporate_actions.py"
       - "analytics.py"
