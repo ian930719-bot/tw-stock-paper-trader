@@ -155,6 +155,24 @@ class PaperAccountTests(unittest.TestCase):
         self.assertEqual(official.call_count, 1)
         self.assertEqual(self.engine.get_order(order.order_id).status, "FILLED")
 
+    def test_sqlite_backup_contains_consistent_account_and_order_tables(self):
+        import sqlite3
+        order = self.order(Side.BUY, 1000, "backup-check")
+        backup = self.account.backup_bytes()
+        self.assertGreater(len(backup), 0)
+        with sqlite3.connect(":memory:") as restored:
+            restored.deserialize(backup)
+            self.assertEqual(
+                restored.execute("PRAGMA integrity_check").fetchone()[0], "ok"
+            )
+            self.assertEqual(
+                restored.execute("SELECT COUNT(*) FROM paper_orders").fetchone()[0], 1
+            )
+            self.assertEqual(
+                restored.execute("SELECT cash FROM paper_account WHERE id=1").fetchone()[0],
+                100000.0,
+            )
+
     def test_integrity_report_reconciles_cash_positions_and_fills(self):
         self.order(Side.BUY, 1000, "integrity-buy")
         self.quote(9)
