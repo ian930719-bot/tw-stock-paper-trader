@@ -5,8 +5,18 @@ import numpy as np
 import pandas as pd
 
 from research_engine import STRATEGIES
-from tests.test_research_engine import sample_frame
 from walk_forward import rolling_walk_forward
+
+
+def sample_frame(n=820):
+    dates = pd.bdate_range("2022-01-03", periods=n)
+    close = np.full(n, 100.0)
+    frame = pd.DataFrame({
+        "date": dates, "open": close.copy(), "high": close + 1.0,
+        "low": close - 1.0, "close": close.copy(), "volume": np.full(n, 1_000_000),
+    })
+    frame["atr"] = 1.0
+    return frame
 
 
 class RollingWalkForwardTests(unittest.TestCase):
