@@ -493,11 +493,16 @@ def fundamental_snapshot(codes):
         rows.append({
             "代號": code,
             "ROE": info.get("returnOnEquity"),
+            "ROA": info.get("returnOnAssets"),
             "營收成長率": info.get("revenueGrowth"),
             "獲利成長率": info.get("earningsGrowth"),
+            "毛利率": info.get("grossMargins"),
+            "營業利益率": info.get("operatingMargins"),
             "自由現金流": info.get("freeCashflow"),
             "負債／權益": info.get("debtToEquity"),
+            "流動比率": info.get("currentRatio"),
             "本益比": info.get("trailingPE"),
+            "股價淨值比": info.get("priceToBook"),
             "資料狀態": "有回傳（最新快照，非歷史資料）" if info else "來源未提供",
         })
     return pd.DataFrame(rows)
