@@ -187,7 +187,8 @@ class ResearchEngineTests(unittest.TestCase):
         # print is excluded. With 2% account risk, shares are sized on 2/share.
         trades = result["trades"]
         self.assertEqual(len(trades), 1)
-        self.assertAlmostEqual(float(trades.iloc[0]["進場成本"]) / float(trades.iloc[0]["股數"]), 100.0 * 1.001 * 1.001425, places=3)
+        expected_shares = int(1_000_000 * 0.02 / (100.0 * 1.001 - 98.0))
+        self.assertEqual(int(trades.iloc[0]["股數"]), expected_shares)
 
     def test_entry_day_high_updates_atr_trailing_stop_for_next_session(self):
         frame = sample_frame(26)
