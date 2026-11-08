@@ -30,8 +30,8 @@ def _features(frame: pd.DataFrame) -> pd.DataFrame:
     z["volume_avg_20"] = volume.shift(1).rolling(20, min_periods=20).mean()
     z["volume"] = volume
     return z[["date", "close", "volume", "mom_126", "mom_63", "sma_50",
-              "sma_200", "ema_21", "prior_high_55", "prior_low_20",
-              "volume_avg_20"]]
+              "sma_200", "sma_50_lag20", "sma_200_lag20", "ema_21",
+              "prior_high_55", "prior_low_20", "volume_avg_20"]]
 
 
 def build_high_conviction_breakout_overrides(
