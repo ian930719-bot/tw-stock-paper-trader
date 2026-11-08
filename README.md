@@ -88,6 +88,8 @@ python -m unittest discover -s tests -v
 ```
 
 ## Portfolio risk and multi-strategy research
+- Strategy deterioration diagnostics compare recent 63-session OOS Sharpe/drawdown with the full supplied OOS sample. Alerts are research-only and never automatically disable strategies.
+
 
 - Five distinct daily-OHLCV strategy families are available, including long-term trend structure, volume breakout, momentum continuation, trend-filtered mean reversion, and volatility-squeeze breakout. The adaptive search evaluates 30 predeclared candidates spanning breakout, multifactor, mean-reversion, and squeeze-breakout families. Signals are evaluated at the close and simulated no earlier than the next session. New entries in both historical simulation and the paper worker are capped at 1% of prior-known 20-session average daily dollar turnover; current-session volume is never used to size an opening fill.
 - Current cross-sectional risk snapshots use common-date close-to-close returns, covariance shrinkage, capped long-only risk-parity weights, and explicit cash reserve. These weights are not retroactively injected into historical OOS results.
