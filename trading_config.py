@@ -17,6 +17,7 @@ class TradingConfig:
     max_order_count_per_day: int = 8
     risk_budget_per_trade: float = 500.0
     max_quote_age_seconds: int = 60
+    max_participation_rate: float = 0.01
     allow_short: bool = False
     require_regular_session: bool = True
 
@@ -39,6 +40,8 @@ class TradingConfig:
             raise ValueError("每日停損不得高於初始資金 5%")
         if self.max_open_orders < 1 or self.max_order_count_per_day < 1:
             raise ValueError("委託筆數限制必須大於零")
+        if not 0 < self.max_participation_rate <= 0.10:
+            raise ValueError("單筆成交量參與率必須介於 0 與 10%")
 
     def risk_limits(self):
         from execution_engine import RiskLimits
