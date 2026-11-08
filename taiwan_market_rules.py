@@ -12,7 +12,7 @@ def stock_tick_size(price) -> Decimal:
     value = Decimal(str(price))
     if not value.is_finite() or value <= 0:
         raise ValueError("價格必須是有限正數")
-    if value < 10:
+    if value < 5:
         return Decimal("0.01")
     if value < 50:
         return Decimal("0.05")
