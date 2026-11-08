@@ -49,6 +49,35 @@ class AdaptiveExitMonitorTests(unittest.TestCase):
         self.assertEqual(signal["side"], "SELL")
         self.assertEqual(signal["quantity"], 100)
 
+    def test_partial_position_update_preserves_original_risk_and_protective_stop(self):
+        self.configure()
+        self.monitor.evaluate_quote("2330", 110, self.quote(), "test", now=self.now)
+        self.monitor.configure_position(
+            "2330", 50, 102, 3, position_version=2,
+            profile="atr_dynamic", atr_multiple=2.0, now=self.now
+        )
+        import sqlite3
+        with sqlite3.connect(self.monitor.db_path) as conn:
+            row = conn.execute(
+                "SELECT entry_price,initial_risk,high_water,stop_price,quantity,position_version "
+                "FROM adaptive_exit_state WHERE symbol='2330'"
+            ).fetchone()
+        self.assertEqual(row[0], 100.0)
+        self.assertEqual(row[1], 4.0)
+        self.assertEqual(row[2], 110.0)
+        self.assertGreaterEqual(row[3], 106.0)
+        self.assertEqual(row[4:], (50, 2))
+
+    def test_flat_position_clears_state_before_reentry(self):
+        self.configure()
+        self.assertEqual(self.monitor.clear_absent_positions([]), 1)
+        fresh = self.monitor.configure_position(
+            "2330", 100, 102, 2, position_version=3,
+            profile="atr_dynamic", atr_multiple=2.0, now=self.now
+        )
+        self.assertAlmostEqual(fresh["stop_price"], 98.0)
+        self.assertEqual(fresh["high_water"], 102.0)
+
     def test_minervini_requires_structural_invalidation(self):
         with self.assertRaises(ValueError):
             self.configure(profile="minervini_sepa")
