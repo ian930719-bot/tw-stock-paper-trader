@@ -129,6 +129,23 @@ class PaperAccount:
                     crossed = price <= limit_price if side == Side.BUY.value else price >= limit_price
                     if not crossed:
                         continue
+                    # Revalidate against the latest official exchange band immediately
+                    # before a simulated fill. A previously accepted order may outlive
+                    # a source update, a session boundary, or a change in the official row.
+                    try:
+                        from taiwan_price_limits import get_official_price_limit, validate_limit_price
+                        band = get_official_price_limit(
+                            symbol.upper(), market, expected_date=current.date(), force_refresh=True
+                        )
+                        validate_limit_price(float(limit_price), band)
+                    except Exception as exc:
+                        conn.execute(
+                            "UPDATE paper_orders SET status=?,message=?,updated_at=? WHERE order_id=? AND status=?",
+                            (OrderStatus.REJECTED.value,
+                             f"成交前官方漲跌停驗證失敗，拒絕撮合：{exc}",
+                             current.isoformat(), order_id, OrderStatus.ACCEPTED.value),
+                        )
+                        continue
                     account = conn.execute(
                         "SELECT cash FROM paper_account WHERE id=1"
                     ).fetchone()
