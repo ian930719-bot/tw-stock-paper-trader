@@ -165,5 +165,60 @@ class ResearchEngineTests(unittest.TestCase):
             shared_capital_backtest({}, STRATEGIES[0], exit_profile="magic")
 
 
+    def test_oneil_profit_review_activates_wide_trailing_stop_not_fixed_target(self):
+        frame = sample_frame(26)
+        frame["open"] = 100.0
+        frame["high"] = 100.5
+        frame["low"] = 99.5
+        frame["close"] = 100.0
+        frame["atr"] = 2.0
+        frame.loc[22, ["high", "close"]] = [125.0, 120.0]
+        frame.loc[23, ["high", "close", "low"]] = [130.0, 126.0, 124.0]
+
+        def controlled_signals(z):
+            entry = pd.Series(False, index=z.index)
+            entry.iloc[20] = True
+            return {STRATEGIES[0]: (entry, pd.Series(False, index=z.index))}
+
+        with patch("research_engine._signals", side_effect=controlled_signals):
+            result = shared_capital_backtest(
+                {"ONEIL": frame}, STRATEGIES[0], warmup=0,
+                max_positions=1, risk_fraction=0.02, exit_profile="oneil_8pct",
+            )
+        trades = result["trades"]
+        self.assertEqual(len(trades), 1)
+        self.assertTrue(bool(trades.iloc[0]["曾觸發獲利檢視"]))
+        self.assertEqual(trades.iloc[0]["出場原因"], "停損／移動停損")
+        self.assertGreater(float(trades.iloc[0]["最高風險倍數"]), 0)
+
+    def test_minervini_two_r_moves_stop_to_breakeven_and_three_r_trails(self):
+        frame = sample_frame(26)
+        frame["open"] = 100.0
+        frame["high"] = 100.5
+        frame["low"] = 99.5
+        frame["close"] = 100.0
+        frame["atr"] = 2.0
+        frame.loc[11:20, "low"] = 98.0
+        frame.loc[22, ["high", "close"]] = [104.0, 102.0]
+        frame.loc[23, ["high", "close"]] = [108.0, 106.0]
+        frame.loc[24, "low"] = 102.0
+
+        def controlled_signals(z):
+            entry = pd.Series(False, index=z.index)
+            entry.iloc[20] = True
+            return {STRATEGIES[0]: (entry, pd.Series(False, index=z.index))}
+
+        with patch("research_engine._signals", side_effect=controlled_signals):
+            result = shared_capital_backtest(
+                {"MINERVINI": frame}, STRATEGIES[0], warmup=0,
+                max_positions=1, risk_fraction=0.02,
+                exit_profile="minervini_structure",
+            )
+        trades = result["trades"]
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades.iloc[0]["出場原因"], "停損／移動停損")
+        self.assertGreaterEqual(float(trades.iloc[0]["最高風險倍數"]), 3.0)
+
+
 if __name__ == "__main__":
     unittest.main()
