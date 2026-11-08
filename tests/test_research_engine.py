@@ -157,7 +157,7 @@ class ResearchEngineTests(unittest.TestCase):
         self.assertEqual(oneil_result["exit_profile"], "oneil_8pct")
         self.assertEqual(len(atr_result["trades"]), 1)
         self.assertEqual(len(oneil_result["trades"]), 1)
-        self.assertIn("進場日觸及停損", atr_result["trades"]["出場原因"].iloc[0])
+        self.assertEqual(atr_result["trades"]["出場原因"].iloc[0], "進場日觸及初始停損")
         self.assertIn("該標的資料期末平倉", oneil_result["trades"]["出場原因"].iloc[0])
 
     def test_unknown_exit_profile_is_rejected(self):
@@ -199,7 +199,7 @@ class ResearchEngineTests(unittest.TestCase):
         frame["close"] = 100.0
         frame["atr"] = 2.0
         frame.loc[11:20, "low"] = 98.0
-        frame.loc[22, ["high", "close"]] = [104.0, 102.0]
+        frame.loc[22, ["high", "close"]] = [105.0, 104.0]
         frame.loc[23, ["high", "close"]] = [108.0, 106.0]
         frame.loc[24, "low"] = 102.0
 
@@ -217,6 +217,7 @@ class ResearchEngineTests(unittest.TestCase):
         trades = result["trades"]
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades.iloc[0]["出場原因"], "停損／移動停損")
+        # Row 22 closes at +2R; row 23 reaches +3R and activates the ATR trail.
         self.assertGreaterEqual(float(trades.iloc[0]["最高風險倍數"]), 3.0)
 
 
