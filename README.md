@@ -37,7 +37,7 @@ pip install streamlit yfinance pandas numpy plotly requests scikit-learn
 
 ## Walk-forward 效能與驗證
 
-- AI 自適應 Walk-forward 預先計算 18 組候選訊號，外層測試窗口重用已計算訊號。
+- AI 自適應 Walk-forward 預先計算 30 組候選訊號，外層測試窗口重用已計算訊號。
 - 候選選擇快取鍵包含訓練資料完整內容指紋，以及本金、持倉上限、風險預算、成本、出場規則與暖機長度；資料或設定改變即重新評估，且快取容量有限。
 - 網頁顯示已完成的樣本外窗口與日期範圍。快取只重用相同訓練切片的內部選擇結果，不使用外層測試資料挑選策略。
 
@@ -89,6 +89,6 @@ python -m unittest discover -s tests -v
 
 ## Portfolio risk and multi-strategy research
 
-- Five distinct daily-OHLCV strategy families are available, including long-term trend structure, volume breakout, momentum continuation, trend-filtered mean reversion, and volatility-squeeze breakout. Signals are evaluated at the close and simulated no earlier than the next session. New entries in both historical simulation and the paper worker are capped at 1% of prior-known 20-session average daily dollar turnover; current-session volume is never used to size an opening fill.
+- Five distinct daily-OHLCV strategy families are available, including long-term trend structure, volume breakout, momentum continuation, trend-filtered mean reversion, and volatility-squeeze breakout. The adaptive search evaluates 30 predeclared candidates spanning breakout, multifactor, mean-reversion, and squeeze-breakout families. Signals are evaluated at the close and simulated no earlier than the next session. New entries in both historical simulation and the paper worker are capped at 1% of prior-known 20-session average daily dollar turnover; current-session volume is never used to size an opening fill.
 - Current cross-sectional risk snapshots use common-date close-to-close returns, covariance shrinkage, capped long-only risk-parity weights, and explicit cash reserve. These weights are not retroactively injected into historical OOS results.
 - The optional strategy ensemble combines each fixed strategy's OOS equity curve using rolling risk estimates. Rebalance weights for each date use only returns observed before that date; the first 60 sessions use equal weights. It is a separate research curve, not the paper account ledger.
