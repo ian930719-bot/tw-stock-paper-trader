@@ -240,6 +240,36 @@ class ResearchEngineTests(unittest.TestCase):
             self.assertTrue(original_entry.iloc[:400].equals(revised_entry.iloc[:400]))
             self.assertTrue(original_exit.iloc[:400].equals(revised_exit.iloc[:400]))
 
+    def test_entries_are_capped_by_prior_known_average_dollar_volume(self):
+        frame = sample_frame(26)
+        frame["open"] = 100.0
+        frame["high"] = 101.0
+        frame["low"] = 99.0
+        frame["close"] = 100.0
+        frame["volume"] = 1000
+        frame["atr"] = 2.0
+
+        def controlled_signals(z):
+            entry = pd.Series(False, index=z.index)
+            entry.iloc[20] = True
+            return {STRATEGIES[0]: (entry, pd.Series(False, index=z.index))}
+
+        with patch("research_engine._signals", side_effect=controlled_signals):
+            result = shared_capital_backtest(
+                {"ILLIQUID": frame}, STRATEGIES[0], initial_capital=1_000_000,
+                warmup=0, max_positions=1, risk_fraction=0.10,
+                fee=0.0, sell_tax=0.0, slippage=0.0,
+                max_participation_rate=0.01,
+            )
+        self.assertEqual(len(result["trades"]), 1)
+        trade = result["trades"].iloc[0]
+        self.assertLessEqual(int(trade["股數"]), 10)
+        self.assertLessEqual(float(trade["估計ADV20參與率"]), 0.0100001)
+
+    def test_invalid_liquidity_participation_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "max_participation_rate"):
+            shared_capital_backtest({}, STRATEGIES[0], max_participation_rate=0.5)
+
     def test_unknown_exit_profile_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "未知出場設定"):
             shared_capital_backtest({}, STRATEGIES[0], exit_profile="magic")
