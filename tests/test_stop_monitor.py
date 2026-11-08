@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -27,7 +28,11 @@ class StopMonitorTests(unittest.TestCase):
         order = self.engine.submit(
             OrderIntent("2330", Side.BUY, quantity, price, "seed", "seed-buy"),
             cash=200000, positions={}, equity=200000, now=NOW)
-        self.account.process_quote("2330", price, NOW.isoformat(), "test", now=NOW)
+        with patch("taiwan_price_limits.get_official_price_limit", return_value={
+            "no_price_limit": False, "lower_limit": 90, "upper_limit": 110,
+            "reference_price": 100, "date": NOW.date().isoformat()
+        }):
+            self.account.process_quote("2330", price, NOW.isoformat(), "test", now=NOW)
         self.assertEqual(self.engine.get_order(order.order_id).status, "FILLED")
 
     def evaluate(self, price, at=NOW, now=NOW):
