@@ -200,7 +200,7 @@ class ResearchEngineTests(unittest.TestCase):
         frame["atr"] = 2.0
         frame.loc[11:20, "low"] = 98.0
         frame.loc[22, ["high", "close"]] = [105.0, 104.0]
-        frame.loc[23, ["high", "close"]] = [108.0, 106.0]
+        frame.loc[23, ["high", "close", "low"]] = [108.0, 106.0, 103.0]
         frame.loc[24, "low"] = 102.0
 
         def controlled_signals(z):
