@@ -111,6 +111,34 @@ class ExecutionEngineTests(unittest.TestCase):
                            open_order_count=0, daily_order_count=0,
                            limits=self.engine.limits, now=OPEN)
 
+    def test_accept_intraday_odd_lot_order(self):
+        odd = self.intent(quantity=37, odd_lot=True)
+        result = self.engine.submit(odd, cash=100000, positions={}, equity=100000, now=OPEN)
+        self.assertEqual(result.status, "ACCEPTED")
+        self.assertEqual(result.quantity, 37)
+
+    def test_reject_odd_lot_without_flag(self):
+        with self.assertRaisesRegex(ValueError, "1 至 999"):
+            validate_order(self.intent(quantity=37), cash=100000, positions={}, equity=100000,
+                           daily_realized_pnl=0, open_order_count=0, daily_order_count=0,
+                           limits=self.engine.limits, now=OPEN)
+
+    def test_reject_odd_lot_over_999(self):
+        with self.assertRaisesRegex(ValueError, "1 至 999"):
+            validate_order(self.intent(quantity=1000, odd_lot=True), cash=100000, positions={},
+                           equity=100000, daily_realized_pnl=0, open_order_count=0,
+                           daily_order_count=0, limits=self.engine.limits, now=OPEN)
+
+    def test_odd_lot_session_until_1330(self):
+        odd = self.intent(quantity=37, odd_lot=True)
+        validate_order(odd, cash=100000, positions={}, equity=100000, daily_realized_pnl=0,
+                       open_order_count=0, daily_order_count=0, limits=self.engine.limits,
+                       now=datetime(2026, 11, 9, 13, 29, tzinfo=TZ))
+        with self.assertRaisesRegex(ValueError, "09:00–13:30"):
+            validate_order(odd, cash=100000, positions={}, equity=100000, daily_realized_pnl=0,
+                           open_order_count=0, daily_order_count=0, limits=self.engine.limits,
+                           now=datetime(2026, 11, 9, 13, 31, tzinfo=TZ))
+
     def test_expire_previous_day_accepted_orders(self):
         order = self.engine.submit(self.intent(), cash=100000, positions={},
                                    equity=100000, now=OPEN)
