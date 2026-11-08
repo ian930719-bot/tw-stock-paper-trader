@@ -207,7 +207,8 @@ def validate_action_frame(actions: pd.DataFrame | None, symbol: str) -> pd.DataF
     frame = actions.copy()
     if "symbol" not in frame:
         frame["symbol"] = str(symbol)
-    frame = frame[frame["symbol"].astype(str) == str(symbol)].copy()
+    if str(symbol):
+        frame = frame[frame["symbol"].astype(str) == str(symbol)].copy()
     required = {"effective_date", "action_type", "share_multiplier", "cash_per_share"}
     if not required.issubset(frame.columns):
         raise ValueError(f"{symbol} 公司行動缺少欄位：{sorted(required - set(frame.columns))}")
