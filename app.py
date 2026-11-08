@@ -443,11 +443,17 @@ with t2:
                         "ai_evolution_holdout_trades.csv", "text/csv",
                     )
                 st.warning("這是有限候選空間的量化搜尋原型，不是能無限制自我學習的 AI。只有樣本外結果、跨年度穩定性及紙上交易持續通過，才可考慮升級；目前不會連接券商。")
+        adaptive_walkforward = st.checkbox(
+            "AI 自適應 Walk-forward（每段只用過去資料重新選策略）",
+            value=True, key="adaptive_walkforward_enabled",
+            help="每個測試區段只用該區段之前的歷史資料進行內部驗證；若沒有足夠交易樣本支持候選策略，該區段保持現金。"
+        )
+        walkforward_strategy = "AI 自適應策略" if adaptive_walkforward else portfolio_strategy
         if st.button("執行 Walk-forward＋0050 基準比較", key="run_walkforward_benchmark", disabled=not portfolio_symbols):
             wf_frames = {code: data[code].copy() for code in portfolio_symbols if code in data}
             with st.spinner("執行多段樣本外驗證，並取得 0050 還原日線作基準…"):
                 wf_result = rolling_walk_forward(
-                    wf_frames, portfolio_strategy,
+                    wf_frames, walkforward_strategy,
                     initial_capital=float(capital),
                     max_positions=int(portfolio_max_positions),
                     risk_fraction=float(portfolio_risk_pct),
@@ -482,8 +488,8 @@ with t2:
                 benchmark_comparison = pd.DataFrame(benchmark_rows)
                 st.session_state["walk_forward_result"] = wf_result
                 st.session_state["walk_forward_benchmark"] = benchmark_comparison
-                st.session_state["walk_forward_config"] = portfolio_config
-        if st.session_state.get("walk_forward_config") == portfolio_config:
+                st.session_state["walk_forward_config"] = portfolio_config + (bool(adaptive_walkforward),)
+        if st.session_state.get("walk_forward_config") == portfolio_config + (bool(adaptive_walkforward),):
             wf = st.session_state["walk_forward_result"]
             st.subheader("Walk-forward 多段樣本外驗證")
             st.caption(wf.get("note", ""))
