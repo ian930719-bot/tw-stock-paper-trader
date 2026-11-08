@@ -19,6 +19,7 @@ import yfinance as yf
 from research_engine import STRATEGIES
 from continuous_walk_forward import continuous_walk_forward
 from analytics import trade_statistics
+from cross_sectional_momentum import build_cross_sectional_overrides
 
 # Exploratory broad universe: top 20 names from the 0050 holdings snapshot
 # dated 2026-08-10, plus 2603 for the prior shipping-sector test. This is NOT
@@ -231,7 +232,12 @@ def main():
             f"可用共同交易日僅 {len(all_dates)}，樣本外區段預估 {expected_windows}，不足 4 段"
         )
 
-    strategies = list(STRATEGIES) + ["AI 自適應策略"]
+    rotation_overrides = build_cross_sectional_overrides(
+        frames, corporate_actions=actions,
+        entry_quantile=0.80, exit_quantile=0.45,
+        minimum_universe=MIN_SYMBOLS,
+    )
+    strategies = list(STRATEGIES) + ["AI 自適應策略", "橫斷面動能輪動"]
     summaries, all_windows, all_trades, all_equity = [], [], [], []
     for strategy in strategies:
         print(f"開始樣本外測試：{strategy}", flush=True)
@@ -247,6 +253,9 @@ def main():
             exit_profile="baseline_atr2",
             min_test_days=40,
             corporate_actions=actions,
+            custom_signal_overrides=(
+                rotation_overrides if strategy == "橫斷面動能輪動" else None
+            ),
         )
         if len(result["windows"]) < 4:
             raise RuntimeError(f"{strategy} 僅完成 {len(result['windows'])} 個樣本外區段")
