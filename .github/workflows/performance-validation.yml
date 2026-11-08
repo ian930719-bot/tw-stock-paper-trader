@@ -11,6 +11,7 @@ on:
       - "continuous_walk_forward.py"
       - "cross_sectional_momentum.py"
       - "high_conviction_breakout.py"
+      - "minervini_vcp_breakout.py"
       - "strategy_evolution.py"
       - "corporate_actions.py"
       - "analytics.py"
