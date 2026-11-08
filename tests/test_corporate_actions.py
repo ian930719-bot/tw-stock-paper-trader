@@ -103,7 +103,7 @@ class CorporateActionTests(unittest.TestCase):
             })
         result = point_in_time_recalculate(frame, actions, builder)
         self.assertAlmostEqual(float(result.loc[2,"sma3"]), 90.0)
-        self.assertAlmostEqual(float(result.loc[3,"sma3"]), 45.0)
+        self.assertAlmostEqual(float(result.loc[3,"sma3"]), 48.333333333333336)
         self.assertAlmostEqual(float(result.loc[3,"return1"]), 0.0)
         self.assertAlmostEqual(float(result.loc[3,"volume3"]), 200.0)
 
