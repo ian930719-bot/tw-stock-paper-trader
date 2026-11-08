@@ -34,6 +34,7 @@ from taiwan_price_limits import get_official_price_limit
 from market_trading_calendar import market_trading_day_status
 from trading_config import TradingConfig
 from trading_mode import StagedTradingController
+st.set_page_config(page_title="台股模擬交易",layout="wide")
 @st.cache_data(ttl=21600, max_entries=8, show_spinner=False)
 def cached_rolling_walk_forward(
     frames, strategy, initial_capital, max_positions, risk_fraction,
@@ -47,7 +48,6 @@ def cached_rolling_walk_forward(
         warmup_bars=warmup_bars, exit_profile=exit_profile,
     )
 
-st.set_page_config(page_title="台股模擬交易",layout="wide")
 TZ=ZoneInfo("Asia/Taipei")
 from stock_universe import fetch_stock_universe, universe_summary, StockUniverseError
 
