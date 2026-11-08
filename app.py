@@ -89,7 +89,7 @@ with st.sidebar:
     st.caption(f"目前載入 {len(ss)} / 最多 30 檔；股票主檔共 {len(stock_master):,} 檔")
     period=st.selectbox("歷史期間",["5y","3y","2y","1y"])
     capital=st.number_input("模擬本金",100000,10000000,100000,100000)
-    risk=st.number_input("單筆風險上限",500,50000,5000,500)
+    risk=st.number_input("單筆風險上限",500,50000,500,500)
     if st.button("重新抓取"): st.cache_data.clear()
 if not ss: st.stop()
 def fetch_yahoo_history(code, period):
