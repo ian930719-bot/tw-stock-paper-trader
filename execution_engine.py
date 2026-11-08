@@ -334,7 +334,7 @@ class PaperExecutionEngine:
             ).fetchone()
         if not row:
             raise KeyError("找不到模擬委託")
-        return OrderResult(*row[:7], *row[7:10], created_at=row[10])
+        return OrderResult(*row[:7], *row[7:10], created_at=row[10], odd_lot=bool(row[11]))
 
     def expire_day_orders(self, now: datetime | None = None) -> int:
         """Expire accepted day orders created before the current Taipei date."""
@@ -357,7 +357,7 @@ class PaperExecutionEngine:
         with closing(sqlite3.connect(self.db_path)) as conn:
             rows = conn.execute(
                 "SELECT order_id,symbol,side,quantity,limit_price,status,message,"
-                "filled_quantity,average_fill_price,fees,reason,created_at "
+                "filled_quantity,average_fill_price,fees,reason,created_at,odd_lot "
                 "FROM paper_orders ORDER BY created_at DESC LIMIT ?", (int(limit),)
             ).fetchall()
         fields = ["order_id","symbol","side","quantity","limit_price","status",
