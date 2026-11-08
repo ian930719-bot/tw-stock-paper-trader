@@ -17,7 +17,7 @@ class StopMonitorTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.db = str(Path(self.tmp.name) / "paper.sqlite3")
         self.engine = PaperExecutionEngine(self.db)
-        self.account = PaperAccount(self.db, initial_cash=100000)
+        self.account = PaperAccount(self.db, initial_cash=200000)
         self.monitor = StopMonitor(self.db, take_profit_pct=0.99)
 
     def tearDown(self):
