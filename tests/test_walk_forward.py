@@ -58,6 +58,53 @@ class RollingWalkForwardTests(unittest.TestCase):
                     self.assertTrue((pd.to_datetime(selected["進場日"]) >=
                                      pd.Timestamp(window["測試開始"])).all())
 
+
+    def test_adaptive_walk_forward_selects_only_from_pretest_history(self):
+        frame = sample_frame(820)
+        captured = []
+
+        def selector(training_frames, **kwargs):
+            captured.append(max(pd.to_datetime(x["date"]).max()
+                                for x in training_frames.values()))
+            return {"status": "ok", "selected_params": {
+                "signal_family": "breakout", "breakout": 20,
+                "volume_multiple": 1.2, "trend_period": 50,
+            }, "selection_score": 0.1}
+
+        def signals(z, params):
+            return (pd.Series(False, index=z.index),
+                    pd.Series(False, index=z.index))
+
+        with patch("walk_forward.select_candidate", side_effect=selector), \\
+             patch("walk_forward.build_signals", side_effect=signals):
+            result = rolling_walk_forward(
+                {"A": frame}, "AI 自適應策略",
+                initial_capital=100_000, lookback_days=300,
+                test_days=100, step_days=100, warmup_bars=200,
+                min_test_days=40,
+            )
+
+        self.assertGreaterEqual(len(captured), 2)
+        starts = pd.to_datetime(result["windows"]["測試開始"])
+        for history_end, test_start in zip(captured, starts):
+            self.assertLess(history_end, test_start)
+        self.assertTrue((result["windows"]["選擇狀態"] == "ok").all())
+        self.assertTrue(result["trades"].empty)
+
+    def test_adaptive_walk_forward_fails_closed_without_candidate(self):
+        frame = sample_frame(820)
+        with patch("walk_forward.select_candidate", return_value={
+            "status": "no_robust_candidate", "selected_params": None
+        }):
+            result = rolling_walk_forward(
+                {"A": frame}, "AI 自適應策略",
+                initial_capital=100_000, lookback_days=300,
+                test_days=100, step_days=100, warmup_bars=200,
+                min_test_days=40,
+            )
+        self.assertTrue(result["trades"].empty)
+        self.assertTrue((result["windows"]["選擇狀態"] == "no_robust_candidate").all())
+
     def test_rejects_overlapping_test_windows(self):
         frame = sample_frame(500)
         with self.assertRaisesRegex(ValueError, "不可小於"):
