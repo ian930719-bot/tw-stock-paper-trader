@@ -97,6 +97,13 @@ class PaperAccount:
             "fills": [dict(zip(fields, row)) for row in fills],
         }
 
+    def backup_bytes(self) -> bytes:
+        """Return a transactionally consistent SQLite snapshot for offline backup."""
+        with closing(sqlite3.connect(self.db_path, timeout=20)) as source:
+            with closing(sqlite3.connect(":memory:")) as target:
+                source.backup(target)
+                return target.serialize()
+
     def integrity_report(self) -> dict:
         """Reconcile the SQLite cash/position ledger against immutable fill records."""
         with closing(sqlite3.connect(self.db_path)) as conn:
