@@ -16,7 +16,8 @@ import pandas as pd
 
 from analytics import equity_risk_metrics, trade_statistics
 from research_engine import STRATEGIES, shared_capital_backtest
-from strategy_evolution import select_candidate, build_signals, candidate_grid
+from strategy_evolution import select_candidate, build_signals, candidate_grid, _candidate_features
+from corporate_actions import point_in_time_recalculate
 
 
 _SELECTION_CACHE_MAX = 32
@@ -34,10 +35,19 @@ def _frame_fingerprint(frames: dict[str, pd.DataFrame]) -> str:
 
 def _selection_cache_key(frames, *, initial_capital, max_positions,
                          risk_fraction, exit_profile, warmup, fee, sell_tax,
-                         slippage):
-    return (_frame_fingerprint(frames), float(initial_capital), int(max_positions),
-            float(risk_fraction), str(exit_profile), int(warmup), float(fee),
-            float(sell_tax), float(slippage))
+                         slippage, corporate_actions=None):
+    action_digest = hashlib.sha256()
+    for code in sorted(corporate_actions or {}):
+        action_digest.update(str(code).encode("utf-8"))
+        events = (corporate_actions or {})[code]
+        if events is not None and not events.empty:
+            action_digest.update(
+                pd.util.hash_pandas_object(events, index=True).values.tobytes()
+            )
+    return (_frame_fingerprint(frames), action_digest.hexdigest(),
+            float(initial_capital), int(max_positions), float(risk_fraction),
+            str(exit_profile), int(warmup), float(fee), float(sell_tax),
+            float(slippage))
 
 
 def rolling_walk_forward(
@@ -111,10 +121,14 @@ def rolling_walk_forward(
             date_index = pd.DatetimeIndex(dated["date"])
             for params in candidate_grid():
                 key = tuple(sorted(params.items()))
-                entry, exit_signal = build_signals(dated, params)
+                events = (corporate_actions or {}).get(str(code))
+                features = point_in_time_recalculate(
+                    dated, events,
+                    lambda adjusted: _candidate_features(adjusted, params),
+                )
                 candidate_signal_cache[(code, key)] = (
-                    pd.Series(entry.to_numpy(), index=date_index),
-                    pd.Series(exit_signal.to_numpy(), index=date_index),
+                    pd.Series(features["entry"].to_numpy(), index=date_index),
+                    pd.Series(features["exit"].to_numpy(), index=date_index),
                 )
 
     start_idx = first_start
@@ -177,7 +191,10 @@ def rolling_walk_forward(
                 for code, frame in window_frames.items():
                     cached = candidate_signal_cache.get((code, selected_key))
                     if cached is None:
-                        signal_overrides[code] = build_signals(frame, selected_params)
+                        from strategy_evolution import _prepare_overrides
+                        signal_overrides[code] = _prepare_overrides(
+                            {code: frame}, selected_params, corporate_actions
+                        )[code]
                     else:
                         date_index = pd.DatetimeIndex(pd.to_datetime(frame["date"]))
                         signal_overrides[code] = tuple(
