@@ -133,5 +133,37 @@ class ResearchEngineTests(unittest.TestCase):
         )
 
 
+    def test_exit_profiles_share_entry_logic_but_change_initial_stop(self):
+        frame = sample_frame(30)
+        frame["symbol"] = "PROFILE"
+        frame.loc[21, "low"] = float(frame.loc[21, "open"]) - 1.0
+
+        def controlled_signals(z):
+            entry = pd.Series(False, index=z.index)
+            entry.iloc[20] = True
+            return {STRATEGIES[0]: (entry, pd.Series(False, index=z.index))}
+
+        with patch("research_engine._signals", side_effect=controlled_signals):
+            atr_result = shared_capital_backtest(
+                {"PROFILE": frame}, STRATEGIES[0], warmup=0,
+                max_positions=1, exit_profile="atr_2",
+            )
+            oneil_result = shared_capital_backtest(
+                {"PROFILE": frame}, STRATEGIES[0], warmup=0,
+                max_positions=1, exit_profile="oneil_8pct",
+            )
+
+        self.assertEqual(atr_result["exit_profile"], "atr_2")
+        self.assertEqual(oneil_result["exit_profile"], "oneil_8pct")
+        self.assertEqual(len(atr_result["trades"]), 1)
+        self.assertEqual(len(oneil_result["trades"]), 1)
+        self.assertIn("進場日觸及停損", atr_result["trades"]["出場原因"].iloc[0])
+        self.assertIn("該標的資料期末平倉", oneil_result["trades"]["出場原因"].iloc[0])
+
+    def test_unknown_exit_profile_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "未知出場設定"):
+            shared_capital_backtest({}, STRATEGIES[0], exit_profile="magic")
+
+
 if __name__ == "__main__":
     unittest.main()
