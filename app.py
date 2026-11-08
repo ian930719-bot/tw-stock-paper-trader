@@ -326,6 +326,44 @@ with t2:
             tuple(sorted(portfolio_symbols)), portfolio_strategy, float(capital),
             int(portfolio_max_positions), float(portfolio_risk_pct), portfolio_exit[0], period,
         )
+        if st.button("比較三種策略（相同條件）", key="compare_historical_portfolio_strategies", disabled=not portfolio_symbols):
+            selected_frames = {code: data[code].copy() for code in portfolio_symbols if code in data}
+            comparison_rows = []
+            with st.spinner("以相同股票、期間、本金及風險設定比較三種策略…"):
+                for strategy_name in STRATEGIES:
+                    comparison = shared_capital_backtest(
+                        selected_frames, strategy_name,
+                        initial_capital=float(capital), max_positions=int(portfolio_max_positions),
+                        risk_fraction=float(portfolio_risk_pct), warmup=260,
+                        exit_profile=portfolio_exit[0],
+                    )
+                    cm = comparison["metrics"]
+                    ct = trade_statistics(comparison["trades"])
+                    comparison_rows.append({
+                        "策略": strategy_name,
+                        "期末資產": cm["期末資產"],
+                        "總報酬": cm["總報酬"],
+                        "年化報酬": cm["年化報酬"],
+                        "最大回撤": cm["最大回撤"],
+                        "交易筆數": ct["交易筆數"],
+                        "勝率": ct["勝率"],
+                        "Profit Factor": ct["Profit Factor"],
+                        "Sharpe": cm.get("Sharpe", 0),
+                    })
+            st.session_state["historical_strategy_comparison"] = comparison_rows
+            st.session_state["historical_strategy_comparison_config"] = portfolio_config
+        if st.session_state.get("historical_strategy_comparison_config") == portfolio_config:
+            st.subheader("三種策略公平比較")
+            comparison_df = pd.DataFrame(st.session_state["historical_strategy_comparison"])
+            st.dataframe(
+                comparison_df.style.format({
+                    "期末資產": "NTD {:,.0f}", "總報酬": "{:.1%}",
+                    "年化報酬": "{:.1%}", "最大回撤": "{:.1%}",
+                    "勝率": "{:.1%}", "Profit Factor": "{:.2f}", "Sharpe": "{:.2f}",
+                }),
+                use_container_width=True, hide_index=True,
+            )
+            st.caption("三種策略使用相同股票、期間、本金、持倉上限、風險預算及出場規則；此比較仍是歷史樣本內結果，不能據此直接選擇實盤策略。")
         if st.button("執行多股票組合回測", key="run_historical_multi_portfolio", disabled=not portfolio_symbols):
             selected_frames = {code: data[code].copy() for code in portfolio_symbols if code in data}
             with st.spinner("使用共享資金池逐日模擬所有股票…"):
