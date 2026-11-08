@@ -109,7 +109,7 @@ def rolling_walk_forward(
             # Only pre-test history is supplied to the selector. The outer test
             # window is excluded from every candidate ranking and parameter choice.
             training_only = {
-                code: frame.loc[pd.to_datetime(frame["date"]) < start_date].copy()
+                code: frame.loc[pd.to_datetime(frame["date"]) < start_date].tail(int(lookback_days)).copy()
                 for code, frame in valid.items()
                 if (pd.to_datetime(frame["date"]) < start_date).any()
             }
