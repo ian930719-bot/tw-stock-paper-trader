@@ -13,6 +13,7 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 # Keep this import synchronized with research_engine.py in the same deployed revision.
+from strategy_evolution import evolve_strategy
 from research_engine import STRATEGIES, daily_strategy_returns, performance, fundamental_snapshot, shared_capital_backtest
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -364,6 +365,68 @@ with t2:
                 use_container_width=True, hide_index=True,
             )
             st.caption("三種策略使用相同股票、期間、本金、持倉上限、風險預算及出場規則；此比較仍是歷史樣本內結果，不能據此直接選擇實盤策略。")
+        if st.button("啟動 AI 自主策略演化", key="run_ai_strategy_evolution", disabled=not portfolio_symbols):
+            evolution_frames = {code: data[code].copy() for code in portfolio_symbols if code in data}
+            with st.spinner("正在搜尋策略參數、訓練前 70% 歷史資料，並保留後 30% 作樣本外驗證…"):
+                evolution_result = evolve_strategy(
+                    evolution_frames,
+                    initial_capital=float(capital),
+                    max_positions=int(portfolio_max_positions),
+                    risk_fraction=float(portfolio_risk_pct),
+                    exit_profile=portfolio_exit[0],
+                    warmup=260,
+                )
+            st.session_state["ai_evolution_result"] = evolution_result
+            st.session_state["ai_evolution_config"] = portfolio_config
+        if st.session_state.get("ai_evolution_config") == portfolio_config:
+            evolution = st.session_state["ai_evolution_result"]
+            st.subheader("AI 自主策略演化研究")
+            if evolution.get("status") != "ok":
+                st.warning(
+                    "目前資料不足以進行可靠的訓練／樣本外切分。"
+                    f"可用共同交易日：{evolution.get('available_sessions', 0)}；"
+                    f"至少需要：{evolution.get('required_sessions', 0)}。"
+                )
+            else:
+                st.write(
+                    f"搜尋 {evolution['search_count']} 組候選；"
+                    f"使用 {evolution['symbols']} 檔股票；"
+                    f"樣本外起始日：{pd.Timestamp(evolution['split_date']).date()}"
+                )
+                st.write("選出的候選參數（只依前 70% 訓練資料選擇）：", evolution["selected_params"])
+                st.caption("樣本外後 30% 完全不參與參數挑選；它只用來檢查策略是否能延續。若樣本外績效不佳，應淘汰策略，而不是用樣本外資料反覆調參。")
+                st.subheader("訓練期候選排名")
+                st.dataframe(
+                    evolution["train_rows"].style.format({
+                        "訓練年化報酬": "{:.1%}", "訓練最大回撤": "{:.1%}",
+                        "訓練Profit Factor": "{:.2f}", "研究分數": "{:.3f}",
+                    }),
+                    use_container_width=True, hide_index=True,
+                )
+                holdout = evolution["holdout"]
+                hm = holdout["metrics"]
+                hs = evolution["holdout_stats"]
+                if holdout["equity"].empty:
+                    st.warning("樣本外期間沒有足夠資料形成資產曲線。")
+                else:
+                    h1, h2, h3, h4, h5 = st.columns(5)
+                    h1.metric("樣本外期末資產", f"NTD {hm['期末資產']:,.0f}")
+                    h2.metric("樣本外總報酬", f"{hm['總報酬']:.1%}")
+                    h3.metric("樣本外年化報酬", f"{hm['年化報酬']:.1%}")
+                    h4.metric("樣本外最大回撤", f"{hm['最大回撤']:.1%}")
+                    h5.metric("樣本外交易筆數", str(hs.get("交易筆數", len(holdout["trades"]))))
+                    h6, h7, h8 = st.columns(3)
+                    h6.metric("樣本外勝率", f"{hs.get('勝率', 0):.1%}")
+                    h7.metric("樣本外 Profit Factor", "∞" if np.isinf(hs.get("Profit Factor", 0)) else f"{hs.get('Profit Factor', 0):.2f}")
+                    h8.metric("樣本外 Sharpe", f"{hm.get('Sharpe', 0):.2f}")
+                    st.line_chart(holdout["equity"].set_index("日期")["資產"])
+                    st.dataframe(holdout["trades"], use_container_width=True, hide_index=True)
+                    st.download_button(
+                        "下載 AI 演化樣本外交易紀錄",
+                        holdout["trades"].to_csv(index=False).encode("utf-8-sig"),
+                        "ai_evolution_holdout_trades.csv", "text/csv",
+                    )
+                st.warning("這是有限候選空間的量化搜尋原型，不是能無限制自我學習的 AI。只有樣本外結果、跨年度穩定性及紙上交易持續通過，才可考慮升級；目前不會連接券商。")
         if st.button("執行多股票組合回測", key="run_historical_multi_portfolio", disabled=not portfolio_symbols):
             selected_frames = {code: data[code].copy() for code in portfolio_symbols if code in data}
             with st.spinner("使用共享資金池逐日模擬所有股票…"):
