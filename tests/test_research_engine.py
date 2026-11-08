@@ -160,6 +160,35 @@ class ResearchEngineTests(unittest.TestCase):
         self.assertEqual(atr_result["trades"]["出場原因"].iloc[0], "進場日觸及初始停損")
         self.assertIn("該標的資料期末平倉", oneil_result["trades"]["出場原因"].iloc[0])
 
+    def test_minervini_structural_stop_uses_only_completed_bars_before_signal(self):
+        frame = sample_frame(26)
+        frame["open"] = 100.0
+        frame["high"] = 100.5
+        frame["low"] = 99.5
+        frame["close"] = 100.0
+        frame["atr"] = 2.0
+        # The signal bar's low is deliberately extreme; it must not become
+        # the stop reference because the signal is only known at that close.
+        frame.loc[20, "low"] = 70.0
+        frame.loc[10:19, "low"] = 98.0
+
+        def controlled_signals(z):
+            entry = pd.Series(False, index=z.index)
+            entry.iloc[20] = True
+            return {STRATEGIES[0]: (entry, pd.Series(False, index=z.index))}
+
+        with patch("research_engine._signals", side_effect=controlled_signals):
+            result = shared_capital_backtest(
+                {"MINERVINI_LOOKAHEAD": frame}, STRATEGIES[0], warmup=0,
+                max_positions=1, risk_fraction=0.02,
+                exit_profile="minervini_structure",
+            )
+        # The 98 support from prior completed bars is used; the signal-day 70
+        # print is excluded. With 2% account risk, shares are sized on 2/share.
+        trades = result["trades"]
+        self.assertEqual(len(trades), 1)
+        self.assertAlmostEqual(float(trades.iloc[0]["進場成本"]) / float(trades.iloc[0]["股數"]), 100.0 * 1.001 * 1.001425, places=3)
+
     def test_entry_day_high_updates_atr_trailing_stop_for_next_session(self):
         frame = sample_frame(26)
         frame["open"] = 100.0
@@ -227,7 +256,8 @@ class ResearchEngineTests(unittest.TestCase):
         frame["low"] = 99.5
         frame["close"] = 100.0
         frame["atr"] = 2.0
-        frame.loc[11:20, "low"] = 98.0
+        # Structural stop at the row-20 signal uses rows 10..19 only.
+        frame.loc[10:19, "low"] = 98.0
         frame.loc[22, ["high", "close"]] = [105.0, 104.0]
         frame.loc[23, ["high", "close", "low"]] = [108.0, 106.0, 103.0]
         frame.loc[24, "low"] = 102.0
