@@ -24,6 +24,7 @@ class AnalyticsTests(unittest.TestCase):
             "持有交易日": [3, 5, 2],
         })
         result = trade_statistics(trades)
+        self.assertEqual(result["交易筆數"], 3)
         self.assertAlmostEqual(result["勝率"], 2 / 3)
         self.assertAlmostEqual(result["Profit Factor"], 5.0)
         self.assertAlmostEqual(result["期望值"], 200 / 3)
@@ -31,6 +32,7 @@ class AnalyticsTests(unittest.TestCase):
 
     def test_empty_trade_statistics_are_safe(self):
         result = trade_statistics(pd.DataFrame())
+        self.assertEqual(result["交易筆數"], 0)
         self.assertEqual(result["勝率"], 0.0)
         self.assertEqual(result["Profit Factor"], 0.0)
 
