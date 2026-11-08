@@ -81,7 +81,7 @@ class PaperAccount:
                 "SELECT initial_cash,cash,created_at FROM paper_account WHERE id=1"
             ).fetchone()
             positions = conn.execute(
-                "SELECT symbol,quantity,average_cost FROM paper_positions WHERE quantity>0"
+                "SELECT symbol,quantity,average_cost,position_version FROM paper_positions WHERE quantity>0"
             ).fetchall()
             fills = conn.execute(
                 "SELECT fill_id,order_id,symbol,side,quantity,price,gross,fees,tax,realized_pnl,quote_source,quote_time,filled_at "
@@ -91,7 +91,7 @@ class PaperAccount:
         return {
             "initial_cash": account[0], "cash": account[1], "created_at": account[2],
             "positions": [
-                {"symbol": r[0], "quantity": r[1], "average_cost": r[2]}
+                {"symbol": r[0], "quantity": r[1], "average_cost": r[2], "position_version": r[3]}
                 for r in positions
             ],
             "fills": [dict(zip(fields, row)) for row in fills],
