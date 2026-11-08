@@ -165,7 +165,9 @@ def get_incremental_history(symbol: str, period: str, token: str = "",
     """Refresh a 10-calendar-day overlap, then return cached history and status."""
     requested_start = period_start(period)
     cached_all = read_daily_bars(symbol, path=path)
-    if cached_all.empty:
+    if cached_all.empty or cached_all["date"].min().strftime("%Y-%m-%d") > requested_start:
+        # Backfill the requested horizon if this symbol was previously cached
+        # with a shorter period.
         fetch_start = requested_start
     else:
         overlap = (cached_all["date"].max() - pd.Timedelta(days=10)).strftime("%Y-%m-%d")
