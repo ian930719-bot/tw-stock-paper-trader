@@ -20,7 +20,7 @@ from research_engine import STRATEGIES, daily_strategy_returns, performance, fun
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from market_data import quote_freshness
-from analytics import equity_risk_metrics, trade_statistics
+from analytics import equity_risk_metrics, trade_statistics, strategy_decay_report
 from portfolio_risk import portfolio_risk_report, dynamic_strategy_ensemble
 from historical_store import get_incremental_history, price_cache_summary
 from execution_engine import PaperExecutionEngine, OrderIntent, RiskLimits, Side, taiwan_regular_session, realized_pnl_from_trades
@@ -1240,6 +1240,24 @@ with t6:
                 "勝率":"{:.1%}","Profit Factor":lambda x:"∞" if np.isinf(x) else f"{x:.2f}",
                 "期望值":"{:,.0f}","平均持有日數":"{:.1f}",
             }),use_container_width=True,hide_index=True)
+            if st.button("檢查策略退化風險", key="run_strategy_decay_report"):
+                oos_curves = {
+                    strategy: st.session_state["portfolio_curves"].get((strategy, "樣本外"), pd.DataFrame())
+                    for strategy in STRATEGIES
+                }
+                decay = strategy_decay_report(
+                    oos_curves, float(pc), recent_window=63, min_observations=40,
+                )
+                st.session_state["strategy_decay_report"] = decay
+                st.session_state["strategy_decay_config"] = current_portfolio_config
+            if st.session_state.get("strategy_decay_config") == current_portfolio_config:
+                decay = st.session_state["strategy_decay_report"]
+                st.subheader("策略退化監測（樣本外診斷）")
+                st.dataframe(decay.style.format({
+                    "近期Sharpe":"{:.2f}", "全期Sharpe":"{:.2f}",
+                    "近期最大回撤":"{:.1%}", "全期最大回撤":"{:.1%}",
+                }), use_container_width=True, hide_index=True)
+                st.caption("退化警示只代表近期風險／報酬特徵轉弱，必須累積更多樣本及重新驗證；系統不會自動停用策略，也不會用這份診斷回頭修改已完成的樣本外績效。")
             if st.button("執行多策略動態資金配置", key="run_dynamic_strategy_ensemble"):
                 oos_curves = {
                     strategy: st.session_state["portfolio_curves"].get((strategy, "樣本外"), pd.DataFrame())
