@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from unittest.mock import patch
 
-from research_engine import STRATEGIES, daily_strategy_returns, performance, shared_capital_backtest
+from research_engine import STRATEGIES, daily_strategy_returns, performance, shared_capital_backtest, strategy_signals
 
 
 def sample_frame(n=620, drift=0.0008, phase=0.0):
@@ -218,6 +218,27 @@ class ResearchEngineTests(unittest.TestCase):
         self.assertEqual(trades.iloc[0]["出場日"], str(pd.Timestamp(frame.loc[22, "date"]).date()))
         self.assertEqual(trades.iloc[0]["出場原因"], "停損／移動停損")
         self.assertAlmostEqual(float(trades.iloc[0]["出場收入"]) / float(trades.iloc[0]["股數"]), 106.0)
+
+    def test_mean_reversion_and_squeeze_signals_are_causal(self):
+        frame = sample_frame(620)
+        signals = strategy_signals(frame)
+        self.assertIn("均值回歸", signals)
+        self.assertIn("波動收縮突破", signals)
+        for name in ("均值回歸", "波動收縮突破"):
+            entry, exit_signal = signals[name]
+            self.assertEqual(len(entry), len(frame))
+            self.assertEqual(len(exit_signal), len(frame))
+            self.assertTrue(entry.notna().all())
+            self.assertTrue(exit_signal.notna().all())
+
+        changed = frame.copy()
+        changed.loc[400:, ["open", "high", "low", "close", "volume"]] *= 3
+        revised = strategy_signals(changed)
+        for name in ("均值回歸", "波動收縮突破"):
+            original_entry, original_exit = signals[name]
+            revised_entry, revised_exit = revised[name]
+            self.assertTrue(original_entry.iloc[:400].equals(revised_entry.iloc[:400]))
+            self.assertTrue(original_exit.iloc[:400].equals(revised_exit.iloc[:400]))
 
     def test_unknown_exit_profile_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "未知出場設定"):
