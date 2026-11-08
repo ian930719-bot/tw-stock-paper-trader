@@ -282,7 +282,7 @@ class PaperExecutionEngine:
             conn.execute("""
                 UPDATE paper_orders SET status=?,message=?,filled_quantity=?,
                     average_fill_price=?,fees=?,updated_at=? WHERE order_id=?
-            """, (OrderStatus.FILLED.value, "模擬限價成交（以觸發時市場價估算）",
+            """, (OrderStatus.FILLED.value, "報價觸及限價後，以委託限價保守模擬成交；非實際成交回報",
                   quantity, fill_price, fees, stamp, order_id))
             conn.commit()
         result = self.get_order(order_id)
