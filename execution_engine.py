@@ -341,14 +341,16 @@ class PaperExecutionEngine:
         current = now or datetime.now(TZ)
         if current.tzinfo is None:
             current = current.replace(tzinfo=TZ)
-        today = current.astimezone(TZ).date().isoformat()
-        stamp = current.astimezone(TZ).isoformat()
+        local = current.astimezone(TZ)
+        today = local.date().isoformat()
+        stamp = local.isoformat()
+        after_close = local.strftime("%H:%M:%S") > "13:30:00"
         with closing(sqlite3.connect(self.db_path)) as conn:
             cursor = conn.execute(
                 "UPDATE paper_orders SET status=?,message=?,updated_at=? "
-                "WHERE status=? AND substr(created_at,1,10)<?",
+                "WHERE status=? AND (substr(created_at,1,10)<? OR (substr(created_at,1,10)=? AND ?=1))",
                 (OrderStatus.EXPIRED.value, "當日有效委託已於交易日結束後到期",
-                 stamp, OrderStatus.ACCEPTED.value, today),
+                 stamp, OrderStatus.ACCEPTED.value, today, today, int(after_close)),
             )
             conn.commit()
             return int(cursor.rowcount)
