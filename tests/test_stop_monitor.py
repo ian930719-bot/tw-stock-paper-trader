@@ -42,7 +42,9 @@ class StopMonitorTests(unittest.TestCase):
 
     def test_take_profit_signal(self):
         self.buy_position()
-        signal = self.evaluate(111)
+        take_profit_monitor = StopMonitor(self.db, take_profit_pct=0.10)
+        signal = take_profit_monitor.evaluate_quote(
+            "2330", 111, NOW.isoformat(), "test-feed", now=NOW)
         self.assertEqual(signal["reason"], "TAKE_PROFIT")
 
     def test_trailing_stop_after_new_high(self):
