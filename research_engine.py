@@ -231,10 +231,31 @@ def shared_capital_backtest(
                     "出場日": str(pd.Timestamp(d).date()), "股數": p["shares"],
                     "進場成本": p["entry_cost"], "出場收入": proceeds,
                     "損益": pnl, "報酬率": pnl / p["entry_cost"] if p["entry_cost"] else 0.0,
-                    "出場原因": "停損" if stop_hit else "策略出場",
+                    "出場原因": "停損／移動停損" if stop_hit else "策略出場",
+                    "曾觸發獲利檢視": bool(p.get("profit_review_triggered", False)),
+                    "最高風險倍數": round((p.get("high_water", p["entry_price"]) - p["entry_price"]) / max(p.get("initial_risk", 0.01), 0.01), 2),
                 })
                 cash += proceeds
                 del positions[code]
+            else:
+                # Today's OHLC updates the protective stop for the next session only.
+                p["high_water"] = max(float(p.get("high_water", p["entry_price"])),
+                                      float(row["high"]), float(row["close"]))
+                p["atr"] = max(float(row.get("_atr", p["atr"])), p["entry_price"] * 0.001)
+                r_multiple = (float(row["close"]) - p["entry_price"]) / max(p["initial_risk"], 0.01)
+                if p["management"] == "oneil":
+                    if float(row["close"]) >= p["entry_price"] * 1.20:
+                        p["profit_review_triggered"] = True
+                        # 20% is a review zone, not a hard take-profit; a wide trail
+                        # is used to avoid capping a strong trend mechanically.
+                        p["stop"] = max(p["stop"], p["high_water"] - 3.0 * p["atr"])
+                elif p["management"] == "minervini":
+                    if r_multiple >= 2.0:
+                        p["stop"] = max(p["stop"], p["entry_price"])
+                    if r_multiple >= 3.0:
+                        p["stop"] = max(p["stop"], p["high_water"] - 2.5 * p["atr"])
+                else:
+                    p["stop"] = max(p["stop"], p["high_water"] - p["trail_multiple"] * p["atr"])
 
         # Entry decisions from previous close; the first warmup period is not traded.
         candidates = []
@@ -298,11 +319,21 @@ def shared_capital_backtest(
                     continue
                 entry_cost = shares * open_px * (1.0 + fee_rate)
                 cash -= entry_cost
+                initial_risk = open_px - stop
+                management = ("oneil" if exit_profile == "oneil_8pct"
+                              else "minervini" if exit_profile == "minervini_structure"
+                              else "atr")
+                trail_multiple = {"atr_1_5": 1.5, "atr_2": 2.0,
+                                  "baseline_atr2": 2.0, "atr_2_5": 2.5,
+                                  "atr_3": 3.0}.get(exit_profile, 2.0)
                 positions[code] = {
                     "shares": shares, "entry_cost": entry_cost,
                     "signal_date": str(pd.Timestamp(signal_row["date"]).date()),
                     "entry_date": str(pd.Timestamp(d).date()), "stop": stop,
-                    "exit_next": False,
+                    "entry_price": open_px, "initial_risk": initial_risk,
+                    "high_water": open_px, "atr": atr,
+                    "management": management, "trail_multiple": trail_multiple,
+                    "profit_review_triggered": False, "exit_next": False,
                 }
                 # If the stop is touched later on the entry day, simulate the
                 # stop fill rather than waiting until the following session.
@@ -316,7 +347,8 @@ def shared_capital_backtest(
                         "出場日": str(pd.Timestamp(d).date()), "股數": shares,
                         "進場成本": entry_cost, "出場收入": proceeds,
                         "損益": pnl, "報酬率": pnl / entry_cost if entry_cost else 0.0,
-                        "出場原因": "進場日觸及停損",
+                        "出場原因": "進場日觸及初始停損",
+                        "曾觸發獲利檢視": False, "最高風險倍數": 0.0,
                     })
                     cash += proceeds
                     del positions[code]
