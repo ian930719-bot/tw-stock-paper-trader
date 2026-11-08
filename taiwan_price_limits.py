@@ -74,13 +74,13 @@ def _parse_rows(rows, symbol, expected_date, market):
         raise PriceLimitUnavailable("交易所回傳格式不是資料列")
     code_aliases = ("證券代號", "股票代號", "SecuritiesCompanyCode", "SecurityCode",
                     "Code", "StockNo", "股票代碼")
-    date_aliases = ("資料日期", "日期", "Date", "TradingDate", "交易日期")
+    date_aliases = ("資料日期", "日期", "Date", "TradingDate", "交易日期", "最近成交日")
     ref_aliases = ("參考價", "當日參考價", "今日參考價", "次日參考價",
-                   "ReferencePrice", "TradingReferencePrice", "NextDayReferencePrice")
+                   "ReferencePrice", "TradingReferencePrice", "NextDayReferencePrice", "本日開盤競價基準")
     up_aliases = ("漲停價", "次日漲停價", "漲停價格", "UpperLimitPrice",
-                  "LimitUpPrice", "NextDayLimitUpPrice", "HighLimitPrice")
+                  "LimitUpPrice", "NextDayLimitUpPrice", "HighLimitPrice", "本日漲停價")
     down_aliases = ("跌停價", "次日跌停價", "跌停價格", "LowerLimitPrice",
-                    "LimitDownPrice", "NextDayLimitDownPrice", "LowLimitPrice")
+                    "LimitDownPrice", "NextDayLimitDownPrice", "LowLimitPrice", "本日跌停價")
     matches = [row for row in rows if isinstance(row, dict) and _find_code(row) == str(symbol).upper()]
     if not matches:
         raise PriceLimitUnavailable(f"{market} 官方資料找不到證券 {symbol}")
