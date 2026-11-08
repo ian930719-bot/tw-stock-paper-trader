@@ -42,7 +42,7 @@ def _event(symbol, effective_date, action_type, *, share_multiplier=1.0,
     cash = float(cash_per_share)
     if not math.isfinite(ratio) or ratio <= 0 or not math.isfinite(cash) or cash < 0:
         return None
-    payment = _day(payment_date) or effective
+    payment = _day(payment_date)
     reference = None
     try:
         ref = float(reference_price)
@@ -212,9 +212,10 @@ def validate_action_frame(actions: pd.DataFrame | None, symbol: str) -> pd.DataF
     if not required.issubset(frame.columns):
         raise ValueError(f"{symbol} 公司行動缺少欄位：{sorted(required - set(frame.columns))}")
     frame["effective_date"] = pd.to_datetime(frame["effective_date"], errors="coerce")
-    frame["payment_date"] = pd.to_datetime(
-        frame.get("payment_date", frame["effective_date"]), errors="coerce"
-    ).fillna(frame["effective_date"])
+    if "payment_date" in frame:
+        frame["payment_date"] = pd.to_datetime(frame["payment_date"], errors="coerce")
+    else:
+        frame["payment_date"] = pd.NaT
     frame["share_multiplier"] = pd.to_numeric(frame["share_multiplier"], errors="coerce")
     frame["cash_per_share"] = pd.to_numeric(frame["cash_per_share"], errors="coerce")
     frame = frame.dropna(subset=["effective_date", "share_multiplier", "cash_per_share"])
