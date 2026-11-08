@@ -452,7 +452,7 @@ with t2:
                     lookback_days=756, test_days=126, step_days=126,
                     warmup_bars=260, exit_profile=portfolio_exit[0],
                 )
-                benchmark_raw = getdata("0050", period, finmind_token)
+                benchmark_raw, benchmark_info = getdata("0050", period, finmind_token)
                 benchmark_frame = benchmark_raw.copy() if benchmark_raw is not None else pd.DataFrame()
                 if not benchmark_frame.empty:
                     benchmark_frame["date"] = pd.to_datetime(benchmark_frame["date"])
