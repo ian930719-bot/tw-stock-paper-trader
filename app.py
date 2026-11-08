@@ -453,6 +453,9 @@ with t2:
             st.caption("三種策略使用相同股票、期間、本金、持倉上限、風險預算及出場規則；此比較仍是歷史樣本內結果，不能據此直接選擇實盤策略。")
         if st.button("啟動 AI 自主策略演化", key="run_ai_strategy_evolution", disabled=not portfolio_symbols):
             evolution_frames = {code: data[code].copy() for code in portfolio_symbols if code in data}
+            evolution_actions, evolution_action_failures = load_corporate_actions(evolution_frames)
+            if evolution_action_failures:
+                st.warning("AI 演化公司行動資料未完整取得：" + "、".join(sorted(evolution_action_failures)))
             with st.spinner("正在搜尋策略參數、訓練前 70% 歷史資料，並保留後 30% 作樣本外驗證…"):
                 evolution_result = evolve_strategy(
                     evolution_frames,
@@ -461,6 +464,7 @@ with t2:
                     risk_fraction=float(portfolio_risk_pct),
                     exit_profile=portfolio_exit[0],
                     warmup=260,
+                    corporate_actions=evolution_actions,
                 )
             st.session_state["ai_evolution_result"] = evolution_result
             st.session_state["ai_evolution_config"] = portfolio_config
