@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import sqlite3
 import pandas as pd
 from unittest.mock import patch
 from datetime import datetime
@@ -210,18 +211,41 @@ class PaperAccountTests(unittest.TestCase):
     def test_paper_ledger_applies_split_and_dividend_once_and_reconciles(self):
         self.order(Side.BUY, 1000, "corp-action-buy")
         self.quote(9)
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("""
+                CREATE TABLE adaptive_exit_state (
+                    symbol TEXT PRIMARY KEY, quantity INTEGER NOT NULL,
+                    position_version INTEGER NOT NULL, entry_price REAL NOT NULL,
+                    initial_risk REAL NOT NULL, high_water REAL NOT NULL,
+                    atr REAL NOT NULL, atr_multiple REAL NOT NULL,
+                    profile TEXT NOT NULL, stop_price REAL NOT NULL,
+                    profit_review_triggered INTEGER NOT NULL DEFAULT 0,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            conn.execute(
+                "INSERT INTO adaptive_exit_state VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                ("2330",1000,1,10.0,2.0,12.0,2.0,2.0,"atr_dynamic",8.0,0,NOW.isoformat()),
+            )
         events = pd.DataFrame([
             {"symbol":"2330","effective_date":"2026-11-10","action_type":"cash_dividend",
              "share_multiplier":1.0,"cash_per_share":1.0,"payment_date":"2026-11-20",
-             "reference_price":None,"event_id":"cash-event"},
+             "reference_price":90.0,"price_adjustment_factor":0.45,"event_id":"cash-event"},
             {"symbol":"2330","effective_date":"2026-11-10","action_type":"stock_split",
              "share_multiplier":2.0,"cash_per_share":0.0,"payment_date":None,
-             "reference_price":5.0,"event_id":"split-event"},
+             "reference_price":45.0,"price_adjustment_factor":0.45,"event_id":"split-event"},
         ])
         applied = self.account.apply_corporate_actions(events, "2026-11-10")
         self.assertEqual(len(applied["applied"]), 2)
         self.assertEqual(self.account.snapshot()["positions"][0]["quantity"], 2000)
         self.assertAlmostEqual(self.account.snapshot()["positions"][0]["average_cost"], 5.007125, places=6)
+        with sqlite3.connect(self.db) as conn:
+            stop_state = conn.execute(
+                "SELECT quantity,position_version,entry_price,initial_risk,high_water,atr,stop_price "
+                "FROM adaptive_exit_state WHERE symbol='2330'"
+            ).fetchone()
+        self.assertEqual(stop_state[:2], (2000, 2))
+        self.assertEqual(stop_state[2:], (4.5, 0.9, 5.4, 0.9, 3.6))
         self.assertTrue(self.account.integrity_report()["ok"])
         repeated = self.account.apply_corporate_actions(events, "2026-11-10")
         self.assertEqual(repeated["applied"], [])
