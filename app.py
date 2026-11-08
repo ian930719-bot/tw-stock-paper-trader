@@ -426,7 +426,7 @@ with t2:
                         st.info("樣本外期間不足以形成完整年度報酬統計。")
                     else:
                         achieved = evolution["annual_100pct_years"]
-                        st.write(f"每年 +100% 目標：{achieved} / {len(annual)} 個樣本外年度達成")
+                        st.write(f"完整樣本外年度 +100%：{achieved} / {evolution.get('complete_years', 0)} 年達成（未滿整年的區段不計入）")
                         st.dataframe(
                             annual.style.format({
                                 "年初資產（樣本外首日）": "NTD {:,.0f}",
@@ -1069,11 +1069,29 @@ with t6:
             st.info("目前未取得融資融券資料。")
         if revenue_rows:
             revenue_all = pd.concat(revenue_rows, ignore_index=True)
-            st.markdown("**歷史月營收**")
+            revenue_all["營收"] = pd.to_numeric(revenue_all.get("revenue"), errors="coerce")
+            revenue_all = revenue_all.sort_values(["代號", "date"])
+            revenue_all["月增率"] = revenue_all.groupby("代號")["營收"].pct_change()
+            revenue_all["年增率"] = revenue_all.groupby("代號")["營收"].pct_change(12)
+            st.markdown("**歷史月營收、月增率與年增率**")
             st.dataframe(revenue_all.sort_values(["代號", "date"], ascending=[True, False]), use_container_width=True, hide_index=True)
             st.caption("FinMind create_time 自 2026-04-21 起才記錄，且只是資料庫寫入日近似值、不是官方公告日；更早月份仍可看歷史數字，但不可當成當時已知資料做回測。")
         else:
             st.info("目前未取得月營收資料。")
+        statement_frames = []
+        for symbol, result in loaded.items():
+            for key in ("income_statement", "balance_sheet", "cash_flow"):
+                part = result["data"].get(key, pd.DataFrame())
+                if not part.empty:
+                    part = part.copy()
+                    part["代號"] = symbol
+                    part["報表類型"] = key
+                    statement_frames.append(part)
+        if statement_frames:
+            statements = pd.concat(statement_frames, ignore_index=True)
+            st.markdown("**歷史季財報原始序列（損益／資產負債／現金流）**")
+            st.dataframe(statements.sort_values(["代號", "date"], ascending=[True, False]), use_container_width=True, hide_index=True)
+            st.warning("FinMind 這些報表資料的 date 是財報所屬期間，不能視為公告日；目前僅供歷史資料檢視，不納入歷史策略回測或 AI 訓練，直到取得可驗證的正式公告日期。")
         errors = st.session_state.get("historical_chip_errors", {})
         if errors:
             with st.expander("資料來源／額度錯誤明細"):
