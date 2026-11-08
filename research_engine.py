@@ -121,6 +121,44 @@ def performance(returns: pd.Series, initial_capital: float) -> dict:
     }
 
 
+
+def _update_exit_management(position: dict, row: pd.Series) -> None:
+    """Apply completed-session high/close/ATR data to next-session protection."""
+    entry_price = float(position["entry_price"])
+    position["high_water"] = max(
+        float(position.get("high_water", entry_price)),
+        float(row["high"]),
+        float(row["close"]),
+    )
+    position["atr"] = max(
+        float(row.get("_atr", position["atr"])),
+        entry_price * 0.001,
+    )
+    initial_risk = max(float(position["initial_risk"]), 0.01)
+    r_multiple = (float(row["close"]) - entry_price) / initial_risk
+    if position["management"] == "oneil":
+        if float(row["close"]) >= entry_price * 1.20:
+            position["profit_review_triggered"] = True
+            # 20% is a review zone, not a hard take-profit.
+            position["stop"] = max(
+                position["stop"],
+                position["high_water"] - 3.0 * position["atr"],
+            )
+    elif position["management"] == "minervini":
+        if r_multiple >= 2.0:
+            position["stop"] = max(position["stop"], entry_price)
+        if r_multiple >= 3.0:
+            position["stop"] = max(
+                position["stop"],
+                position["high_water"] - 2.5 * position["atr"],
+            )
+    else:
+        position["stop"] = max(
+            position["stop"],
+            position["high_water"] - position["trail_multiple"] * position["atr"],
+        )
+
+
 def shared_capital_backtest(
     frames: Mapping[str, pd.DataFrame],
     strategy: str,
@@ -240,24 +278,8 @@ def shared_capital_backtest(
                 cash += proceeds
                 del positions[code]
             else:
-                # Today's OHLC updates the protective stop for the next session only.
-                p["high_water"] = max(float(p.get("high_water", p["entry_price"])),
-                                      float(row["high"]), float(row["close"]))
-                p["atr"] = max(float(row.get("_atr", p["atr"])), p["entry_price"] * 0.001)
-                r_multiple = (float(row["close"]) - p["entry_price"]) / max(p["initial_risk"], 0.01)
-                if p["management"] == "oneil":
-                    if float(row["close"]) >= p["entry_price"] * 1.20:
-                        p["profit_review_triggered"] = True
-                        # 20% is a review zone, not a hard take-profit; a wide trail
-                        # is used to avoid capping a strong trend mechanically.
-                        p["stop"] = max(p["stop"], p["high_water"] - 3.0 * p["atr"])
-                elif p["management"] == "minervini":
-                    if r_multiple >= 2.0:
-                        p["stop"] = max(p["stop"], p["entry_price"])
-                    if r_multiple >= 3.0:
-                        p["stop"] = max(p["stop"], p["high_water"] - 2.5 * p["atr"])
-                else:
-                    p["stop"] = max(p["stop"], p["high_water"] - p["trail_multiple"] * p["atr"])
+                # Completed today's bar updates protection for the next session.
+                _update_exit_management(p, row)
 
         # Entry decisions from previous close; the first warmup period is not traded.
         candidates = []
@@ -354,6 +376,10 @@ def shared_capital_backtest(
                     })
                     cash += proceeds
                     del positions[code]
+                else:
+                    # Include the entry session's completed high/close/ATR.
+                    # The resulting stop is only checked from the next session.
+                    _update_exit_management(positions[code], row)
 
         # The current close creates an exit instruction for the next session.
         for code, p in positions.items():
