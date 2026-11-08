@@ -137,3 +137,128 @@ def rolling_walk_forward(
         "metrics": metrics, "coverage": len(valid),
         "note": "各測試區段獨立重設本金並清空持倉；鏈結曲線用於串接區段報酬，不代表同一帳戶連續持倉。",
     }
+
+
+def classify_market_regime(
+    benchmark: pd.DataFrame,
+    *,
+    ema_window: int = 200,
+    slope_window: int = 20,
+) -> pd.Series:
+    """Classify each benchmark session using only that session's close.
+
+    Bull: close and EMA slope are positive versus the long-term trend.
+    Bear: close and EMA slope are negative versus the long-term trend.
+    Otherwise sideways/transition. This is a descriptive regime proxy.
+    """
+    if benchmark is None or benchmark.empty or not {"date", "close"}.issubset(benchmark.columns):
+        return pd.Series(dtype="object", name="盤勢")
+    if ema_window < 2 or slope_window < 1:
+        raise ValueError("ema_window 與 slope_window 必須為正整數")
+    z = benchmark[["date", "close"]].copy()
+    z["date"] = pd.to_datetime(z["date"])
+    z["close"] = pd.to_numeric(z["close"], errors="coerce")
+    z = z.dropna().sort_values("date").drop_duplicates("date", keep="last")
+    ema = z["close"].ewm(span=int(ema_window), adjust=False, min_periods=int(ema_window)).mean()
+    rising = ema > ema.shift(int(slope_window))
+    falling = ema < ema.shift(int(slope_window))
+    labels = np.select(
+        [(z["close"] > ema) & rising, (z["close"] < ema) & falling],
+        ["多頭", "空頭"], default="盤整／轉換"
+    )
+    return pd.Series(labels, index=pd.DatetimeIndex(z["date"]), name="盤勢")
+
+
+def regime_performance(
+    equity: pd.DataFrame,
+    benchmark: pd.DataFrame,
+    *,
+    initial_capital: float = 1_000_000,
+    ema_window: int = 200,
+    slope_window: int = 20,
+) -> pd.DataFrame:
+    """Summarize OOS daily returns conditional on a benchmark regime.
+
+    If equity contains 區段資產 and 區段, daily returns are computed inside
+    each independently reset test window, avoiding artificial returns across
+    gaps between windows. The first session of each window is measured from
+    its nominal starting capital.
+    """
+    columns = ["盤勢", "交易日數", "累積報酬", "年化波動率", "Sharpe", "上漲日比例"]
+    if equity is None or equity.empty or benchmark is None or benchmark.empty:
+        return pd.DataFrame(columns=columns)
+    regime = classify_market_regime(
+        benchmark, ema_window=ema_window, slope_window=slope_window
+    )
+    if regime.empty:
+        return pd.DataFrame(columns=columns)
+    z = equity.copy()
+    z["日期"] = pd.to_datetime(z["日期"])
+    if {"區段資產", "區段"}.issubset(z.columns):
+        z["報酬"] = z.groupby("區段", sort=False)["區段資產"].pct_change()
+        first = z.groupby("區段", sort=False).head(1).index
+        z.loc[first, "報酬"] = (
+            pd.to_numeric(z.loc[first, "區段資產"], errors="coerce") /
+            float(initial_capital) - 1.0
+        )
+    else:
+        z["報酬"] = pd.to_numeric(z["資產"], errors="coerce").pct_change()
+        if len(z):
+            z.loc[z.index[0], "報酬"] = float(z["資產"].iloc[0]) / float(initial_capital) - 1.0
+    z["盤勢"] = z["日期"].map(regime)
+    z["報酬"] = pd.to_numeric(z["報酬"], errors="coerce")
+    z = z.dropna(subset=["盤勢", "報酬"])
+    rows = []
+    for label in ["多頭", "空頭", "盤整／轉換"]:
+        values = z.loc[z["盤勢"] == label, "報酬"]
+        if values.empty:
+            continue
+        vol = float(values.std(ddof=1) * np.sqrt(252)) if len(values) > 1 else 0.0
+        sharpe = float(values.mean() / values.std(ddof=1) * np.sqrt(252)) if len(values) > 1 and values.std(ddof=1) > 0 else 0.0
+        rows.append({
+            "盤勢": label,
+            "交易日數": int(len(values)),
+            "累積報酬": float((1.0 + values).prod() - 1.0),
+            "年化波動率": vol,
+            "Sharpe": sharpe,
+            "上漲日比例": float((values > 0).mean()),
+        })
+    return pd.DataFrame(rows, columns=columns)
+
+
+def parameter_sensitivity(
+    frames: dict[str, pd.DataFrame],
+    strategy: str,
+    *,
+    risk_fractions=(0.0025, 0.005, 0.01),
+    exit_profiles=("baseline_atr2", "atr_1_5", "atr_3"),
+    **walk_forward_kwargs,
+) -> pd.DataFrame:
+    """Run a small, predeclared robustness grid; does not select a winner."""
+    risks = tuple(float(x) for x in risk_fractions)
+    profiles = tuple(exit_profiles)
+    if not risks or not profiles:
+        raise ValueError("風險比例與出場設定不可為空")
+    if any(not np.isfinite(x) or x < 0 or x > 0.10 for x in risks):
+        raise ValueError("風險比例必須介於 0 至 10%")
+    allowed = {"baseline_atr2", "oneil_8pct", "minervini_structure", "atr_1_5", "atr_2", "atr_2_5", "atr_3"}
+    if any(x not in allowed for x in profiles):
+        raise ValueError("包含未知出場設定")
+    rows = []
+    for profile in profiles:
+        for risk in risks:
+            result = rolling_walk_forward(
+                frames, strategy, risk_fraction=risk,
+                exit_profile=profile, **walk_forward_kwargs
+            )
+            metrics = result.get("metrics", {})
+            rows.append({
+                "出場規則": profile,
+                "單筆風險預算": risk,
+                "有效區段": int(len(result.get("windows", []))),
+                "交易筆數": int(len(result.get("trades", []))),
+                "鏈結總報酬": metrics.get("總報酬（鏈結）", np.nan),
+                "鏈結最大回撤": metrics.get("最大回撤（鏈結）", np.nan),
+                "鏈結 Sharpe": metrics.get("Sharpe（鏈結）", np.nan),
+            })
+    return pd.DataFrame(rows)
