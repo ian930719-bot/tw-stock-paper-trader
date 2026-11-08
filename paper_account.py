@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import sqlite3
+import math
 from contextlib import closing
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -96,8 +97,10 @@ class PaperAccount:
         age = (current - quoted).total_seconds()
         if not source or age < -5 or age > max_age_seconds:
             raise ValueError("報價來源缺失或報價已過期，拒絕撮合")
-        if price <= 0:
-            raise ValueError("報價必須大於零")
+        if not math.isfinite(float(price)) or float(price) <= 0:
+            raise ValueError("報價必須是有限正數")
+        if isinstance(max_age_seconds, bool) or int(max_age_seconds) < 0:
+            raise ValueError("報價有效秒數設定不合法")
         if not taiwan_regular_session(current):
             raise ValueError("非台股一般盤中時段，拒絕撮合")
 
@@ -126,7 +129,10 @@ class PaperAccount:
                         (symbol.upper(),),
                     ).fetchone()
                     held, avg_cost = (int(pos[0]), float(pos[1])) if pos else (0, 0.0)
-                    # Last-trade data confirms only that a limit was touched; it does not\n                    # reveal queue priority or executable depth. Use the submitted\n                    # limit as the conservative simulated fill price.\n                    fill_price = float(limit_price)\n                    gross = fill_price * int(quantity)
+                    # Last-trade data confirms only that a limit was touched; it does not
+                    # reveal queue priority or executable depth. Use the submitted
+                    # limit as the conservative simulated fill price.
+                    fill_price = float(limit_price)\n                    gross = fill_price * int(quantity)
                     fee_rate = buy_fee_rate if side == Side.BUY.value else sell_fee_rate
                     fees = gross * fee_rate
                     tax = gross * sell_tax_rate if side == Side.SELL.value else 0.0
