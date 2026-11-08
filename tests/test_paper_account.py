@@ -142,6 +142,39 @@ class PaperAccountTests(unittest.TestCase):
         self.assertEqual(self.quote(11), [])
         self.assertEqual(self.engine.get_order(order.order_id).status, "ACCEPTED")
 
+    def test_official_price_band_is_fetched_once_per_fill(self):
+        order = self.order(Side.BUY, 1000, "single-band-check")
+        with patch("taiwan_price_limits.get_official_price_limit", return_value={
+            "no_price_limit": False, "lower_limit": 9, "upper_limit": 11,
+            "reference_price": 10, "date": NOW.date().isoformat()
+        }) as official:
+            fills = self.account.process_quote(
+                "2330", 9, NOW.isoformat(), "test-feed", now=NOW
+            )
+        self.assertEqual(len(fills), 1)
+        self.assertEqual(official.call_count, 1)
+        self.assertEqual(self.engine.get_order(order.order_id).status, "FILLED")
+
+    def test_integrity_report_reconciles_cash_positions_and_fills(self):
+        self.order(Side.BUY, 1000, "integrity-buy")
+        self.quote(9)
+        report = self.account.integrity_report()
+        self.assertTrue(report["ok"], report["issues"])
+        self.assertEqual(report["status"], "通過")
+        self.assertEqual(report["fill_count"], 1)
+        self.assertAlmostEqual(report["cash_difference"], 0.0, places=2)
+        self.assertEqual(report["actual_positions"], {"2330": 1000})
+
+    def test_integrity_report_detects_manual_cash_corruption(self):
+        self.order(Side.BUY, 1000, "integrity-corrupt")
+        self.quote(9)
+        import sqlite3
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("UPDATE paper_account SET cash=cash-100 WHERE id=1")
+        report = self.account.integrity_report()
+        self.assertFalse(report["ok"])
+        self.assertIn("現金帳差異", "；".join(report["issues"]))
+
     def test_idempotent_fill_processing(self):
         order = self.order(Side.BUY, 1000, "once-only")
         self.quote(9)
