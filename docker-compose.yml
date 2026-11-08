@@ -1,0 +1,35 @@
+services:
+  app:
+    build: .
+    command: ["streamlit", "run", "app.py", "--server.address=0.0.0.0", "--server.port=8501"]
+    ports:
+      - "8501:8501"
+    environment:
+      EXECUTION_DB_PATH: /data/trading.sqlite3
+      MARKET_DB_PATH: /data/market.sqlite3
+      FINMIND_TOKEN: ${FINMIND_TOKEN:-}
+    volumes:
+      - paper-data:/data
+    restart: unless-stopped
+
+  paper-worker:
+    build: .
+    command: ["python", "paper_worker.py", "--loop", "--interval", "${PAPER_WORKER_INTERVAL_SECONDS:-30}"]
+    environment:
+      EXECUTION_DB_PATH: /data/trading.sqlite3
+      MARKET_DB_PATH: /data/market.sqlite3
+      FINMIND_TOKEN: ${FINMIND_TOKEN:-}
+      PAPER_WATCHLIST: ${PAPER_WATCHLIST:-}
+      PAPER_AUTO_ENTRIES: ${PAPER_AUTO_ENTRIES:-false}
+      PAPER_EXIT_PROFILE: ${PAPER_EXIT_PROFILE:-atr_dynamic}
+      PAPER_ATR_MULTIPLE: ${PAPER_ATR_MULTIPLE:-2.0}
+      PAPER_ETF_SYMBOLS: ${PAPER_ETF_SYMBOLS:-}
+      PAPER_WORKER_INTERVAL_SECONDS: ${PAPER_WORKER_INTERVAL_SECONDS:-30}
+      LOG_LEVEL: INFO
+    volumes:
+      - paper-data:/data
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+volumes:
+  paper-data:
