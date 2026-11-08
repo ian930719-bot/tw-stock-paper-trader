@@ -111,6 +111,12 @@ class ExecutionEngineTests(unittest.TestCase):
                            open_order_count=0, daily_order_count=0,
                            limits=self.engine.limits, now=OPEN)
 
+    def test_odd_lot_flag_is_persisted(self):
+        odd = self.intent(quantity=37, odd_lot=True)
+        result = self.engine.submit(odd, cash=100000, positions={}, equity=100000, now=OPEN)
+        self.assertTrue(self.engine.get_order(result.order_id).odd_lot)
+        self.assertTrue(self.engine.list_orders()[0]["odd_lot"])
+
     def test_accept_intraday_odd_lot_order(self):
         odd = self.intent(quantity=37, odd_lot=True)
         result = self.engine.submit(odd, cash=100000, positions={}, equity=100000, now=OPEN)
