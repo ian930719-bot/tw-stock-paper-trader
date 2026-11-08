@@ -259,8 +259,8 @@ class ResearchEngineTests(unittest.TestCase):
         frame["atr"] = 2.0
         # Structural stop at the row-20 signal uses rows 10..19 only.
         frame.loc[10:19, "low"] = 98.0
-        frame.loc[22, ["high", "close"]] = [105.0, 104.0]
-        frame.loc[23, ["high", "close", "low"]] = [108.0, 106.0, 103.0]
+        frame.loc[22, ["high", "close"]] = [105.5, 105.0]
+        frame.loc[23, ["high", "close", "low"]] = [109.0, 107.0, 103.0]
         frame.loc[24, "low"] = 102.0
 
         def controlled_signals(z):
