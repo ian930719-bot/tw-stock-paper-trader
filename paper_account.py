@@ -126,7 +126,7 @@ class PaperAccount:
                         (symbol.upper(),),
                     ).fetchone()
                     held, avg_cost = (int(pos[0]), float(pos[1])) if pos else (0, 0.0)
-                    gross = float(price) * int(quantity)
+                    # Last-trade data confirms only that a limit was touched; it does not\n                    # reveal queue priority or executable depth. Use the submitted\n                    # limit as the conservative simulated fill price.\n                    fill_price = float(limit_price)\n                    gross = fill_price * int(quantity)
                     fee_rate = buy_fee_rate if side == Side.BUY.value else sell_fee_rate
                     fees = gross * fee_rate
                     tax = gross * sell_tax_rate if side == Side.SELL.value else 0.0
@@ -164,17 +164,17 @@ class PaperAccount:
                     stamp = current.isoformat()
                     conn.execute(
                         "INSERT INTO paper_fills VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                        (order_id, order_id, symbol.upper(), side, int(quantity), float(price),
+                        (order_id, order_id, symbol.upper(), side, int(quantity), fill_price,
                          gross, fees, tax, realized, source, quoted.isoformat(), stamp),
                     )
                     conn.execute(
                         "UPDATE paper_orders SET status=?,message=?,filled_quantity=?,average_fill_price=?,fees=?,updated_at=? "
                         "WHERE order_id=? AND status=?",
-                        (OrderStatus.FILLED.value, "新鮮盤中報價觸發模擬成交；已同步模擬帳本",
+                        (OrderStatus.FILLED.value, "報價觸及限價後，以委託限價保守模擬成交；非實際成交回報",
                          int(quantity), float(price), fees + tax, stamp, order_id, OrderStatus.ACCEPTED.value),
                     )
                     completed.append({"order_id": order_id, "symbol": symbol.upper(),
-                                      "side": side, "quantity": int(quantity), "price": float(price),
+                                      "side": side, "quantity": int(quantity), "price": fill_price,
                                       "fees": fees, "tax": tax, "realized_pnl": realized})
                 conn.execute("COMMIT")
             except Exception:
