@@ -53,6 +53,33 @@ class StopMonitorTests(unittest.TestCase):
         signal = self.evaluate(113)
         self.assertEqual(signal["reason"], "TRAILING_STOP")
 
+    def test_new_position_resets_previous_trailing_high_water(self):
+        self.buy_position()
+        self.assertIsNone(self.evaluate(120))
+        # Simulate a full close followed by a new position with the same
+        # quantity and average cost. The lifecycle version must still differ.
+        import sqlite3
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("UPDATE paper_positions SET position_version=position_version+1 WHERE symbol='2330'")
+        self.assertIsNone(self.evaluate(112))
+        with sqlite3.connect(self.db) as conn:
+            high_water, version = conn.execute(
+                "SELECT high_water,position_version FROM paper_stop_state WHERE symbol='2330'"
+            ).fetchone()
+        self.assertEqual(high_water, 112)
+        self.assertEqual(version, 2)
+
+    def test_flat_position_clears_trailing_state(self):
+        self.buy_position()
+        self.assertIsNone(self.evaluate(120))
+        import sqlite3
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("UPDATE paper_positions SET quantity=0,average_cost=0,position_version=position_version+1 WHERE symbol='2330'")
+        self.assertIsNone(self.evaluate(100))
+        with sqlite3.connect(self.db) as conn:
+            count = conn.execute("SELECT COUNT(*) FROM paper_stop_state WHERE symbol='2330'").fetchone()[0]
+        self.assertEqual(count, 0)
+
     def test_stale_quote_does_not_trigger(self):
         self.buy_position()
         old = NOW - timedelta(minutes=5)
