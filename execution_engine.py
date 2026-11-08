@@ -54,6 +54,7 @@ class OrderIntent:
     limit_price: float
     reason: str
     idempotency_key: str
+    instrument_type: str = "stock"
 
 
 @dataclass
@@ -139,7 +140,7 @@ def validate_order(intent: OrderIntent, *, cash: float, positions: dict[str, int
         raise ValueError("委託股數必須是正整數")
     price = _positive_decimal(intent.limit_price, "限價")
     from taiwan_market_rules import is_valid_stock_tick
-    if not is_valid_stock_tick(price):
+    if not is_valid_stock_tick(price, intent.instrument_type):
         raise ValueError("限價不符合台股普通股票升降單位")
     if intent.quantity % 1000 != 0:
         raise ValueError("普通交易股數須為 1,000 股整數倍；零股需使用獨立零股撮合")
