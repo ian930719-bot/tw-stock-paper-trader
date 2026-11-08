@@ -1757,6 +1757,13 @@ with t7:
     m2.metric("持股市值估算",f"NTD {position_value:,.0f}")
     m3.metric("帳戶資產估算",f"NTD {equity_now:,.0f}")
     m4.metric("今日已實現損益",f"NTD {daily_pnl:,.0f}")
+    st.download_button(
+        "下載完整 SQLite 模擬帳本備份",
+        data=paper_account.backup_bytes(),
+        file_name=f"paper_account_{session_now.date().isoformat()}.sqlite3",
+        mime="application/vnd.sqlite3",
+        help="包含模擬帳戶現金、持股、委託、成交及 Worker 紀錄；建議定期下載並離線保存。",
+    )
     if account_integrity["ok"]:
         st.success(
             f"帳本完整性檢查通過｜SQLite 正常｜{account_integrity['fill_count']} 筆成交已與現金及持股核對"
