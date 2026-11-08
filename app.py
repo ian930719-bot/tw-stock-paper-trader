@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 from market_data import quote_freshness
 from analytics import equity_risk_metrics, trade_statistics
 from historical_store import get_incremental_history, price_cache_summary
+from execution_engine import PaperExecutionEngine, OrderIntent, RiskLimits, Side, taiwan_regular_session
 st.set_page_config(page_title="台股模擬交易",layout="wide")
 TZ=ZoneInfo("Asia/Taipei")
 from stock_universe import fetch_stock_universe, universe_summary, StockUniverseError
@@ -213,7 +214,7 @@ with st.spinner("讀取歷史行情…"):
                   else "AI未確認" if score>=70 else "等待" if score>=50 else "不進場")
         rows.append({"代號":s,"名稱":W.get(s,s),"規則分數":int(score),"訊號":signal,"AI五日上漲機率":round(prob,3) if prob is not None else None,"模型測試平衡準確率":round(metric,3) if metric is not None else None,"多數類基準平衡準確率":round(baseline_metric,3) if baseline_metric is not None else None,"三大法人買賣超(股)":net,"法人資料日期":inst.get("資料日期") if inst else None,"RSI14":round(r.rsi,1) if pd.notna(r.rsi) else None,"20日報酬":r.r20,"60日報酬":r.r60,"日線日期":r.date.strftime("%Y-%m-%d")})
 if not data: st.error("目前無法取得歷史行情，請稍後重試。"); st.stop()
-t0,t1,t2,t3,t4,t5,t6=st.tabs(["上市櫃股票庫","行情監控","歷史回測","模擬帳本","資料限制","大師策略回測","整合研究中心"])
+t0,t1,t2,t3,t4,t5,t6,t7=st.tabs(["上市櫃股票庫","行情監控","歷史回測","模擬帳本","資料限制","大師策略回測","整合研究中心","自動交易（模擬）"])
 with t0:
     st.subheader("台灣上市／上櫃證券主檔")
     st.caption("資料來源："+universe_source+"。依每一證券代號最新市場別紀錄判斷是否仍為上市或上櫃，避免把已轉板股票誤列為興櫃。")
@@ -754,3 +755,92 @@ with t6:
         elif "portfolio_summary" in st.session_state:
             st.info("回測參數或觀察清單已變更；請重新執行，避免沿用舊結果。")
             st.warning("這是歷史研究，不是投資建議。仍未完整納入股息再投資、除權息、漲跌停排隊、停牌、流動性衝擊、下市股及歷史成分股偏誤；樣本外結果不能回頭用於調參。")
+
+
+with t7:
+    st.subheader("自動交易引擎｜模擬模式")
+    st.warning("目前只建立與撮合模擬委託，不會連接券商或送出真實委託。實盤交易開關尚未實作，預設不存在。")
+    st.markdown("**自動策略條件**：只採用「多因子觀察」訊號，要求 AI 測試優於多數類基準至少 2 個百分點、五日預測分數至少 55%，且必須取得盤中更新的參考報價。")
+    limits = RiskLimits()
+    engine = PaperExecutionEngine(limits=limits)
+    session_now = datetime.now(TZ)
+    session_open = taiwan_regular_session(session_now)
+    st.write("交易時段：", "台股一般盤中" if session_open else "非台股一般盤中時段")
+    l1,l2,l3,l4=st.columns(4)
+    l1.metric("單筆委託上限",f"NTD {limits.max_order_notional:,.0f}")
+    l2.metric("單一標的曝險上限",f"NTD {limits.max_symbol_exposure:,.0f}")
+    l3.metric("投資組合曝險上限",f"NTD {limits.max_portfolio_exposure:,.0f}")
+    l4.metric("每日虧損停手",f"NTD {limits.max_daily_loss:,.0f}")
+    st.caption("其他保護：不允許放空、必須在 09:00–13:25 建立委託、最多 5 筆未完成委託、每日最多 20 次委託、防重複委託識別碼、限價單。")
+    auto_candidates = []
+    quote_lookup = {q["代號"]: q for q in quotes}
+    row_lookup = {r["代號"]: r for r in rows}
+    for code, row in row_lookup.items():
+        quote = quote_lookup.get(code, {})
+        price = quote.get("盤中參考價")
+        if (row.get("訊號") == "多因子觀察"
+                and quote.get("報價狀態") == "盤中更新"
+                and price is not None and np.isfinite(price) and price > 0):
+            frame = data[code]
+            atr_value = float(frame.iloc[-1]["atr"]) if pd.notna(frame.iloc[-1]["atr"]) else float(price)*0.04
+            stop_distance = max(2.0*atr_value, float(price)*0.01)
+            risk_qty = int(float(risk) / stop_distance)
+            notional_qty = int(limits.max_order_notional / float(price))
+            cash_available = float(st.session_state.get("paper_cash", capital))
+            cash_qty = int(cash_available / (float(price)*1.001425))
+            quantity = min(risk_qty, notional_qty, cash_qty)
+            if quantity > 0:
+                auto_candidates.append({
+                    "代號":code,"名稱":row["名稱"],"參考價":round(float(price),2),
+                    "股數":quantity,"估算金額":round(quantity*float(price),2),
+                    "風險預算":float(risk),"AI五日分數":row.get("AI五日上漲機率"),
+                    "報價時間":quote.get("報價時間"),
+                })
+    st.write("符合自動策略條件的候選委託：",len(auto_candidates))
+    if auto_candidates:
+        st.dataframe(pd.DataFrame(auto_candidates),use_container_width=True,hide_index=True)
+    else:
+        st.info("目前沒有同時符合 AI 條件與新鮮盤中報價的標的；不會使用舊收盤價代替盤中價格建立自動委託。")
+    enable_paper_auto = st.checkbox("啟用本輪自動模擬委託（不是真實下單）",value=False)
+    if st.button("依策略訊號建立模擬委託",disabled=(not enable_paper_auto or not session_open or not auto_candidates)):
+        positions = st.session_state.get("paper_positions", {})
+        cash_available = float(st.session_state.get("paper_cash", capital))
+        market_value = sum(
+            int(qty)*float(data[code].iloc[-1]["close"])
+            for code,qty in positions.items() if code in data
+        )
+        equity_value = cash_available + market_value
+        existing_orders = engine.list_orders()
+        pending_count = sum(1 for order in existing_orders if order["status"] == "ACCEPTED")
+        today_text = session_now.strftime("%Y-%m-%d")
+        daily_count = sum(1 for order in existing_orders if str(order["created_at"]).startswith(today_text))
+        created_count = 0
+        for candidate in auto_candidates:
+            signal_row = row_lookup[candidate["代號"]]
+            intent = OrderIntent(
+                symbol=candidate["代號"], side=Side.BUY,
+                quantity=int(candidate["股數"]), limit_price=float(candidate["參考價"]),
+                reason="AI多因子觀察；ATR風險預算控量",
+                idempotency_key=f"auto-buy-{candidate['代號']}-{today_text}-{signal_row['日線日期']}",
+            )
+            result = engine.submit(
+                intent, cash=cash_available, positions=positions,
+                equity=equity_value, daily_realized_pnl=0.0,
+                open_order_count=pending_count, daily_order_count=daily_count,
+                now=session_now,
+            )
+            if result.status == "ACCEPTED":
+                created_count += 1
+                pending_count += 1
+                daily_count += 1
+        st.success(f"本輪建立 {created_count} 筆模擬委託。重複訊號會由識別碼阻擋。")
+    st.subheader("模擬委託佇列與成交狀態")
+    order_rows = engine.list_orders()
+    st.dataframe(pd.DataFrame(order_rows),use_container_width=True,hide_index=True)
+    if order_rows:
+        st.download_button(
+            "下載模擬委託紀錄 CSV",
+            pd.DataFrame(order_rows).to_csv(index=False).encode("utf-8-sig"),
+            "paper_order_log.csv","text/csv"
+        )
+    st.caption("目前模擬委託引擎會建立限價委託並記錄狀態；成交撮合需以市場價格觸及限價才會觸發。SQLite 仍是執行環境本機檔案，雲端重啟可能清除。自動策略目前只產生模擬買進委託，尚未接入券商、即時成交回報、停損監控與自動賣出。")
