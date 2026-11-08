@@ -12,7 +12,7 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
-from execution_engine import TZ, taiwan_regular_session
+from execution_engine import TZ
 from strategy_exits import initial_stop, trailing_stop
 
 
@@ -167,8 +167,12 @@ class AdaptiveExitMonitor:
             raise ValueError("報價來源缺失或報價已過期，拒絕執行出場監控")
         if not math.isfinite(float(price)) or float(price) <= 0:
             raise ValueError("報價必須是有限正數")
-        if not taiwan_regular_session(current):
-            raise ValueError("非台股一般盤中時段，拒絕執行出場監控")
+        if current.weekday() >= 5 or not (
+            datetime.strptime("09:00", "%H:%M").time()
+            <= current.time().replace(tzinfo=None)
+            <= datetime.strptime("13:30", "%H:%M").time()
+        ):
+            raise ValueError("非台股盤中時段，拒絕執行出場監控")
         code = str(symbol).strip().upper()
         with closing(sqlite3.connect(self.db_path, timeout=15)) as conn:
             conn.isolation_level = None
