@@ -43,22 +43,23 @@ def _date_iso(value):
     raw = _clean(value)
     if not raw:
         return None
+    # Parse ROC compact dates before strptime: 1151109 is a 7-digit ROC date,
+    # not a Gregorian year/month/day string.
+    try:
+        if len(raw) == 7 and raw.isdigit():
+            return date(int(raw[:3]) + 1911, int(raw[3:5]), int(raw[5:])).isoformat()
+        if "/" in raw:
+            parts = raw.split("/")
+            if len(parts[0]) == 3:
+                return date(int(parts[0]) + 1911, int(parts[1]), int(parts[2])).isoformat()
+    except (ValueError, TypeError):
+        return None
     for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y%m%d"):
         try:
             return datetime.strptime(raw, fmt).date().isoformat()
         except ValueError:
             pass
-    # ROC date formats: 115/11/08 or 1151108.
-    try:
-        if "/" in raw:
-            y, m, d = raw.split("/")
-        elif len(raw) == 7 and raw.isdigit():
-            y, m, d = raw[:3], raw[3:5], raw[5:]
-        else:
-            return None
-        return date(int(y) + 1911, int(m), int(d)).isoformat()
-    except (ValueError, TypeError):
-        return None
+    return None
 
 
 def _find_code(row):
