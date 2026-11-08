@@ -60,8 +60,11 @@ class AdaptiveExitMonitorTests(unittest.TestCase):
             now=self.now
         )
         self.monitor.evaluate_quote("2330", 110, self.quote(), "test", now=self.now)
-        state = self.monitor.evaluate_quote(
+        self.monitor.evaluate_quote(
             "2330", 105, self.quote(1), "test", now=self.now.replace(minute=1)
+        )
+        state = self.monitor.evaluate_quote(
+            "2330", 99, self.quote(2), "test", now=self.now.replace(minute=2)
         )
         # 2R at a 5-point initial risk moves protection to entry (100).
         self.assertIsNotNone(state)
@@ -85,4 +88,5 @@ class AdaptiveExitMonitorTests(unittest.TestCase):
             )
 
 
-if __ (unittest.main())
+if __name__ == "__main__":
+    unittest.main()
