@@ -54,9 +54,13 @@ streamlit run app.py
 
 ## 官方交易日曆
 
-模擬委託介面已介接臺灣證券交易所（TWSE）官方開（休）市日期 JSON 日曆，辨識平日休市及僅辦理結算交割日期；週末直接視為休市。資料快取 6 小時。若官方日曆無法取得或格式錯誤，系統會停止建立模擬委託與撮合操作。注意：上櫃市場另由 TPEx 公告開休市日期，系統目前尚未獨立介接 TPEx 日曆，也未即時整合颱風等臨時公告，因此不能宣稱已完整覆蓋所有上市／上櫃休市例外；下單前仍須核對對應交易所最新公告。
+模擬委託介面依市場別核對官方交易日曆：上市使用 TWSE 官方 JSON 日曆，上櫃使用 TPEx 官方「開休市日期表」頁面。兩者均快取 6 小時；官方資料無法取得、格式錯誤或缺少目標年度時，該市場的委託及撮合採 fail-closed 停止。TPEx 頁面由官方網站 HTML 表格解析，若網站改版或雲端來源遭拒絕，會停止上櫃委託而不猜測日期。臨時颱風停市等公告可能未即時反映，仍須核對當日交易所公告。
 
-官方來源：`https://openapi.twse.com.tw/v1/holidaySchedule/holidaySchedule`；`https://www.twse.com.tw/zh/trading/holiday.html`。
+官方來源：TWSE OpenAPI `https://openapi.twse.com.tw/v1/holidaySchedule/holidaySchedule`；TWSE 日曆 `https://www.twse.com.tw/zh/trading/holiday.html`；TPEx 官方開休市日期表 `https://www.tpex.org.tw/web/bulletin/trading_date/trading_date.php?l=zh-tw`。
+
+## 官方漲跌停價驗證
+
+模擬委託引擎依證券市場別讀取交易所官方每日資料，不以昨收乘以 1.1 推算。上市使用 TWSE TWT84U 的本日漲停價、本日開盤競價基準、本日跌停價；上櫃使用 TPEx 官方每日行情所提供的次日參考價、次日漲停價及次日跌停價欄位。價格資料快取 60 秒；證券代號、日期或價格欄位無法核對時，拒絕委託。交易所提供無漲跌幅限制的特殊標記時，依官方標記處理；無法辨識的特殊商品不自行推算，採 fail-closed。首五日、外國成分 ETF、槓反商品及其他特殊類別仍需持續擴充分類與官方資料驗證，不能視為已完整涵蓋所有商品規則。
 
 ## 自動測試
 
