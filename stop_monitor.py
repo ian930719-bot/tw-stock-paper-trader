@@ -41,7 +41,7 @@ class StopMonitor:
             )""")
             state_columns = {row[1] for row in conn.execute("PRAGMA table_info(paper_stop_state)")}
             if "position_version" not in state_columns:
-                conn.execute("ALTER TABLE paper_stop_state ADD COLUMN position_version INTEGER NOT NULL DEFAULT 1")
+                conn.execute("ALTER TABLE paper_stop_state ADD COLUMN position_version INTEGER NOT NULL DEFAULT 0")
             conn.execute("""CREATE TABLE IF NOT EXISTS paper_stop_events (
                 event_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 symbol TEXT NOT NULL,
