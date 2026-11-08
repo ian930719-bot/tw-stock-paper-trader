@@ -213,7 +213,8 @@ def shared_capital_backtest(
         z["_exit"] = exit_.fillna(False).to_numpy()
         z["_momentum"] = z["close"].pct_change(20).fillna(-999).to_numpy()
         # Lowest low of the prior 10 completed bars: transparent structural-stop proxy.
-        z["_structure_low"] = z["low"].rolling(10, min_periods=10).min().to_numpy()
+        # Structural invalidation uses only the 10 completed bars BEFORE the signal bar.
+        z["_structure_low"] = z["low"].shift(1).rolling(10, min_periods=10).min().to_numpy()
         if "atr" in z:
             z["_atr"] = pd.to_numeric(z["atr"], errors="coerce").fillna(z["close"] * .04).to_numpy()
         else:
@@ -332,10 +333,11 @@ def shared_capital_backtest(
                     if not prepared[k].loc[pd.to_datetime(prepared[k]["date"]) < d].empty
                 )
                 risk_budget = max(float(prior_equity), 0.0) * risk_fraction
-                # Keep entry sizing comparable across exit profiles: size from the
-                # common ATR×2 reference distance, not each profile's own stop width.
-                sizing_stop = open_px - 2.0 * atr
-                shares_by_risk = int(risk_budget / max(open_px - sizing_stop, 0.01))
+                # Apply the same account-level risk budget to each profile, but
+                # size shares from that profile's ACTUAL initial stop distance.
+                # This prevents narrow structural stops or wide 8% stops from
+                # silently changing the intended cash-at-risk.
+                shares_by_risk = int(risk_budget / max(open_px - stop, 0.01))
                 shares_by_cash = int(cash / (open_px * (1.0 + fee_rate)))
                 shares_by_alloc = int(allocation / (open_px * (1.0 + fee_rate)))
                 shares = max(0, min(shares_by_risk, shares_by_cash, shares_by_alloc))
