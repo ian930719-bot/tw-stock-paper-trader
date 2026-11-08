@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import pandas as pd
 from unittest.mock import patch
 from datetime import datetime
 from pathlib import Path
@@ -205,6 +206,39 @@ class PaperAccountTests(unittest.TestCase):
         report = self.account.integrity_report()
         self.assertFalse(report["ok"])
         self.assertIn("現金帳差異", "；".join(report["issues"]))
+
+    def test_paper_ledger_applies_split_and_dividend_once_and_reconciles(self):
+        self.order(Side.BUY, 1000, "corp-action-buy")
+        self.quote(9)
+        events = pd.DataFrame([
+            {"symbol":"2330","effective_date":"2026-11-10","action_type":"cash_dividend",
+             "share_multiplier":1.0,"cash_per_share":1.0,"payment_date":"2026-11-20",
+             "reference_price":None,"event_id":"cash-event"},
+            {"symbol":"2330","effective_date":"2026-11-10","action_type":"stock_split",
+             "share_multiplier":2.0,"cash_per_share":0.0,"payment_date":None,
+             "reference_price":5.0,"event_id":"split-event"},
+        ])
+        applied = self.account.apply_corporate_actions(events, "2026-11-10")
+        self.assertEqual(len(applied["applied"]), 2)
+        self.assertEqual(self.account.snapshot()["positions"][0]["quantity"], 2000)
+        self.assertEqual(self.account.snapshot()["positions"][0]["average_cost"], 5.0)
+        self.assertTrue(self.account.integrity_report()["ok"])
+        repeated = self.account.apply_corporate_actions(events, "2026-11-10")
+        self.assertEqual(repeated["applied"], [])
+        self.assertEqual(self.account.snapshot()["positions"][0]["quantity"], 2000)
+        paid = self.account.apply_corporate_actions([], "2026-11-20")
+        self.assertEqual(paid["cash_dividends_paid"], 1000.0)
+        self.assertTrue(self.account.integrity_report()["ok"])
+
+    def test_missed_past_corporate_action_is_not_applied_late(self):
+        events = pd.DataFrame([{
+            "symbol":"2330","effective_date":"2026-11-08","action_type":"stock_split",
+            "share_multiplier":2.0,"cash_per_share":0.0,"payment_date":None,
+            "reference_price":5.0,"event_id":"missed-event",
+        }])
+        result = self.account.apply_corporate_actions(events, "2026-11-09")
+        self.assertEqual(result["applied"], [])
+        self.assertEqual(result["missed"], ["missed-event"])
 
     def test_idempotent_fill_processing(self):
         order = self.order(Side.BUY, 1000, "once-only")
