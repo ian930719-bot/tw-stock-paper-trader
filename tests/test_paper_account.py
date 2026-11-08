@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from unittest.mock import patch
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -18,7 +19,8 @@ class PaperAccountTests(unittest.TestCase):
         self.engine = PaperExecutionEngine(self.db, RiskLimits(
             max_order_notional=50000, max_symbol_exposure=100000,
             max_portfolio_exposure=150000))
-        self.account = PaperAccount(self.db, initial_cash=100000, calendar_checker=lambda day: (True, "test calendar"))
+        self.calendar = lambda day: (True, "test calendar")
+        self.account = PaperAccount(self.db, initial_cash=100000, calendar_checker=self.calendar)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -30,8 +32,15 @@ class PaperAccountTests(unittest.TestCase):
             equity=100000, now=NOW)
 
     def quote(self, price=9, at=NOW, source="test-feed"):
-        return self.account.process_quote(
-            "2330", price, at.isoformat(), source, now=NOW)
+        with patch("taiwan_price_limits.get_official_price_limit", return_value={
+            "no_price_limit": False, "lower_limit": 9, "upper_limit": 11,
+            "reference_price": 10, "date": NOW.date().isoformat()
+        }) as official:
+            result = self.account.process_quote(
+                "2330", price, at.isoformat(), source, now=NOW)
+            if result:
+                self.assertTrue(official.called)
+            return result
 
     def test_odd_lot_order_fills_and_updates_account(self):
         order = self.engine.submit(
@@ -99,6 +108,24 @@ class PaperAccountTests(unittest.TestCase):
             cash=100000, positions={}, equity=100000, now=NOW)
         with self.assertRaisesRegex(ValueError, "官方交易日曆"):
             account.process_quote("2330", 9, NOW.isoformat(), "test-feed", now=NOW)
+
+    def test_official_price_band_failure_rejects_order_before_fill(self):
+        order = self.order(Side.BUY, 1000, "bad-band")
+        with patch("taiwan_price_limits.get_official_price_limit", side_effect=ValueError("official feed unavailable")):
+            result = self.account.process_quote("2330", 9, NOW.isoformat(), "test-feed", now=NOW)
+        self.assertEqual(result, [])
+        self.assertEqual(self.engine.get_order(order.order_id).status, "REJECTED")
+        self.assertIn("成交前官方漲跌停驗證失敗", self.engine.get_order(order.order_id).message)
+
+    def test_order_outside_refreshed_official_band_is_rejected_before_fill(self):
+        order = self.order(Side.BUY, 1000, "changed-band")
+        with patch("taiwan_price_limits.get_official_price_limit", return_value={
+            "no_price_limit": False, "lower_limit": 10, "upper_limit": 12,
+            "reference_price": 11, "date": NOW.date().isoformat()
+        }):
+            result = self.account.process_quote("2330", 9, NOW.isoformat(), "test-feed", now=NOW)
+        self.assertEqual(result, [])
+        self.assertEqual(self.engine.get_order(order.order_id).status, "REJECTED")
 
     def test_outside_session_is_rejected(self):
         self.order(Side.BUY, 1000, "closed-1")
