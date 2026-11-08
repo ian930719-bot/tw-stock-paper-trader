@@ -42,7 +42,7 @@ def _signals(frame: pd.DataFrame) -> Dict[str, Tuple[pd.Series, pd.Series]]:
     avg_loss = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False, min_periods=14).mean()
     rsi = 100 - 100 / (1 + avg_gain / avg_loss.replace(0, np.nan))
     bandwidth = (4.0 * std20 / sma20.replace(0, np.nan))
-    squeeze_threshold = bandwidth.shift(1).rolling(120, min_periods=60).quantile(0.20)
+    squeeze_threshold = bandwidth.shift(2).rolling(120, min_periods=60).quantile(0.20)
     recent_squeeze = (bandwidth.shift(1) <= squeeze_threshold).rolling(10, min_periods=1).max().fillna(0).astype(bool)
     return {
         STRATEGIES[0]: (
