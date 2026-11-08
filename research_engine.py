@@ -6,6 +6,7 @@ as a latest-available snapshot and must not be mixed into historical signals.
 from __future__ import annotations
 
 from typing import Dict, Mapping, Tuple
+from corporate_actions import validate_action_frame
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -198,6 +199,7 @@ def shared_capital_backtest(
     exit_profile: str = "baseline_atr2",
     signal_overrides: Mapping[str, Tuple[pd.Series, pd.Series]] | None = None,
     max_participation_rate: float = 0.01,
+    corporate_actions: Mapping[str, pd.DataFrame] | None = None,
 ) -> dict:
     """Multi-symbol portfolio simulation with one shared cash balance.
 
@@ -298,6 +300,12 @@ def shared_capital_backtest(
     fee_rate = float(fee)
     tax_rate = float(sell_tax)
     slip_rate = float(slippage)
+    action_lookup = {
+        str(code): validate_action_frame(events, str(code))
+        for code, events in (corporate_actions or {}).items()
+    }
+    processed_actions = set()
+    dividend_receivables = []
 
     for d in dates:
         todays = {
@@ -305,6 +313,45 @@ def shared_capital_backtest(
             for code, lookup in row_lookup.items()
             if d in lookup
         }
+
+        # Corporate actions apply before the ex-date open to positions held
+        # through the prior close. Cash dividends become receivables on ex-date;
+        # share-changing actions adjust quantity and per-share risk levels.
+        for code, events in action_lookup.items():
+            if code not in positions or code not in todays or events.empty:
+                continue
+            due = events.loc[pd.to_datetime(events["effective_date"]).dt.normalize() == pd.Timestamp(d).normalize()]
+            for event in due.itertuples(index=False):
+                event_id = str(event.event_id)
+                if event_id in processed_actions:
+                    continue
+                p = positions[code]
+                if event.action_type == "cash_dividend":
+                    amount = float(p["shares"]) * float(event.cash_per_share)
+                    if amount > 0:
+                        p["dividends"] = float(p.get("dividends", 0.0)) + amount
+                        dividend_receivables.append({
+                            "symbol": code, "event_id": event_id,
+                            "payment_date": pd.Timestamp(event.payment_date).normalize(),
+                            "amount": amount,
+                        })
+                elif event.action_type in {
+                    "stock_dividend", "stock_split", "capital_reduction", "par_value_change"
+                }:
+                    multiplier = float(event.share_multiplier)
+                    p["shares"] = float(p["shares"]) * multiplier
+                    for key in ("entry_price", "stop", "high_water", "atr", "initial_risk"):
+                        p[key] = float(p[key]) / multiplier
+                processed_actions.add(event_id)
+
+        # Settle previously accrued cash dividends on their published payment date.
+        still_receivable = []
+        for item in dividend_receivables:
+            if item["payment_date"] <= pd.Timestamp(d).normalize():
+                cash += float(item["amount"])
+            else:
+                still_receivable.append(item)
+        dividend_receivables = still_receivable
 
         # Mark current portfolio using today's close; execute exits at today's
         # open based on signals formed at the prior close.
@@ -323,11 +370,13 @@ def shared_capital_backtest(
                 raw_fill = min(open_px, p["stop"]) if stop_hit else open_px
                 fill = raw_fill * (1.0 - slip_rate)
                 proceeds = p["shares"] * fill * (1.0 - fee_rate - tax_rate)
-                pnl = proceeds - p["entry_cost"]
+                dividend_income = float(p.get("dividends", 0.0))
+                pnl = proceeds + dividend_income - p["entry_cost"]
                 trades.append({
                     "代號": code, "訊號日": p["signal_date"], "進場日": p["entry_date"],
                     "出場日": str(pd.Timestamp(d).date()), "股數": p["shares"],
                     "進場成本": p["entry_cost"], "出場收入": proceeds,
+                    "股利收入": dividend_income,
                     "損益": pnl, "報酬率": pnl / p["entry_cost"] if p["entry_cost"] else 0.0,
                     "出場原因": "策略出場" if prior_exit else "停損／移動停損",
                     "曾觸發獲利檢視": bool(p.get("profit_review_triggered", False)),
@@ -420,18 +469,21 @@ def shared_capital_backtest(
                     "management": management, "trail_multiple": trail_multiple,
                     "profit_review_triggered": False, "exit_next": False,
                     "adv20": adv20, "max_participation_rate": max_participation_rate,
+                    "dividends": 0.0,
                 }
                 # If the stop is touched later on the entry day, simulate the
                 # stop fill rather than waiting until the following session.
                 if float(row["low"]) <= stop:
                     fill = min(float(row["open"]), stop) * (1.0 - slip_rate)
                     proceeds = shares * fill * (1.0 - fee_rate - tax_rate)
-                    pnl = proceeds - entry_cost
+                    dividend_income = float(positions[code].get("dividends", 0.0))
+                    pnl = proceeds + dividend_income - entry_cost
                     trades.append({
                         "代號": code, "訊號日": positions[code]["signal_date"],
                         "進場日": positions[code]["entry_date"],
                         "出場日": str(pd.Timestamp(d).date()), "股數": shares,
                         "進場成本": entry_cost, "出場收入": proceeds,
+                        "股利收入": dividend_income,
                         "損益": pnl, "報酬率": pnl / entry_cost if entry_cost else 0.0,
                         "出場原因": "進場日觸及初始停損",
                         "曾觸發獲利檢視": False, "最高風險倍數": 0.0,
@@ -461,11 +513,13 @@ def shared_capital_backtest(
             p = positions[code]
             fill = float(todays[code]["close"]) * (1.0 - slip_rate)
             proceeds = p["shares"] * fill * (1.0 - fee_rate - tax_rate)
-            pnl = proceeds - p["entry_cost"]
+            dividend_income = float(p.get("dividends", 0.0))
+            pnl = proceeds + dividend_income - p["entry_cost"]
             trades.append({
                 "代號": code, "訊號日": p["signal_date"], "進場日": p["entry_date"],
                 "出場日": str(pd.Timestamp(d).date()), "股數": p["shares"],
                 "進場成本": p["entry_cost"], "出場收入": proceeds,
+                "股利收入": dividend_income,
                 "損益": pnl, "報酬率": pnl / p["entry_cost"] if p["entry_cost"] else 0.0,
                 "出場原因": "該標的資料期末平倉",
                 "曾觸發獲利檢視": bool(p.get("profit_review_triggered", False)),
@@ -489,17 +543,20 @@ def shared_capital_backtest(
         for code, row in todays.items():
             last_closes[code] = float(row["close"])
 
+        receivable_value = sum(float(item["amount"]) for item in dividend_receivables)
         if report_start_date is None or pd.Timestamp(d) >= pd.Timestamp(report_start_date):
             equity_rows.append({"日期": pd.Timestamp(d), "現金": cash,
+                                "股利應收": receivable_value,
                                 "持倉市值": market_value, "持倉數": len(positions),
-                                "資產": cash + market_value})
+                                "資產": cash + receivable_value + market_value})
 
     eq = pd.DataFrame(equity_rows)
     if not eq.empty:
         eq.loc[eq.index[-1], "現金"] = cash
         eq.loc[eq.index[-1], "持倉市值"] = 0.0
         eq.loc[eq.index[-1], "持倉數"] = 0
-        eq.loc[eq.index[-1], "資產"] = cash
+        eq.loc[eq.index[-1], "股利應收"] = sum(float(item["amount"]) for item in dividend_receivables)
+        eq.loc[eq.index[-1], "資產"] = cash + sum(float(item["amount"]) for item in dividend_receivables)
     if not eq.empty:
         daily_returns = eq.set_index("日期")["資產"].pct_change()
         # Include first-day execution costs and mark-to-market P&L relative to
@@ -507,10 +564,11 @@ def shared_capital_backtest(
         daily_returns.iloc[0] = float(eq["資產"].iloc[0]) / float(initial_capital) - 1.0
         daily_returns = daily_returns.replace([np.inf, -np.inf], np.nan).fillna(0.0)
         metrics = performance(daily_returns, initial_capital)
-        metrics["期末資產"] = float(cash)
-        metrics["總報酬"] = float(cash / initial_capital - 1.0)
+        ending_equity = float(cash) + sum(float(item["amount"]) for item in dividend_receivables)
+        metrics["期末資產"] = ending_equity
+        metrics["總報酬"] = float(ending_equity / initial_capital - 1.0)
         years = max((pd.Timestamp(eq["日期"].iloc[-1]) - pd.Timestamp(eq["日期"].iloc[0])).days / 365.25, 1/252)
-        metrics["年化報酬"] = float((cash / initial_capital) ** (1 / years) - 1) if cash > 0 else -1.0
+        metrics["年化報酬"] = float((ending_equity / initial_capital) ** (1 / years) - 1) if ending_equity > 0 else -1.0
         peak = pd.Series(
             np.maximum.accumulate(np.r_[float(initial_capital), eq["資產"].to_numpy()])[1:],
             index=eq.index,
@@ -524,6 +582,8 @@ def shared_capital_backtest(
         "equity": eq,
         "trades": pd.DataFrame(trades),
         "coverage": {"symbols_requested": len(frames), "symbols_used": len(prepared)},
+        "corporate_actions_applied": len(processed_actions),
+        "unpaid_dividend_receivables": sum(float(item["amount"]) for item in dividend_receivables),
         "exit_profile": exit_profile,
         "exit_profile_note": ("Minervini 使用前 10 根已完成日 K 最低價作為結構失效代理；不是完整 SEPA 型態辨識。" if exit_profile == "minervini_structure" else "出場設定僅作候選比較，尚未證明任何一組參數具有樣本外優勢。"),
     }
