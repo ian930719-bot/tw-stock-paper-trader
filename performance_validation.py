@@ -17,7 +17,7 @@ import pandas as pd
 import yfinance as yf
 
 from research_engine import STRATEGIES
-from walk_forward import rolling_walk_forward
+from continuous_walk_forward import continuous_walk_forward
 from analytics import trade_statistics
 
 SYMBOLS = {"2330.TW": "2330", "2454.TW": "2454", "2603.TW": "2603"}
@@ -122,14 +122,10 @@ def summarize_result(name: str, result: dict):
         raise RuntimeError(f"{name} 的資產曲線無效")
     peak = pd.concat([pd.Series([INITIAL_CAPITAL]), values.reset_index(drop=True)]).cummax().iloc[1:].reset_index(drop=True)
     drawdown = values.reset_index(drop=True) / peak - 1.0
-    daily_returns = values.pct_change().dropna()
-    if len(daily_returns) > 1 and daily_returns.std(ddof=1) > 0:
-        sharpe = float(daily_returns.mean() / daily_returns.std(ddof=1) * np.sqrt(252))
-    else:
-        sharpe = 0.0
     total_return = float(values.iloc[-1] / INITIAL_CAPITAL - 1.0)
-    years = max(len(values) / 252.0, 1.0 / 252.0)
-    cagr = float((values.iloc[-1] / INITIAL_CAPITAL) ** (1.0 / years) - 1.0)
+    metric_values = result.get("metrics", {})
+    cagr = float(metric_values.get("年化報酬", 0.0))
+    sharpe = float(metric_values.get("Sharpe", 0.0))
     stats = trade_statistics(trades)
     return {
         "策略": name,
@@ -143,7 +139,7 @@ def summarize_result(name: str, result: dict):
         "期末資產_NT": float(values.iloc[-1]),
         "總報酬": total_return,
         "年化報酬_CAGR": cagr,
-        "最大回撤": float(drawdown.min()),
+        "最大回撤": float(metric_values.get("最大回撤", drawdown.min())),
         "Sharpe": sharpe,
         "費率": FEE,
         "賣出證交稅": SELL_TAX,
@@ -178,14 +174,13 @@ def main():
     summaries, all_windows, all_trades, all_equity = [], [], [], []
     for strategy in strategies:
         print(f"開始樣本外測試：{strategy}", flush=True)
-        result = rolling_walk_forward(
+        result = continuous_walk_forward(
             frames, strategy,
             initial_capital=INITIAL_CAPITAL,
             max_positions=MAX_POSITIONS,
             risk_fraction=RISK_FRACTION,
             lookback_days=LOOKBACK_DAYS,
             test_days=TEST_DAYS,
-            step_days=TEST_DAYS,
             warmup_bars=WARMUP_BARS,
             fee=FEE, sell_tax=SELL_TAX, slippage=SLIPPAGE,
             exit_profile="baseline_atr2",
@@ -238,12 +233,13 @@ def main():
             "max_participation_rate": 0.01, "lookback_sessions": LOOKBACK_DAYS,
             "oos_window_sessions": TEST_DAYS, "warmup_sessions": WARMUP_BARS,
             "exit_profile": "baseline_atr2",
+            "continuous_portfolio": True,
         },
         "limitations": [
             "Yahoo Finance is not an exchange-certified source; its historical bars and corporate-action coverage may be revised or incomplete.",
             "Dividend and split events are sourced from Yahoo Finance; cash-dividend payment dates and some capital-reduction/par-value events are not fully modeled.",
             "The current universe contains only three currently listed symbols; this does not remove survivorship bias.",
-            "Each walk-forward OOS window resets cash and positions; the chained curve is a research aggregate, not one continuously held account.",
+            "Portfolio cash and open positions carry continuously across OOS boundaries; adaptive candidates are selected only from pre-window history.",
             "Daily OHLCV cannot reconstruct intraday queue position, limit-up/down execution, halts, partial fills, or market impact.",
             "Results are paper research only and are not a prediction or guarantee of future returns.",
         ],
