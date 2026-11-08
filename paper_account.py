@@ -9,13 +9,13 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from execution_engine import OrderStatus, Side, TZ, taiwan_regular_session
-from taiwan_trading_calendar import trading_day_status
+from market_trading_calendar import market_trading_day_status
 
 
 class PaperAccount:
     """Atomic paper fills and account ledger sharing execution_engine's database."""
 
-    def __init__(self, db_path: str, initial_cash: float = 1_000_000, *, calendar_checker=trading_day_status):
+    def __init__(self, db_path: str, initial_cash: float = 1_000_000, *, calendar_checker=None):
         if initial_cash <= 0:
             raise ValueError("初始資金必須大於零")
         self.db_path = str(db_path)
@@ -81,7 +81,7 @@ class PaperAccount:
         }
 
     def process_quote(self, symbol: str, price: float, quote_time: str, source: str,
-                      *, now: datetime | None = None, max_age_seconds: int = 120,
+                      *, now: datetime | None = None, max_age_seconds: int = 120, market: str = "上市",
                       buy_fee_rate: float = 0.001425, sell_fee_rate: float = 0.001425,
                       sell_tax_rate: float = 0.003) -> list[dict]:
         """Fill crossed limit orders only from fresh, sourced quotes during regular hours."""
@@ -106,7 +106,10 @@ class PaperAccount:
         clock = current.time().replace(tzinfo=None)
         if current.weekday() >= 5 or not (datetime.strptime("09:00", "%H:%M").time() <= clock <= datetime.strptime("13:30", "%H:%M").time()):
             raise ValueError("非台股盤中交易時段，拒絕撮合")
-        market_open, calendar_note = self.calendar_checker(current.date())
+        if self.calendar_checker is None:
+            market_open, calendar_note = market_trading_day_status(current.date(), market)
+        else:
+            market_open, calendar_note = self.calendar_checker(current.date())
         if not market_open:
             raise ValueError(f"官方交易日曆確認休市或無法確認，拒絕撮合：{calendar_note}")
 
