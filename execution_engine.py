@@ -194,13 +194,14 @@ def validate_order(intent: OrderIntent, *, cash: float, positions: dict[str, int
 class PaperExecutionEngine:
     """SQLite-backed paper order log; never connects to a broker."""
 
-    def __init__(self, db_path: str | None = None, limits: RiskLimits | None = None, *, price_limit_provider=None):
+    def __init__(self, db_path: str | None = None, limits: RiskLimits | None = None, *, price_limit_provider=None, calendar_provider=None):
         self.db_path = db_path or os.getenv(
             "EXECUTION_DB_PATH",
             str(Path(tempfile.gettempdir()) / "tw_stock_execution.sqlite3"),
         )
         self.limits = limits or RiskLimits()
         self.price_limit_provider = price_limit_provider
+        self.calendar_provider = calendar_provider
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         with closing(sqlite3.connect(self.db_path)) as conn:
             conn.execute("""
@@ -250,6 +251,12 @@ class PaperExecutionEngine:
                 open_order_count=open_order_count, daily_order_count=daily_order_count,
                 limits=self.limits, now=now,
             )
+            if self.calendar_provider is not None:
+                market_open, calendar_note = self.calendar_provider(
+                    (now or datetime.now(TZ)).astimezone(TZ).date(), intent.market
+                )
+                if not market_open:
+                    raise ValueError(f"官方交易日曆確認休市或無法確認：{calendar_note}")
             if self.price_limit_provider is not None:
                 from taiwan_price_limits import validate_limit_price
                 band = self.price_limit_provider(intent.symbol, intent.market)
