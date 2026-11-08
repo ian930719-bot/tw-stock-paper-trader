@@ -34,6 +34,19 @@ from taiwan_price_limits import get_official_price_limit
 from market_trading_calendar import market_trading_day_status
 from trading_config import TradingConfig
 from trading_mode import StagedTradingController
+@st.cache_data(ttl=21600, max_entries=8, show_spinner=False)
+def cached_rolling_walk_forward(
+    frames, strategy, initial_capital, max_positions, risk_fraction,
+    lookback_days, test_days, step_days, warmup_bars, exit_profile,
+):
+    """Cache expensive deterministic research runs across Streamlit reruns."""
+    return rolling_walk_forward(
+        frames, strategy, initial_capital=initial_capital,
+        max_positions=max_positions, risk_fraction=risk_fraction,
+        lookback_days=lookback_days, test_days=test_days, step_days=step_days,
+        warmup_bars=warmup_bars, exit_profile=exit_profile,
+    )
+
 st.set_page_config(page_title="台股模擬交易",layout="wide")
 TZ=ZoneInfo("Asia/Taipei")
 from stock_universe import fetch_stock_universe, universe_summary, StockUniverseError
@@ -461,7 +474,7 @@ with t2:
         if st.button("執行 Walk-forward＋0050 基準比較", key="run_walkforward_benchmark", disabled=not portfolio_symbols):
             wf_frames = {code: data[code].copy() for code in portfolio_symbols if code in data}
             with st.spinner("執行多段樣本外驗證，並取得 0050 還原日線作基準…"):
-                wf_result = rolling_walk_forward(
+                wf_result = cached_rolling_walk_forward(
                     wf_frames, walkforward_strategy,
                     initial_capital=float(capital),
                     max_positions=int(portfolio_max_positions),
@@ -471,7 +484,7 @@ with t2:
                 )
                 fixed_wf_result = None
                 if adaptive_walkforward:
-                    fixed_wf_result = rolling_walk_forward(
+                    fixed_wf_result = cached_rolling_walk_forward(
                         wf_frames, portfolio_strategy,
                         initial_capital=float(capital),
                         max_positions=int(portfolio_max_positions),
