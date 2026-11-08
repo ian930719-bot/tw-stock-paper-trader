@@ -39,6 +39,8 @@ class PaperAccountTests(unittest.TestCase):
         self.assertEqual(len(fills), 1)
         snap = self.account.snapshot()
         self.assertEqual(snap["positions"][0]["quantity"], 1000)
+        self.assertEqual(snap["fills"][0]["price"], 10)
+        self.assertEqual(self.engine.get_order(order.order_id).average_fill_price, 10)
         self.assertLess(snap["cash"], 100000)
         self.assertEqual(self.engine.get_order(order.order_id).status, "FILLED")
 
