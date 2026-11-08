@@ -22,7 +22,7 @@ PROFILES = {
     },
     "atr_dynamic": {
         "name": "ATR 動態風控",
-        "description": "依 ATR 倍數與技術失效點建立初始風險；倍數是待驗證參數，不宣稱有通用最佳值。",
+        "description": "依 ATR 倍數與技術失效點建立初始風險；列出的 ATR 倍數屬候選參數，仍待驗證，不宣稱有通用最佳值。",
         "candidate_atr_multipliers": (1.5, 2.0, 2.5, 3.0),
     },
 }
