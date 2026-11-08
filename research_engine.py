@@ -240,11 +240,25 @@ def shared_capital_backtest(
                 "equity": pd.DataFrame(), "trades": pd.DataFrame(),
                 "coverage": {"symbols_requested": len(frames), "symbols_used": 0}}
 
+    # Build date lookups once. Repeated Series-to-datetime conversions and
+    # boolean scans inside every portfolio session were a major runtime hotspot.
+    row_lookup = {}
+    index_lookup = {}
+    for code, z in prepared.items():
+        date_values = pd.to_datetime(z["date"])
+        row_lookup[code] = {
+            pd.Timestamp(date_values.iloc[i]): z.iloc[i]
+            for i in range(len(z))
+        }
+        index_lookup[code] = {
+            pd.Timestamp(date_values.iloc[i]): i
+            for i in range(len(z))
+        }
     # Calendar dates are unioned. A symbol without a bar on a date is not traded.
-    date_sets = [set(pd.to_datetime(z["date"])) for z in prepared.values()]
-    dates = sorted(set.union(*date_sets))
+    dates = sorted(set().union(*[set(x) for x in row_lookup.values()]))
     cash = float(initial_capital)
     positions = {}
+    last_closes = {}
     trades = []
     equity_rows = []
     fee_rate = float(fee)
@@ -252,11 +266,11 @@ def shared_capital_backtest(
     slip_rate = float(slippage)
 
     for d in dates:
-        todays = {}
-        for code, z in prepared.items():
-            match = z.index[pd.to_datetime(z["date"]) == d]
-            if len(match):
-                todays[code] = z.iloc[int(match[0])]
+        todays = {
+            code: lookup[d]
+            for code, lookup in row_lookup.items()
+            if d in lookup
+        }
 
         # Mark current portfolio using today's close; execute exits at today's
         # open based on signals formed at the prior close.
@@ -295,8 +309,7 @@ def shared_capital_backtest(
         candidates = []
         for code, row in todays.items():
             z = prepared[code]
-            ix = z.index[pd.to_datetime(z["date"]) == d]
-            i = int(ix[0])
+            i = index_lookup[code][d]
             if i < warmup or code in positions:
                 continue
             if trading_start_date is not None and pd.Timestamp(d) < pd.Timestamp(trading_start_date):
@@ -337,11 +350,8 @@ def shared_capital_backtest(
                 if not np.isfinite(stop) or stop <= 0 or stop >= open_px:
                     continue
                 prior_equity = cash + sum(
-                    p["shares"] * float(prepared[k].loc[
-                        pd.to_datetime(prepared[k]["date"]) < d, "close"
-                    ].iloc[-1])
+                    p["shares"] * float(last_closes.get(k, p["entry_price"]))
                     for k, p in positions.items()
-                    if not prepared[k].loc[pd.to_datetime(prepared[k]["date"]) < d].empty
                 )
                 risk_budget = max(float(prior_equity), 0.0) * risk_fraction
                 # Apply the same account-level risk budget to each profile, but
@@ -398,9 +408,7 @@ def shared_capital_backtest(
         for code, p in positions.items():
             row = todays.get(code)
             if row is not None:
-                z = prepared[code]
-                ix = z.index[pd.to_datetime(z["date"]) == d]
-                p["exit_next"] = bool(z.iloc[int(ix[0])]["_exit"])
+                p["exit_next"] = bool(todays[code]["_exit"])
 
         # A symbol's history can end before the portfolio calendar. Liquidate
         # on that symbol's own final available close instead of postponing the
@@ -431,13 +439,15 @@ def shared_capital_backtest(
             row = todays.get(code)
             if row is None:
                 z = prepared[code]
-                prior = z[pd.to_datetime(z["date"]) < d]
-                if prior.empty:
+                if code not in last_closes:
                     continue
-                mark = float(prior.iloc[-1]["close"])
+                mark = float(last_closes[code])
             else:
                 mark = float(row["close"])
             market_value += p["shares"] * mark
+        for code, row in todays.items():
+            last_closes[code] = float(row["close"])
+
         if report_start_date is None or pd.Timestamp(d) >= pd.Timestamp(report_start_date):
             equity_rows.append({"日期": pd.Timestamp(d), "現金": cash,
                                 "持倉市值": market_value, "持倉數": len(positions),
