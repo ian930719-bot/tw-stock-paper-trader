@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 from execution_engine import OrderStatus, Side, TZ, taiwan_regular_session
 from market_trading_calendar import market_trading_day_status
+from corporate_actions import validate_action_frame
 
 
 class PaperAccount:
@@ -52,6 +53,21 @@ class PaperAccount:
                 quote_time TEXT NOT NULL,
                 filled_at TEXT NOT NULL
             )""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS paper_corporate_actions (
+                event_id TEXT PRIMARY KEY,
+                symbol TEXT NOT NULL,
+                action_type TEXT NOT NULL,
+                effective_date TEXT NOT NULL,
+                payment_date TEXT,
+                share_multiplier REAL NOT NULL,
+                cash_per_share REAL NOT NULL,
+                reference_price REAL,
+                entitled_quantity INTEGER NOT NULL DEFAULT 0,
+                cash_amount REAL NOT NULL DEFAULT 0,
+                cash_in_lieu REAL NOT NULL DEFAULT 0,
+                applied_at TEXT NOT NULL,
+                paid_at TEXT
+            )""")
             conn.execute(
                 "INSERT OR IGNORE INTO paper_account(id,initial_cash,cash,created_at) VALUES(1,?,?,?)",
                 (float(initial_cash), float(initial_cash), datetime.now(TZ).isoformat()),
@@ -87,6 +103,11 @@ class PaperAccount:
                 "SELECT fill_id,order_id,symbol,side,quantity,price,gross,fees,tax,realized_pnl,quote_source,quote_time,filled_at "
                 "FROM paper_fills ORDER BY filled_at DESC"
             ).fetchall()
+            actions = conn.execute(
+                "SELECT event_id,symbol,action_type,effective_date,payment_date,entitled_quantity,"
+                "cash_amount,cash_in_lieu,applied_at,paid_at FROM paper_corporate_actions "
+                "ORDER BY effective_date DESC,event_id"
+            ).fetchall()
         fields = ["fill_id","order_id","symbol","side","quantity","price","gross","fees","tax","realized_pnl","quote_source","quote_time","filled_at"]
         return {
             "initial_cash": account[0], "cash": account[1], "created_at": account[2],
@@ -95,6 +116,11 @@ class PaperAccount:
                 for r in positions
             ],
             "fills": [dict(zip(fields, row)) for row in fills],
+            "corporate_actions": [
+                dict(zip(["event_id","symbol","action_type","effective_date","payment_date",
+                          "entitled_quantity","cash_amount","cash_in_lieu","applied_at","paid_at"], row))
+                for row in actions
+            ],
         }
 
     def backup_bytes(self) -> bytes:
@@ -103,6 +129,133 @@ class PaperAccount:
             with closing(sqlite3.connect(":memory:")) as target:
                 source.backup(target)
                 return target.serialize()
+
+    def position_start_date(self, symbol: str) -> str | None:
+        """Return the start date of the currently open fill-derived position."""
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            fills = conn.execute(
+                "SELECT side,quantity,filled_at FROM paper_fills WHERE symbol=? ORDER BY filled_at,fill_id",
+                (str(symbol),),
+            ).fetchall()
+        quantity = 0
+        opened_at = None
+        for side, amount, filled_at in fills:
+            amount = int(amount)
+            if side == Side.BUY.value:
+                if quantity <= 0:
+                    opened_at = str(filled_at)
+                quantity += amount
+            elif side == Side.SELL.value:
+                quantity -= amount
+                if quantity <= 0:
+                    quantity = 0
+                    opened_at = None
+        return opened_at
+
+    def apply_corporate_actions(self, events, as_of: datetime | str) -> dict:
+        """Apply ex-date actions exactly once and settle dividend receivables.
+
+        This method only applies actions effective on the supplied Taiwan date.
+        An unapplied older event is reported as missed; it is never silently
+        applied late because current holdings may have changed since ex-date.
+        """
+        current = as_of if isinstance(as_of, datetime) else datetime.fromisoformat(str(as_of))
+        action_day = current.date().isoformat()
+        frame = validate_action_frame(
+            events if isinstance(events, __import__("pandas").DataFrame) else __import__("pandas").DataFrame(events),
+            "",
+        )
+        applied, paid, missed = [], [], []
+        stamp = datetime.now(TZ).isoformat()
+        with closing(sqlite3.connect(self.db_path, timeout=20)) as conn:
+            conn.execute("PRAGMA busy_timeout=20000")
+            # A missed ex-date must be reconciled manually; do not infer old entitlements.
+            for event in frame.itertuples(index=False):
+                effective = event.effective_date.date().isoformat()
+                exists = conn.execute(
+                    "SELECT 1 FROM paper_corporate_actions WHERE event_id=?",
+                    (str(event.event_id),),
+                ).fetchone()
+                if exists:
+                    continue
+                if effective < action_day:
+                    missed.append(str(event.event_id))
+                    continue
+                if effective > action_day:
+                    continue
+                pending = conn.execute(
+                    "SELECT COUNT(*) FROM paper_orders WHERE symbol=? AND status=?",
+                    (str(event.symbol), OrderStatus.ACCEPTED.value),
+                ).fetchone()[0]
+                if pending:
+                    raise ValueError(
+                        f"{event.symbol} 除權息日仍有未成交委託；請先取消委託再處理公司行動"
+                    )
+                position = conn.execute(
+                    "SELECT quantity,average_cost FROM paper_positions WHERE symbol=?",
+                    (str(event.symbol),),
+                ).fetchone()
+                quantity = int(position[0]) if position else 0
+                average_cost = float(position[1]) if position else 0.0
+                cash_amount = 0.0
+                cash_in_lieu = 0.0
+                new_quantity = quantity
+                if event.action_type == "cash_dividend":
+                    cash_amount = quantity * float(event.cash_per_share)
+                elif quantity > 0:
+                    multiplier = float(event.share_multiplier)
+                    exact = quantity * multiplier
+                    new_quantity = int(math.floor(exact + 1e-9))
+                    fractional = max(0.0, exact - new_quantity)
+                    if fractional > 1e-8:
+                        reference = event.reference_price
+                        if reference is None or not math.isfinite(float(reference)) or float(reference) <= 0:
+                            raise ValueError(
+                                f"{event.symbol} 公司行動產生零股權利，但缺少可用參考價；停止自動調整"
+                            )
+                        cash_in_lieu = fractional * float(reference)
+                    if position:
+                        conn.execute(
+                            "UPDATE paper_positions SET quantity=?,average_cost=?,position_version=position_version+1 WHERE symbol=?",
+                            (new_quantity, average_cost / multiplier, str(event.symbol)),
+                        )
+                if cash_in_lieu:
+                    conn.execute(
+                        "UPDATE paper_account SET cash=cash+? WHERE id=1",
+                        (cash_in_lieu,),
+                    )
+                conn.execute("""INSERT INTO paper_corporate_actions(
+                    event_id,symbol,action_type,effective_date,payment_date,
+                    share_multiplier,cash_per_share,reference_price,entitled_quantity,
+                    cash_amount,cash_in_lieu,applied_at,paid_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                    str(event.event_id), str(event.symbol), str(event.action_type),
+                    effective, event.payment_date.date().isoformat() if not __import__("pandas").isna(event.payment_date) else None,
+                    float(event.share_multiplier), float(event.cash_per_share),
+                    float(event.reference_price) if event.reference_price is not None and math.isfinite(float(event.reference_price)) else None,
+                    quantity, cash_amount, cash_in_lieu, stamp, None,
+                ))
+                applied.append(str(event.event_id))
+
+            due = conn.execute(
+                "SELECT event_id,cash_amount FROM paper_corporate_actions "
+                "WHERE action_type='cash_dividend' AND cash_amount>0 AND paid_at IS NULL "
+                "AND payment_date IS NOT NULL AND payment_date<=?",
+                (action_day,),
+            ).fetchall()
+            total_paid = sum(float(row[1]) for row in due)
+            if total_paid:
+                conn.execute("UPDATE paper_account SET cash=cash+? WHERE id=1", (total_paid,))
+                conn.executemany(
+                    "UPDATE paper_corporate_actions SET paid_at=? WHERE event_id=?",
+                    [(stamp, row[0]) for row in due],
+                )
+                paid = [row[0] for row in due]
+            conn.commit()
+        return {
+            "applied": applied, "paid": paid, "missed": missed,
+            "cash_dividends_paid": round(total_paid, 2),
+        }
 
     def integrity_report(self) -> dict:
         """Reconcile the SQLite cash/position ledger against immutable fill records."""
