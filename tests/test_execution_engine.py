@@ -60,6 +60,19 @@ class ExecutionEngineTests(unittest.TestCase):
         )
         self.assertEqual(result.status, "ACCEPTED")
 
+    def test_engine_rejects_order_when_market_calendar_closed(self):
+        engine = PaperExecutionEngine(
+            str(Path(self.tmp.name) / "calendar-closed.sqlite3"),
+            self.engine.limits,
+            calendar_provider=lambda day, market: (False, "TPEx holiday"),
+        )
+        result = engine.submit(
+            self.intent(market="上櫃"), cash=100000, positions={},
+            equity=100000, now=OPEN,
+        )
+        self.assertEqual(result.status, "REJECTED")
+        self.assertIn("TPEx holiday", result.message)
+
     def test_buy_order_accepted_within_limits(self):
         result = self.engine.submit(self.intent(), cash=100000, positions={},
                                     equity=100000, now=OPEN)
