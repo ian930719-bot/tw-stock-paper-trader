@@ -324,13 +324,30 @@ def point_in_time_recalculate(frame: pd.DataFrame, actions: pd.DataFrame | None,
         before = adjusted.index < idx
         for column in ("open", "high", "low", "close"):
             if column in adjusted:
-                adjusted.loc[before, column] = pd.to_numeric(
-                    adjusted.loc[before, column], errors="coerce"
-                ) * price_factor
+                adjusted[column] = pd.to_numeric(
+                    adjusted[column], errors="coerce"
+                ).astype(float)
+                adjusted.loc[before, column] = (
+                    adjusted.loc[before, column] * price_factor
+                )
         if "volume" in adjusted and volume_factor != 1.0:
-            adjusted.loc[before, "volume"] = pd.to_numeric(
-                adjusted.loc[before, "volume"], errors="coerce"
-            ) * volume_factor
+            adjusted["volume"] = pd.to_numeric(
+                adjusted["volume"], errors="coerce"
+            ).astype(float)
+            adjusted.loc[before, "volume"] = (
+                adjusted.loc[before, "volume"] * volume_factor
+            )
+        if "atr" in adjusted:
+            close = pd.to_numeric(adjusted["close"], errors="coerce")
+            high = pd.to_numeric(adjusted["high"], errors="coerce")
+            low = pd.to_numeric(adjusted["low"], errors="coerce")
+            true_range = pd.concat([
+                high - low, (high - close.shift()).abs(),
+                (low - close.shift()).abs(),
+            ], axis=1).max(axis=1)
+            adjusted["atr"] = true_range.ewm(
+                alpha=1 / 14, adjust=False
+            ).mean().fillna(close * 0.04)
 
         recalculated = builder(adjusted).copy().reset_index(drop=True)
         if len(recalculated) != len(z):
