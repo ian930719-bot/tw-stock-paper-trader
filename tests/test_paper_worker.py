@@ -102,6 +102,11 @@ class PaperWorkerTests(unittest.TestCase):
                 ("f1","o1","2330","BUY",1000,10.0,10000.0,14.25,0.0,0.0,
                  "test",self.now.isoformat(),self.now.isoformat()),
             )
+            conn.execute(
+                "INSERT INTO adaptive_exit_state(symbol,quantity,position_version,entry_price,initial_risk,high_water,atr,atr_multiple,profile,stop_price,profit_review_triggered,updated_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                ("2330",1000,1,10.0,2.0,12.0,2.0,2.0,"atr_dynamic",8.0,0,self.now.isoformat()),
+            )
             conn.execute("UPDATE paper_account SET cash=89985.75 WHERE id=1")
         events = pd.DataFrame([{
             "symbol":"2330","effective_date":self.now.date().isoformat(),
@@ -113,6 +118,13 @@ class PaperWorkerTests(unittest.TestCase):
             result = worker._process_corporate_actions(self.now)
         self.assertEqual(result["applied"], ["worker-split"])
         self.assertEqual(worker.account.snapshot()["positions"][0]["quantity"], 2000)
+        with sqlite3.connect(self.db) as conn:
+            state = conn.execute(
+                "SELECT quantity,position_version,entry_price,initial_risk,high_water,atr,stop_price "
+                "FROM adaptive_exit_state WHERE symbol='2330'"
+            ).fetchone()
+        self.assertEqual(state[:2], (2000, 2))
+        self.assertEqual(state[2:], (5.0, 1.0, 6.0, 1.0, 4.0))
 
     def test_worker_blocks_when_past_corporate_action_was_missed(self):
         from unittest.mock import patch
