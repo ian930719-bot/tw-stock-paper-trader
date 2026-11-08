@@ -69,6 +69,18 @@ python -m py_compile app.py research_engine.py market_data.py analytics.py stock
 python -m unittest discover -s tests -v
 ```
 
+## 純瀏覽器模擬 Worker（免安裝）
+
+若使用者的電腦不能下載或安裝任何程式，可直接使用 Streamlit 網頁中的「自動交易（模擬）」分頁：
+
+- 選擇最多 5 檔監控標的，按「立即執行一輪模擬監控」可手動執行一輪。
+- 勾選「網頁開啟期間每 30 秒自動執行一輪」後，Streamlit fragment 會在目前網頁工作階段存活時定期執行。
+- 自動買進模擬委託預設關閉；只有使用者明確勾選後才會建立模擬買進委託。
+- 此模式重用 PaperWorker 的新鮮報價檢查、官方交易日曆、限價驗證、SQLite 租約、模擬撮合與風險限制。
+- 不需要在使用者電腦安裝 Docker、Python 或其他程式；依賴套件由 Streamlit Cloud 部署環境安裝。
+
+**限制：** 此模式不是 24/7 常駐服務。關閉網頁、工作階段逾時、雲端休眠、部署重啟或網路中斷時，Worker 不會持續執行。Streamlit Community Cloud 的暫存檔案系統可能在重啟或重新部署後清除 SQLite 資料；請定期使用網頁提供的帳本備份功能。免費雲端仍有資源與使用限制，不能承諾不限使用量、永久保存或不中斷服務。若需要真正持續執行，仍需自有常開設備或有額度限制的常駐主機。
+
 ## 常駐模擬交易 Worker（Docker Compose）
 
 本專案新增獨立的 paper_worker.py，不依賴 Streamlit 頁面是否開啟。Worker 與網頁服務透過同一個 Docker named volume 共用交易 SQLite 與歷史行情 SQLite；主機重啟後資料仍保留在該 volume。
