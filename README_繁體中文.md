@@ -52,6 +52,12 @@ streamlit run app.py
 - 模擬帳本目前只保存在 Streamlit 工作階段。JSON 可手動跨裝置備份／還原，但沒有雲端自動同步；匯入會覆蓋目前帳本。
 - 自動交易目前僅為模擬委託流程，尚未接入券商 API、真實委託／成交回報、停損觸發監控、撤單重送或自動賣出。SQLite 委託與行情快取都可能因 Streamlit Cloud 重啟而清除。
 
+## 官方交易日曆
+
+模擬委託介面已介接臺灣證券交易所官方開（休）市日期 JSON 日曆，辨識平日休市及僅辦理結算交割日期；週末直接視為休市。資料快取 6 小時。若官方日曆無法取得或格式錯誤，系統會停止建立模擬委託與撮合操作，不會只憑星期一至星期五就視為開市。此日曆不保證即時涵蓋臨時颱風停市或公告後突發變更，仍須核對交易所最新公告。
+
+官方來源：`https://openapi.twse.com.tw/v1/holidaySchedule/holidaySchedule`；`https://www.twse.com.tw/zh/trading/holiday.html`。
+
 ## 自動測試
 
 ```bash
