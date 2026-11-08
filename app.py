@@ -953,6 +953,7 @@ with t7:
     account_snapshot = paper_account.snapshot()
     account_positions = {p["symbol"]: int(p["quantity"]) for p in account_snapshot["positions"]}
     account_costs = {p["symbol"]: float(p["average_cost"]) for p in account_snapshot["positions"]}
+    adaptive_monitor.clear_absent_positions(account_positions.keys())
     session_now = datetime.now(TZ)
     expired_orders = engine.expire_day_orders(session_now)
     market_day_open, market_day_note = trading_day_status(session_now.date())
