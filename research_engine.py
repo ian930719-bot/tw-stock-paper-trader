@@ -14,6 +14,8 @@ STRATEGIES = [
     "趨勢結構延續",
     "量價突破",
     "動能趨勢突破",
+    "均值回歸",
+    "波動收縮突破",
 ]
 
 
@@ -32,6 +34,16 @@ def _signals(frame: pd.DataFrame) -> Dict[str, Tuple[pd.Series, pd.Series]]:
     ema50 = c.ewm(span=50, adjust=False).mean()
     ema21_up = ema21 > ema21.shift(5)
     vol_ok = z["volume"] > 1.4 * v20
+    sma20 = c.rolling(20, min_periods=20).mean()
+    std20 = c.rolling(20, min_periods=20).std(ddof=0)
+    lower_band = sma20 - 2.0 * std20
+    delta = c.diff()
+    avg_gain = delta.clip(lower=0).ewm(alpha=1/14, adjust=False, min_periods=14).mean()
+    avg_loss = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False, min_periods=14).mean()
+    rsi = 100 - 100 / (1 + avg_gain / avg_loss.replace(0, np.nan))
+    bandwidth = (4.0 * std20 / sma20.replace(0, np.nan))
+    squeeze_threshold = bandwidth.shift(1).rolling(120, min_periods=60).quantile(0.20)
+    recent_squeeze = (bandwidth.shift(1) <= squeeze_threshold).rolling(10, min_periods=1).max().fillna(0).astype(bool)
     return {
         STRATEGIES[0]: (
             (c > s50) & (s50 > s150) & (s150 > s200)
@@ -46,6 +58,18 @@ def _signals(frame: pd.DataFrame) -> Dict[str, Tuple[pd.Series, pd.Series]]:
         STRATEGIES[2]: (
             (c > h20) & (c > ema50) & ema21_up & (r20 > 0),
             (c < ema21) | (c < ema50),
+        ),
+        # Mean reversion is deliberately restricted to the long-term uptrend;
+        # the signal is observed at close and executed no earlier than next open.
+        STRATEGIES[3]: (
+            (c > s200) & (c < lower_band) & (rsi < 35),
+            (c > sma20) | (rsi > 55),
+        ),
+        # A squeeze must have occurred within the previous ten completed bars.
+        # Today's breakout is confirmed with prior-volume average and trend.
+        STRATEGIES[4]: (
+            (c > h20) & vol_ok & (c > s50) & recent_squeeze & (r20 > 0),
+            (c < ema21) | (c < s50),
         ),
     }
 
