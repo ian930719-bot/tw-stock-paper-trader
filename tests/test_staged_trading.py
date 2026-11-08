@@ -21,6 +21,10 @@ class StagedTradingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             TradingConfig(max_daily_loss=6000)
 
+    def test_invalid_liquidity_participation_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "參與率"):
+            TradingConfig(max_participation_rate=0.5)
+
     def test_live_is_locked_by_default(self):
         controller = StagedTradingController()
         self.assertEqual(controller.mode, TradingMode.PAPER)
