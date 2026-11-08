@@ -6,7 +6,7 @@ as a latest-available snapshot and must not be mixed into historical signals.
 from __future__ import annotations
 
 from typing import Dict, Mapping, Tuple
-from corporate_actions import validate_action_frame
+from corporate_actions import validate_action_frame, point_in_time_recalculate
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -184,6 +184,37 @@ def _update_exit_management(position: dict, row: pd.Series) -> None:
         )
 
 
+
+
+def _research_features(frame: pd.DataFrame, strategy: str) -> pd.DataFrame:
+    """Build causal indicators on the price/share basis known on each date."""
+    z = frame.copy().reset_index(drop=True)
+    signals = _signals(z)
+    if strategy in signals:
+        entry, exit_signal = signals[strategy]
+    else:
+        entry = pd.Series(False, index=z.index)
+        exit_signal = pd.Series(False, index=z.index)
+    close = pd.to_numeric(z["close"], errors="coerce")
+    volume = pd.to_numeric(z.get("volume", pd.Series(np.nan, index=z.index)), errors="coerce")
+    high = pd.to_numeric(z["high"], errors="coerce")
+    low = pd.to_numeric(z["low"], errors="coerce")
+    tr = pd.concat([
+        high - low,
+        (high - close.shift()).abs(),
+        (low - close.shift()).abs(),
+    ], axis=1).max(axis=1)
+    atr = tr.ewm(alpha=1 / 14, adjust=False).mean().fillna(close * 0.04)
+    adv20 = (close * volume).rolling(20, min_periods=20).mean()
+    return pd.DataFrame({
+        "_entry": entry.fillna(False).astype(bool),
+        "_exit": exit_signal.fillna(False).astype(bool),
+        "_momentum": close.pct_change(20).fillna(-999),
+        "_adv20": adv20,
+        "_structure_low": low.shift(1).rolling(10, min_periods=10).min(),
+        "_atr": atr,
+    })
+
 def shared_capital_backtest(
     frames: Mapping[str, pd.DataFrame],
     strategy: str,
@@ -231,44 +262,35 @@ def shared_capital_backtest(
                 "equity": pd.DataFrame(), "trades": pd.DataFrame(),
                 "coverage": {"symbols_requested": 0, "symbols_used": 0}}
 
+    action_lookup = {
+        str(code): validate_action_frame(events, str(code))
+        for code, events in (corporate_actions or {}).items()
+    }
     prepared = {}
     for code, raw in frames.items():
         if raw is None or raw.empty or len(raw) <= warmup + 2:
             continue
         z = raw.copy().sort_values("date").reset_index(drop=True)
+        features = point_in_time_recalculate(
+            z, action_lookup.get(str(code)),
+            lambda adjusted: _research_features(adjusted, strategy),
+        )
         if signal_overrides is not None and code in signal_overrides:
-            entry, exit_ = signal_overrides[code]
-            entry = pd.Series(entry).reset_index(drop=True)
-            exit_ = pd.Series(exit_).reset_index(drop=True)
+            entry = pd.Series(signal_overrides[code][0]).reset_index(drop=True)
+            exit_ = pd.Series(signal_overrides[code][1]).reset_index(drop=True)
             if len(entry) != len(z) or len(exit_) != len(z):
                 raise ValueError(f"{code} 的自訂訊號長度必須與歷史資料相同")
+            z["_entry"] = entry.fillna(False).to_numpy()
+            z["_exit"] = exit_.fillna(False).to_numpy()
         else:
-            sigs = _signals(z)
-            if strategy not in sigs:
+            z["_entry"] = features["_entry"].to_numpy()
+            z["_exit"] = features["_exit"].to_numpy()
+            if strategy not in STRATEGIES:
                 continue
-            entry, exit_ = sigs[strategy]
-        z["_entry"] = entry.fillna(False).to_numpy()
-        z["_exit"] = exit_.fillna(False).to_numpy()
-        z["_momentum"] = z["close"].pct_change(20).fillna(-999).to_numpy()
-        # ADV is known at the signal close (t-1) before the next-open fill (t).
-        # Never size an opening fill with the current session's eventual volume.
-        if "volume" in z:
-            z["_adv20"] = (pd.to_numeric(z["close"], errors="coerce") *
-                           pd.to_numeric(z["volume"], errors="coerce")).rolling(20, min_periods=20).mean().to_numpy()
-        else:
-            z["_adv20"] = np.nan
-        # Lowest low of the prior 10 completed bars: transparent structural-stop proxy.
-        # Structural invalidation uses only the 10 completed bars BEFORE the signal bar.
-        z["_structure_low"] = z["low"].shift(1).rolling(10, min_periods=10).min().to_numpy()
-        if "atr" in z:
-            z["_atr"] = pd.to_numeric(z["atr"], errors="coerce").fillna(z["close"] * .04).to_numpy()
-        else:
-            tr = pd.concat([
-                z["high"] - z["low"],
-                (z["high"] - z["close"].shift()).abs(),
-                (z["low"] - z["close"].shift()).abs(),
-            ], axis=1).max(axis=1)
-            z["_atr"] = tr.ewm(alpha=1/14, adjust=False).mean().fillna(z["close"] * .04).to_numpy()
+        # Recalculate indicators from each ex-date onward only. Earlier signals
+        # remain frozen, while OHLCV is expressed on the then-current share basis.
+        for column in ("_momentum", "_adv20", "_structure_low", "_atr"):
+            z[column] = features[column].to_numpy()
         prepared[code] = z
 
     if not prepared:
@@ -300,10 +322,6 @@ def shared_capital_backtest(
     fee_rate = float(fee)
     tax_rate = float(sell_tax)
     slip_rate = float(slippage)
-    action_lookup = {
-        str(code): validate_action_frame(events, str(code))
-        for code, events in (corporate_actions or {}).items()
-    }
     processed_actions = set()
     dividend_receivables = []
 
