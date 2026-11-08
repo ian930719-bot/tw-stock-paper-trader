@@ -441,6 +441,85 @@ with t2:
                         "ai_evolution_holdout_trades.csv", "text/csv",
                     )
                 st.warning("這是有限候選空間的量化搜尋原型，不是能無限制自我學習的 AI。只有樣本外結果、跨年度穩定性及紙上交易持續通過，才可考慮升級；目前不會連接券商。")
+        if st.button("執行 Walk-forward＋0050 基準比較", key="run_walkforward_benchmark", disabled=not portfolio_symbols):
+            wf_frames = {code: data[code].copy() for code in portfolio_symbols if code in data}
+            with st.spinner("執行多段樣本外驗證，並取得 0050 還原日線作基準…"):
+                wf_result = rolling_walk_forward(
+                    wf_frames, portfolio_strategy,
+                    initial_capital=float(capital),
+                    max_positions=int(portfolio_max_positions),
+                    risk_fraction=float(portfolio_risk_pct),
+                    lookback_days=756, test_days=126, step_days=126,
+                    warmup_bars=260, exit_profile=portfolio_exit[0],
+                )
+                benchmark_raw = getdata("0050", period, finmind_token)
+                benchmark_frame = benchmark_raw.copy() if benchmark_raw is not None else pd.DataFrame()
+                if not benchmark_frame.empty:
+                    benchmark_frame["date"] = pd.to_datetime(benchmark_frame["date"])
+                    benchmark_frame = benchmark_frame.sort_values("date").drop_duplicates("date")
+                    benchmark_frame = benchmark_frame[["date", "close"]].dropna()
+                benchmark_rows = []
+                if not benchmark_frame.empty and not wf_result["windows"].empty:
+                    prices = benchmark_frame.set_index("date")["close"]
+                    for _, window in wf_result["windows"].iterrows():
+                        start = pd.Timestamp(window["測試開始"])
+                        end = pd.Timestamp(window["測試結束"])
+                        prior = prices.loc[prices.index < start]
+                        finish = prices.loc[prices.index <= end]
+                        if prior.empty or finish.empty:
+                            continue
+                        base_price = float(prior.iloc[-1])
+                        end_price = float(finish.iloc[-1])
+                        benchmark_rows.append({
+                            "區段": int(window["區段"]),
+                            "測試開始": window["測試開始"],
+                            "測試結束": window["測試結束"],
+                            "0050買進持有報酬": end_price / base_price - 1.0,
+                            "策略報酬": float(window.get("總報酬", 0.0)),
+                        })
+                benchmark_comparison = pd.DataFrame(benchmark_rows)
+                st.session_state["walk_forward_result"] = wf_result
+                st.session_state["walk_forward_benchmark"] = benchmark_comparison
+                st.session_state["walk_forward_config"] = portfolio_config
+        if st.session_state.get("walk_forward_config") == portfolio_config:
+            wf = st.session_state["walk_forward_result"]
+            st.subheader("Walk-forward 多段樣本外驗證")
+            st.caption(wf.get("note", ""))
+            if wf["windows"].empty:
+                st.warning("目前歷史資料不足以形成有效的 Walk-forward 區段。")
+            else:
+                wm = wf["metrics"]
+                w1, w2, w3, w4 = st.columns(4)
+                w1.metric("鏈結樣本外總報酬", f"{wm.get('總報酬（鏈結）', 0):.1%}")
+                w2.metric("鏈結最大回撤", f"{wm.get('最大回撤（鏈結）', 0):.1%}")
+                w3.metric("鏈結 Sharpe", f"{wm.get('Sharpe（鏈結）', 0):.2f}")
+                w4.metric("樣本外區段", str(len(wf["windows"])))
+                st.dataframe(wf["windows"], use_container_width=True, hide_index=True)
+                bench = st.session_state.get("walk_forward_benchmark", pd.DataFrame())
+                if bench.empty:
+                    st.warning("0050 歷史資料未取得或日期無法對齊；本次不顯示基準比較，不能把缺資料解讀為打敗大盤。")
+                else:
+                    st.subheader("各樣本外區段：策略 vs 0050 買進持有")
+                    st.dataframe(
+                        bench.style.format({
+                            "0050買進持有報酬": "{:.1%}", "策略報酬": "{:.1%}",
+                        }),
+                        use_container_width=True, hide_index=True,
+                    )
+                    st.caption("0050 使用還原日線收盤價；每段以測試開始前最近收盤至測試結束收盤計算，未扣 ETF 買賣費用與稅負，僅作基準參考。")
+                regime = regime_performance(
+                    wf["equity"].rename(columns={"資產": "資產"}),
+                    benchmark_frame.assign(date=benchmark_frame["date"]) if not benchmark_frame.empty else pd.DataFrame(),
+                    initial_capital=float(capital),
+                ) if not benchmark_frame.empty and not wf["equity"].empty else pd.DataFrame()
+                if not regime.empty:
+                    st.subheader("依 0050 市場環境拆分")
+                    st.dataframe(regime, use_container_width=True, hide_index=True)
+                st.download_button(
+                    "下載 Walk-forward 區段報告",
+                    wf["windows"].to_csv(index=False).encode("utf-8-sig"),
+                    "walk_forward_windows.csv", "text/csv",
+                )
         if st.button("執行多股票組合回測", key="run_historical_multi_portfolio", disabled=not portfolio_symbols):
             selected_frames = {code: data[code].copy() for code in portfolio_symbols if code in data}
             with st.spinner("使用共享資金池逐日模擬所有股票…"):
