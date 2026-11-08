@@ -1751,6 +1751,15 @@ with t7:
     m2.metric("持股市值估算",f"NTD {position_value:,.0f}")
     m3.metric("帳戶資產估算",f"NTD {equity_now:,.0f}")
     m4.metric("今日已實現損益",f"NTD {daily_pnl:,.0f}")
+    ledger_check = paper_account.integrity_report()
+    if ledger_check["ok"]:
+        st.success(
+            f"帳本完整性檢查通過｜SQLite 正常｜{ledger_check['fill_count']} 筆成交已與現金及持股核對"
+        )
+    else:
+        st.error("帳本完整性檢查異常，請先停止新增模擬委託並下載備份。")
+        for issue in ledger_check["issues"]:
+            st.warning(issue)
     if account_snapshot["positions"]:
         st.dataframe(pd.DataFrame(account_snapshot["positions"]),use_container_width=True,hide_index=True)
     else:
