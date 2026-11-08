@@ -20,7 +20,8 @@ class AnalyticsTests(unittest.TestCase):
 
     def test_strategy_decay_report_flags_recent_reversal(self):
         dates = pd.bdate_range("2024-01-02", periods=140)
-        returns = np.r_[np.full(77, 0.002), np.full(63, -0.003)]
+        rng = np.random.default_rng(17)
+        returns = np.r_[rng.normal(0.005, 0.001, 77), rng.normal(-0.003, 0.001, 63)]
         curve = pd.DataFrame({
             "日期": dates,
             "資產": 100000 * np.cumprod(1 + returns),
