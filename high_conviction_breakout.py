@@ -17,7 +17,7 @@ def _features(frame: pd.DataFrame) -> pd.DataFrame:
     close = pd.to_numeric(z["close"], errors="coerce")
     high = pd.to_numeric(z["high"], errors="coerce")
     low = pd.to_numeric(z["low"], errors="coerce")
-    volume = pd.to_numeric(z["volume"], errors="coerce")
+    volume = pd.to_numeric(z["volume"], errors="coerce").astype(float)
     z["mom_126"] = close.pct_change(126)
     z["mom_63"] = close.pct_change(63)
     z["sma_50"] = close.rolling(50, min_periods=50).mean()
