@@ -8,10 +8,15 @@ limits without an authoritative daily reference price.
 from decimal import Decimal, InvalidOperation
 
 
-def stock_tick_size(price) -> Decimal:
+def stock_tick_size(price, instrument_type: str = "stock") -> Decimal:
     value = Decimal(str(price))
     if not value.is_finite() or value <= 0:
         raise ValueError("價格必須是有限正數")
+    kind = str(instrument_type).lower()
+    if kind == "etf":
+        return Decimal("0.01") if value < 50 else Decimal("0.05")
+    if kind != "stock":
+        raise ValueError("不支援的證券類型")
     if value < 5:
         return Decimal("0.01")
     if value < 50:
@@ -25,10 +30,10 @@ def stock_tick_size(price) -> Decimal:
     return Decimal("5.00")
 
 
-def is_valid_stock_tick(price) -> bool:
+def is_valid_stock_tick(price, instrument_type: str = "stock") -> bool:
     try:
         value = Decimal(str(price))
-        tick = stock_tick_size(value)
+        tick = stock_tick_size(value, instrument_type)
         return value % tick == 0
     except (InvalidOperation, ValueError, TypeError):
         return False
