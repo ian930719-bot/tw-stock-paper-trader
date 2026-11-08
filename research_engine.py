@@ -197,6 +197,7 @@ def shared_capital_backtest(
     trading_start_date=None,
     exit_profile: str = "baseline_atr2",
     signal_overrides: Mapping[str, Tuple[pd.Series, pd.Series]] | None = None,
+    max_participation_rate: float = 0.01,
 ) -> dict:
     """Multi-symbol portfolio simulation with one shared cash balance.
 
@@ -220,6 +221,8 @@ def shared_capital_backtest(
         raise ValueError("risk_fraction must be between 0 and 0.10")
     if any(not np.isfinite(float(v)) or float(v) < 0 for v in (fee, sell_tax, slippage)):
         raise ValueError("fee, sell_tax and slippage must be finite non-negative rates")
+    if not np.isfinite(max_participation_rate) or not 0 < max_participation_rate <= 0.10:
+        raise ValueError("max_participation_rate 必須介於 0 與 10%")
 
     if not frames:
         return {"metrics": performance(pd.Series(dtype=float), initial_capital),
@@ -245,6 +248,13 @@ def shared_capital_backtest(
         z["_entry"] = entry.fillna(False).to_numpy()
         z["_exit"] = exit_.fillna(False).to_numpy()
         z["_momentum"] = z["close"].pct_change(20).fillna(-999).to_numpy()
+        # ADV is known at the signal close (t-1) before the next-open fill (t).
+        # Never size an opening fill with the current session's eventual volume.
+        if "volume" in z:
+            z["_adv20"] = (pd.to_numeric(z["close"], errors="coerce") *
+                           pd.to_numeric(z["volume"], errors="coerce")).rolling(20, min_periods=20).mean().to_numpy()
+        else:
+            z["_adv20"] = np.nan
         # Lowest low of the prior 10 completed bars: transparent structural-stop proxy.
         # Structural invalidation uses only the 10 completed bars BEFORE the signal bar.
         z["_structure_low"] = z["low"].shift(1).rolling(10, min_periods=10).min().to_numpy()
@@ -322,6 +332,7 @@ def shared_capital_backtest(
                     "出場原因": "策略出場" if prior_exit else "停損／移動停損",
                     "曾觸發獲利檢視": bool(p.get("profit_review_triggered", False)),
                     "最高風險倍數": round((p.get("high_water", p["entry_price"]) - p["entry_price"]) / max(p.get("initial_risk", 0.01), 0.01), 2),
+                    "估計ADV20參與率": (p["shares"] * p["entry_price"] / p["adv20"]) if p.get("adv20", 0) else np.nan,
                 })
                 cash += proceeds
                 del positions[code]
@@ -385,7 +396,10 @@ def shared_capital_backtest(
                 shares_by_risk = int(risk_budget / max(open_px - stop, 0.01))
                 shares_by_cash = int(cash / (open_px * (1.0 + fee_rate)))
                 shares_by_alloc = int(allocation / (open_px * (1.0 + fee_rate)))
-                shares = max(0, min(shares_by_risk, shares_by_cash, shares_by_alloc))
+                adv20 = float(signal_row["_adv20"])
+                shares_by_liquidity = (int(max(0.0, adv20) * max_participation_rate / open_px)
+                                       if np.isfinite(adv20) and adv20 > 0 else 0)
+                shares = max(0, min(shares_by_risk, shares_by_cash, shares_by_alloc, shares_by_liquidity))
                 if shares <= 0:
                     continue
                 entry_cost = shares * open_px * (1.0 + fee_rate)
@@ -405,6 +419,7 @@ def shared_capital_backtest(
                     "high_water": open_px, "atr": atr,
                     "management": management, "trail_multiple": trail_multiple,
                     "profit_review_triggered": False, "exit_next": False,
+                    "adv20": adv20, "max_participation_rate": max_participation_rate,
                 }
                 # If the stop is touched later on the entry day, simulate the
                 # stop fill rather than waiting until the following session.
@@ -420,6 +435,7 @@ def shared_capital_backtest(
                         "損益": pnl, "報酬率": pnl / entry_cost if entry_cost else 0.0,
                         "出場原因": "進場日觸及初始停損",
                         "曾觸發獲利檢視": False, "最高風險倍數": 0.0,
+                        "估計ADV20參與率": (shares * open_px / adv20) if adv20 > 0 else np.nan,
                     })
                     cash += proceeds
                     del positions[code]
