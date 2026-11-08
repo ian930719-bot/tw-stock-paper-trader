@@ -260,7 +260,7 @@ class PaperAccount:
                 applied.append(str(event.event_id))
 
             due = conn.execute(
-                "SELECT event_id,cash_amount FROM paper_corporate_actions "
+                "SELECT event_id,cash_amount,payment_date FROM paper_corporate_actions "
                 "WHERE action_type='cash_dividend' AND cash_amount>0 AND paid_at IS NULL "
                 "AND payment_date IS NOT NULL AND payment_date<=?",
                 (action_day,),
@@ -270,7 +270,16 @@ class PaperAccount:
                 conn.execute("UPDATE paper_account SET cash=cash+? WHERE id=1", (total_paid,))
                 conn.executemany(
                     "UPDATE paper_corporate_actions SET paid_at=? WHERE event_id=?",
-                    [(stamp, row[0]) for row in due],
+                    [
+                        (
+                            max(
+                                datetime.fromisoformat(stamp),
+                                datetime.fromisoformat(str(row[2]) + "T00:00:00+08:00"),
+                            ).isoformat(),
+                            row[0],
+                        )
+                        for row in due
+                    ],
                 )
                 paid = [row[0] for row in due]
             conn.commit()
