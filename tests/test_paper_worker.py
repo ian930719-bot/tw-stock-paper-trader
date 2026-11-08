@@ -9,7 +9,7 @@ import pandas as pd
 from execution_engine import TZ
 from paper_worker import (
     PaperWorker, calculate_atr, completed_daily_bars, parse_watchlist,
-    quote_is_fresh, rank_entry_candidates, round_price_down,
+    quote_is_fresh, rank_entry_candidates, round_price_down, max_shares_for_participation,
 )
 
 
@@ -57,6 +57,22 @@ class PaperWorkerTests(unittest.TestCase):
         result = completed_daily_bars(frame, self.now.date())
         self.assertEqual(len(result), 1)
         self.assertEqual(result.iloc[-1]["date"].date().isoformat(), "2026-11-06")
+
+    def test_order_size_respects_prior_completed_average_turnover(self):
+        frame = pd.DataFrame({
+            "close": np.full(20, 100.0),
+            "volume": np.full(20, 1000),
+        })
+        self.assertEqual(max_shares_for_participation(frame, 100.0, 0.01), 10)
+        self.assertEqual(max_shares_for_participation(frame.iloc[:19], 100.0, 0.01), 0)
+        self.assertEqual(max_shares_for_participation(frame, 100.0, 0.02), 20)
+
+    def test_invalid_participation_rate_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "參與率"):
+            max_shares_for_participation(
+                pd.DataFrame({"close": [10] * 20, "volume": [1000] * 20}),
+                10, 0.5,
+            )
 
     def test_atr_uses_true_range(self):
         frame = pd.DataFrame({
