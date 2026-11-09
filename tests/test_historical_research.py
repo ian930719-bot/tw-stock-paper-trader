@@ -1,10 +1,12 @@
 """Tests for historical data audit and factor research."""
 import unittest
+import tempfile
+from pathlib import Path
 import numpy as np
 import pandas as pd
 
 from historical_research import (
-    audit_historical_panel, build_factor_panel, evaluate_factor_panel,
+    audit_historical_panel, build_factor_panel, evaluate_factor_panel, run_research,
 )
 
 
@@ -66,6 +68,20 @@ class HistoricalResearchTests(unittest.TestCase):
             a.loc[:199, cols].reset_index(drop=True),
             b.loc[:199, cols].reset_index(drop=True),
         )
+
+    def test_research_runner_reads_collector_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "download"
+            bars = root / "bars"
+            bars.mkdir(parents=True)
+            sample_panel(n=260, symbols=tuple(f"{i:04d}" for i in range(10))).to_csv(
+                bars / "fixture.csv", index=False
+            )
+            output = Path(tmp) / "artifacts"
+            summary = run_research(str(root), str(output), price_basis="raw")
+            self.assertEqual(summary["symbols"], 10)
+            self.assertTrue((output / "data_audit_summary.json").exists())
+            self.assertTrue((output / "factor_research_results.csv").exists())
 
     def test_factor_evaluation_returns_registry_without_auto_selecting(self):
         panel = build_factor_panel(sample_panel(n=300, symbols=tuple(f"{i:04d}" for i in range(10))))
