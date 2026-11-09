@@ -109,3 +109,30 @@ The paper-account area also offers a consistent SQLite snapshot download contain
 ## Point-in-time security-universe snapshots and survivorship bias
 
 After a successful FinMind TaiwanStockInfo fetch, the app stores the first observed listed/OTC security universe of each Taiwan calendar day as an immutable SQLite snapshot alongside market history. `universe_history.load_universe_as_of(as_of)` only returns a snapshot actually captured by the requested instant. If no earlier snapshot exists, it returns an explicit unavailable status rather than substituting today's surviving listings. Continuous capture can preserve future listing, transfer, and delisting changes, but it cannot reconstruct delisted securities or historical index constituents from before the first captured snapshot. Earlier backtests must therefore continue to disclose survivorship-bias limitations. SQLite persistence still depends on the deployment disk; Streamlit Community Cloud temporary storage can be cleared on restart or redeploy.
+
+
+## Historical data-first factor research (research branch)
+
+A research-only command is available in `historical_research.py`. It audits an OHLCV panel and computes a broad, auditable set of momentum, reversal, trend, breakout, volume, volatility, gap/range and relative-strength factors. Signals are formed from completed closes; forward outcomes assume entry at the next session open.
+
+Prepare a CSV with columns:
+
+```text
+symbol,date,open,high,low,close,volume
+2330,2020-01-02,....
+```
+
+Optional `turnover` is used for turnover-shock features. Example:
+
+```bash
+python historical_research.py --input data/taiwan_daily_raw.csv --output artifacts/historical_research --split-date 2024-01-01 --source "FinMind TaiwanStockPrice" --price-basis raw
+```
+
+Outputs: `data_coverage.csv`, `data_audit_summary.json`, `historical_factor_panel.csv`, `factor_research_results.csv`, and `hypothesis_registry.csv`.
+
+Important limitations:
+- This command does not download the whole Taiwan market. The panel must be acquired and archived separately; use official exchange sources where available and reconcile vendor feeds.
+- `--point-in-time-universe` and `--delisted-coverage` are explicit evidence assertions, not switches that create missing data. Only pass them when the supplied panel's provenance proves the coverage.
+- A current security master or 0050 constituent snapshot is not historical membership. Without verified point-in-time constituents and delisted securities, the audit intentionally remains research-grade-ineligible.
+- Factor IC and top-minus-bottom spreads are descriptive screens, not net strategy returns. They do not include transaction costs, portfolio constraints, capacity, or multiple-testing correction; candidates must proceed to nested walk-forward and blind forward paper tests.
+- Never pass retrospectively adjusted prices as executable raw fills without a separately validated corporate-action treatment.
