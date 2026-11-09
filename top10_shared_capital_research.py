@@ -35,7 +35,7 @@ MAX_POSITION_WEIGHT = 0.20
 MAX_ADV_PARTICIPATION = 0.01
 INITIAL_STOP_ATR = 3.0
 TRAIL_ATR = 3.5
-STRATEGIES = ["KD_low", "Oversold3", "Trend_RSI", "TrendBreakout", "SqueezeBreakout", "TrendPullback"]
+STRATEGIES = ["KD_low", "Oversold3", "Trend_RSI", "TrendBreakout", "SqueezeBreakout", "TrendPullback", "KD_low_Breadth50", "KD_low_Breadth70", "Oversold3_Breadth50", "Trend_RSI_Breadth50", "TrendBreakout_Breadth50", "TrendBreakout_Breadth70", "SqueezeBreakout_Breadth50"]
 EXIT_MODES = ["fixed_20", "fixed_40", "fixed_60"]
 
 
@@ -134,7 +134,33 @@ def load_adjusted_frames(input_dir: str | Path) -> tuple[dict[str, pd.DataFrame]
         d["symbol"] = symbol
         d["name"] = NAMES[symbol]
         frames[symbol] = prepare_bars(d)
+    apply_universe_breadth(frames)
     return frames, manifest
+
+
+def apply_universe_breadth(frames: dict[str, pd.DataFrame], min_symbols: int = 8) -> dict[str, pd.DataFrame]:
+    """Add same-close cross-sectional breadth filters; no future bars are used."""
+    above = {}
+    for symbol, frame in frames.items():
+        series = (frame.close > frame.sma200).where(frame.sma200.notna())
+        above[symbol] = pd.Series(series.to_numpy(), index=pd.to_datetime(frame.date))
+    panel = pd.DataFrame(above).sort_index()
+    count = panel.notna().sum(axis=1)
+    breadth = panel.mean(axis=1).where(count >= min_symbols)
+    for symbol, frame in frames.items():
+        d = frame.copy()
+        d["universe_breadth"] = pd.to_datetime(d.date).map(breadth)
+        b50 = d.universe_breadth >= .50
+        b70 = d.universe_breadth >= .70
+        d["sig_KD_low_Breadth50"] = (d.sig_KD_low & b50).fillna(False)
+        d["sig_KD_low_Breadth70"] = (d.sig_KD_low & b70).fillna(False)
+        d["sig_Oversold3_Breadth50"] = (d.sig_Oversold3 & b50).fillna(False)
+        d["sig_Trend_RSI_Breadth50"] = (d.sig_Trend_RSI & b50).fillna(False)
+        d["sig_TrendBreakout_Breadth50"] = (d.sig_TrendBreakout & b50).fillna(False)
+        d["sig_TrendBreakout_Breadth70"] = (d.sig_TrendBreakout & b70).fillna(False)
+        d["sig_SqueezeBreakout_Breadth50"] = (d.sig_SqueezeBreakout & b50).fillna(False)
+        frames[symbol] = d
+    return frames
 
 
 def _trade_cost_return(entry: float, exit_: float) -> float:
