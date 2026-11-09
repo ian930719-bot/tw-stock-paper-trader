@@ -57,6 +57,16 @@ class HistoricalResearchTests(unittest.TestCase):
         self.assertIn("breakout_55", result.columns)
         self.assertIn("volatility_compression", result.columns)
 
+    def test_factor_panel_drops_invalid_and_duplicate_bars_and_keeps_warmup_nulls(self):
+        panel = sample_panel(n=260, symbols=("2330",))
+        panel.loc[10, "high"] = panel.loc[10, "low"] - 1
+        panel = pd.concat([panel, panel.iloc[[20]]], ignore_index=True)
+        result = build_factor_panel(panel)
+        self.assertEqual(len(result), 259)
+        self.assertTrue(pd.isna(result.loc[0, "breakout_20"]))
+        self.assertTrue(pd.isna(result.loc[0, "trend_stack"]))
+        self.assertTrue(pd.isna(result.loc[100, "breakout_55"]))
+
     def test_factor_panel_is_causal(self):
         original = sample_panel(n=260, symbols=("2330",))
         changed = original.copy()
