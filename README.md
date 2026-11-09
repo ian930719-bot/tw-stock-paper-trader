@@ -123,7 +123,7 @@ python historical_data_collector.py --output data/taiwan_history --start-date 20
 
 Set `FINMIND_TOKEN` in the environment to use the higher documented request allowance. The collector writes one CSV per symbol, a candidate symbol list, source snapshots, and a SHA-256 manifest. It resumes by skipping already-downloaded symbol files. The API request allowance is rate-limited (documented as 300/hour without a token and 600/hour with a token), so a full-market pull can take hours and may need multiple resumable runs. The collector does not claim full historical point-in-time constituents or verified delisted-price coverage.
 
-Prepare a CSV with columns:
+Alternatively, pass a single combined CSV. The research runner can read the collector output directory directly and merge its per-symbol CSVs. For custom input, prepare a CSV with columns:
 
 ```text
 symbol,date,open,high,low,close,volume
@@ -133,7 +133,7 @@ symbol,date,open,high,low,close,volume
 Optional `turnover` is used for turnover-shock features. Example:
 
 ```bash
-python historical_research.py --input data/taiwan_daily_raw.csv --output artifacts/historical_research --split-date 2024-01-01 --source "FinMind TaiwanStockPrice" --price-basis raw
+python historical_research.py --input data/taiwan_history --output artifacts/historical_research --split-date 2024-01-01 --source "FinMind TaiwanStockPrice" --price-basis raw
 ```
 
 Outputs: `data_coverage.csv`, `data_audit_summary.json`, `historical_factor_panel.csv`, `factor_research_results.csv`, and `hypothesis_registry.csv`.
