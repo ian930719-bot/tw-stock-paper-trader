@@ -8,6 +8,16 @@ on:
       - tests/test_collect_top10_adjusted_prices.py
       - .github/workflows/top10-adjusted-price.yml
   workflow_dispatch:
+    inputs:
+      provider:
+        description: "auto = FinMind first, Yahoo fallback; yahoo = force Yahoo; finmind = require token"
+        required: true
+        default: "auto"
+        type: choice
+        options:
+          - auto
+          - yahoo
+          - finmind
 
 permissions:
   contents: read
@@ -19,7 +29,7 @@ concurrency:
 jobs:
   collect-and-validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,13 +40,17 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
       - run: pip install -r requirements.txt
-      - name: Unit tests
+      - name: Unit tests for adjustment providers and fallback
         run: python -m unittest tests.test_collect_top10_adjusted_prices -v
-      - name: Collect official adjusted OHLCV for the ten stocks
+      - name: Collect adjusted OHLCV (FinMind first, Yahoo fallback)
         env:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+          PRICE_PROVIDER: ${{ inputs.provider || 'auto' }}
         run: |
-          python collect_top10_adjusted_prices.py --output data/top10_adjusted --start-date 2010-01-04
+          python collect_top10_adjusted_prices.py \
+            --output data/top10_adjusted \
+            --start-date 2010-01-04 \
+            --provider "$PRICE_PROVIDER"
           python - <<'PY'
           import json
           from pathlib import Path
@@ -44,7 +58,10 @@ jobs:
           assert m["collection_complete"], "Adjusted price collection incomplete"
           assert m["symbols_collected"] == 10, "Expected exactly ten stocks"
           assert all(x["rows"] > 1000 for x in m["status_rows"]), "Unexpectedly short price history"
+          assert all(x.get("provider") for x in m["status_rows"]), "Provider provenance missing"
           print(json.dumps({k:v for k,v in m.items() if k != "status_rows"}, ensure_ascii=False, indent=2))
+          for row in m["status_rows"]:
+              print(f'{row["symbol"]} {row["name"]}: {row["rows"]} bars; {row["first_date"]}..{row["last_date"]}; {row["provider"]}')
           PY
       - name: Upload adjusted price data and provenance
         uses: actions/upload-artifact@v4
