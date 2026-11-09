@@ -214,7 +214,7 @@ def evaluate_factor_panel(panel: pd.DataFrame, *, split_date: str | None = None)
 
 def run_research(input_csv: str, output_dir: str, *, split_date: str | None = None,
                  source: str = "user-supplied CSV", price_basis: str = "unknown",
-                 point_in_time_universe: bool = False, delisted_coverage: bool = False) -> dict:
+                 point_in_time_universe: bool = False, delisted_coverage: bool = False,\n                 corporate_actions_reconciled: bool = False, trading_calendar_verified: bool = False) -> dict:
     raw = pd.read_csv(input_csv)
     audit, summary = audit_historical_panel(
         raw, source=source, price_basis=price_basis,
