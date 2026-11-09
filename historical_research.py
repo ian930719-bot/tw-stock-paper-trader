@@ -36,6 +36,16 @@ def normalize_panel(frame: pd.DataFrame) -> pd.DataFrame:
         if col in z.columns:
             z[col] = pd.to_numeric(z[col], errors="coerce")
     z = z.dropna(subset=["symbol", "date", "open", "high", "low", "close", "volume"])
+    valid_price = (z[["open", "high", "low", "close"]] > 0).all(axis=1)
+    valid_volume = z["volume"] >= 0
+    valid_ohlc = (
+        (z["high"] >= z[["open", "close", "low"]].max(axis=1))
+        & (z["low"] <= z[["open", "close", "high"]].min(axis=1))
+    )
+    z = z.loc[valid_price & valid_volume & valid_ohlc]
+    # A symbol/date must have one deterministic observation before rolling
+    # features or forward labels are calculated.
+    z = z.drop_duplicates(["symbol", "date"], keep="last")
     return z.sort_values(["symbol", "date"], kind="mergesort").reset_index(drop=True)
 
 
@@ -148,14 +158,16 @@ def build_factor_panel(frame: pd.DataFrame, benchmark: pd.Series | None = None) 
             sma = close.rolling(n, min_periods=n).mean()
             g[f"distance_sma_{n}"] = close / sma - 1
         g["sma50_slope_20"] = close.rolling(50, min_periods=50).mean().pct_change(20)
+        sma50 = close.rolling(50, min_periods=50).mean()
+        sma100 = close.rolling(100, min_periods=100).mean()
+        sma200 = close.rolling(200, min_periods=200).mean()
+        trend_valid = sma200.notna()
         g["trend_stack"] = (
-            (close > close.rolling(50, min_periods=50).mean())
-            & (close.rolling(50, min_periods=50).mean() > close.rolling(100, min_periods=100).mean())
-            & (close.rolling(100, min_periods=100).mean() > close.rolling(200, min_periods=200).mean())
-        ).astype(float)
+            (close > sma50) & (sma50 > sma100) & (sma100 > sma200)
+        ).astype(float).where(trend_valid)
         for n in (20, 55):
             prior_high = high.shift(1).rolling(n, min_periods=n).max()
-            g[f"breakout_{n}"] = (close > prior_high).astype(float)
+            g[f"breakout_{n}"] = (close > prior_high).astype(float).where(prior_high.notna())
             g[f"distance_high_{n}"] = close / prior_high - 1
         avg_vol = volume.shift(1).rolling(20, min_periods=20).mean()
         g["relative_volume_20"] = volume / avg_vol.replace(0, np.nan)
