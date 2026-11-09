@@ -6,6 +6,8 @@ on:
     paths:
       - .github/run-historical-smoke
       - historical_data_collector.py
+      - corporate_action_adjustments.py
+      - streaming_factor_research.py
   workflow_dispatch:
     inputs:
       start_date:
@@ -79,11 +81,13 @@ jobs:
             --output data/taiwan_history \
             --start-date "$START_DATE" \
             --max-runtime-minutes 45 \
+            --collect-corporate-actions \
             "${LIMIT_ARGS[@]}"
           python - <<'PY' >> "$GITHUB_OUTPUT"
           import json
           m=json.load(open("data/taiwan_history/download_manifest.json", encoding="utf-8"))
           print(f"collection_complete={str(m.get('collection_complete', False)).lower()}")
+          print(f"corporate_actions_complete={str(m.get('corporate_actions_complete', False)).lower()}")
           print(f"remaining_symbols={m.get('remaining_symbols', 0)}")
           print(f"completed_symbols={m.get('completed_symbols', 0)}")
           PY
@@ -94,7 +98,7 @@ jobs:
           path: data/taiwan_history/
           key: taiwan-history-${{ github.ref_name }}-${{ github.run_id }}
       - name: Run exploratory factor research after full collection
-        if: steps.collect.outcome == 'success' && steps.collect.outputs.collection_complete == 'true'
+        if: steps.collect.outcome == 'success' && steps.collect.outputs.collection_complete == 'true' && steps.collect.outputs.corporate_actions_complete == 'true'
         run: |
           python streaming_factor_research.py \
             --input data/taiwan_history \
@@ -111,7 +115,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
       - name: Dispatch next resumable batch
-        if: steps.collect.outcome == 'success' && steps.collect.outputs.collection_complete != 'true'
+        if: steps.collect.outcome == 'success' && (steps.collect.outputs.collection_complete != 'true' || steps.collect.outputs.corporate_actions_complete != 'true')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_REF: ${{ github.ref_name }}
