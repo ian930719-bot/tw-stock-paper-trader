@@ -14,6 +14,19 @@ Target: investigate whether a robust, executable Taiwan-equity strategy can appr
 7. Never use future data to fill missing bars or corporate actions. Missing or suspicious records are excluded or flagged with a reproducible reason.
 8. Do not optimize solely for CAGR. Report drawdown, volatility, Sharpe/Sortino, Calmar, profit factor, expectancy, turnover, exposure, capacity, trade concentration, tail losses, and year/regime/sector dispersion.
 
+
+## Stage 0: historical-data-first research (must precede strategy mining)
+
+Do not begin large-scale factor mining until the historical dataset has passed a reproducible audit. The first research deliverable is a data dossier, not a strategy leaderboard.
+
+1. Inventory available raw daily OHLCV, turnover, trading calendar, security master, listing/delisting dates, suspensions, price limits, corporate actions, dividends, historical industry classifications, and point-in-time index constituents. Record source, license/access method, earliest/latest date, symbol count, row count, update timestamp, and missingness.
+2. Prefer exchange/regulator primary sources for Taiwan listed and OTC data. Treat vendor feeds as convenience mirrors until reconciled against official samples. Record whether delisted securities remain queryable and whether historical identifiers can be mapped across ticker changes.
+3. Build a reproducible sample spanning large/small caps, liquid/illiquid names, listed/OTC, currently listed/delisted, corporate-action dates, suspensions, and limit-up/down days. Compare raw OHLCV and action records with exchange publications.
+4. Validate price/volume units, duplicate dates, impossible OHLC relationships, zero-volume sessions, missing trading sessions against the official calendar, stale prices, adjusted-vs-unadjusted semantics, dividend/split handling, and timezone/date conventions.
+5. Quantify universe coverage by year and market. Publish explicit exclusions and unresolved gaps. A current constituent snapshot, a current security master, or a vendor's adjusted history must never silently stand in for historical point-in-time membership.
+6. Only after the audit, create a frozen research panel and data manifest with source version, retrieval timestamp, raw-file hashes, transformation code SHA, and per-symbol coverage. Strategy experiments must reference this manifest.
+7. If historical delisted coverage, point-in-time constituents, or action reconciliation is insufficient, limit conclusions to exploratory research and do not label results research-grade. Do not fill gaps with fabricated data.
+
 ## Research design
 
 ### A. Data and universe
