@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: sector-rotation-research-\${{ github.ref_name }}
+  group: sector-rotation-research-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -33,9 +33,9 @@ jobs:
         id: history-cache
         with:
           path: data/taiwan_history/
-          key: sector-rotation-\${{ github.ref_name }}-\${{ github.run_id }}
+          key: sector-rotation-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
-            taiwan-history-\${{ github.ref_name }}-
+            taiwan-history-${{ github.ref_name }}-
       - name: Verify historical data cache
         run: |
           test -s data/taiwan_history/candidate_symbols.csv
@@ -68,7 +68,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: sector-rotation-results-\${{ github.run_id }}
+          name: sector-rotation-results-${{ github.run_id }}
           path: artifacts/sector_rotation/
           if-no-files-found: warn
           retention-days: 30
