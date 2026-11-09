@@ -63,6 +63,43 @@ def discover_symbols(start_date: str, end_date: str | None = None, *,
     return current, delisted
 
 
+def build_candidate_universe(current: pd.DataFrame, delisted: pd.DataFrame) -> pd.DataFrame:
+    """Build a stock-only candidate list, excluding ETFs, bonds and warrants.
+
+    Current common equities are prioritized for bounded smoke tests. Historical
+    delisting notices add likely delisted common shares, but do not establish
+    full historical listing or point-in-time universe coverage.
+    """
+    id_pattern = r"^[1-9][0-9]{3}(?:-[A-Z]+)?$"
+    current = current.copy()
+    if "stock_name" not in current:
+        current["stock_name"] = ""
+    industry = current.get("industry_category", pd.Series("", index=current.index)).astype(str)
+    current_equities = current[
+        current["stock_id"].astype(str).str.fullmatch(id_pattern, na=False)
+        & ~industry.str.contains(
+            r"ETF|指數股票型基金|債|受益證券|權證|認購|認售|牛熊", case=False, regex=True
+        )
+    ][["stock_id", "stock_name"]].copy()
+    current_equities["candidate_source"] = "current_common_equity"
+    current_equities["delisting_date"] = ""
+
+    delisted_equities = pd.DataFrame(columns=["stock_id", "stock_name", "candidate_source", "delisting_date"])
+    if not delisted.empty and "stock_id" in delisted:
+        old = delisted.copy()
+        if "stock_name" not in old:
+            old["stock_name"] = ""
+        old["stock_id"] = old["stock_id"].astype(str).str.strip()
+        old = old[old["stock_id"].str.fullmatch(id_pattern, na=False)]
+        delisted_equities = old[["stock_id", "stock_name"]].copy()
+        delisted_equities["candidate_source"] = "delisted_common_equity_candidate"
+        delisted_equities["delisting_date"] = old["date"].astype(str) if "date" in old else ""
+
+    candidates = pd.concat([current_equities, delisted_equities], ignore_index=True)
+    candidates = candidates.drop_duplicates("stock_id", keep="first")
+    return candidates.sort_values(["candidate_source", "stock_id"]).reset_index(drop=True)
+
+
 def _normalize_bars(rows: list[dict], symbol: str) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame(columns=["symbol", "date", "open", "high", "low", "close", "volume", "turnover"])
@@ -104,31 +141,7 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
     bars_dir = out / "bars"
     bars_dir.mkdir(parents=True, exist_ok=True)
     current, delisted = discover_symbols(start_date, end_date, token=api_token)
-    # Keep the stock-selection research universe focused on common shares.
-    # The security master also contains ETFs, bonds, warrants, and other products;
-    # blindly sorting stock_id puts 00xxx ETFs first and contaminates small smoke tests.
-    current_equities = current[
-        current["stock_id"].str.fullmatch(r"[1-9]\\d{3}(?:-[A-Z]+)?", na=False)
-        & ~current.get("industry_category", pd.Series("", index=current.index)).astype(str).str.contains(
-            r"ETF|指數股票型基金|債|受益證券|權證|認購|認售|牛熊", case=False, regex=True
-        )
-    ].copy()
-    current_equities["candidate_source"] = "current_common_equity"
-    current_equities["delisting_date"] = ""
-    delisted_equities = pd.DataFrame(columns=["stock_id", "stock_name", "candidate_source", "delisting_date"])
-    if not delisted.empty and "stock_id" in delisted:
-        delisted_equities = delisted.copy()
-        delisted_equities["stock_id"] = delisted_equities["stock_id"].astype(str).str.strip()
-        delisted_equities = delisted_equities[
-            delisted_equities["stock_id"].str.fullmatch(r"[1-9]\\d{3}(?:-[A-Z]+)?", na=False)
-        ].copy()
-        delisted_equities["candidate_source"] = "delisted_common_equity_candidate"
-        delisted_equities["delisting_date"] = delisted_equities.get("date", "")
-    candidate_meta = pd.concat([
-        current_equities[["stock_id", "stock_name", "candidate_source", "delisting_date"]],
-        delisted_equities[["stock_id", "stock_name", "candidate_source", "delisting_date"]],
-    ], ignore_index=True).drop_duplicates("stock_id", keep="first")
-    candidate_meta = candidate_meta.sort_values(["candidate_source", "stock_id"]).reset_index(drop=True)
+    candidate_meta = build_candidate_universe(current, delisted)
     symbols = candidate_meta["stock_id"].astype(str).tolist()
     if max_symbols is not None:
         symbols = symbols[:max(0, int(max_symbols))]
