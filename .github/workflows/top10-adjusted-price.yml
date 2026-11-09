@@ -6,6 +6,9 @@ on:
     paths:
       - collect_top10_adjusted_prices.py
       - tests/test_collect_top10_adjusted_prices.py
+      - top10_shared_capital_research.py
+      - tests/test_top10_shared_capital_research.py
+      - research_engine.py
       - .github/workflows/top10-adjusted-price.yml
   workflow_dispatch:
     inputs:
@@ -29,7 +32,7 @@ concurrency:
 jobs:
   collect-and-validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -40,12 +43,14 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
       - run: pip install -r requirements.txt
-      - name: Unit tests for adjustment providers and fallback
-        run: python -m unittest tests.test_collect_top10_adjusted_prices -v
+      - name: Unit tests for adjusted prices and portfolio research
+        run: |
+          python -m unittest tests.test_collect_top10_adjusted_prices -v
+          python -m unittest tests.test_top10_shared_capital_research -v
       - name: Collect adjusted OHLCV (FinMind first, Yahoo fallback)
         env:
-          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
-          PRICE_PROVIDER: ${{ inputs.provider || 'auto' }}
+          FINMIND_TOKEN: \${{ secrets.FINMIND_TOKEN }}
+          PRICE_PROVIDER: \${{ inputs.provider || 'auto' }}
         run: |
           python collect_top10_adjusted_prices.py \
             --output data/top10_adjusted \
@@ -63,10 +68,31 @@ jobs:
           for row in m["status_rows"]:
               print(f'{row["symbol"]} {row["name"]}: {row["rows"]} bars; {row["first_date"]}..{row["last_date"]}; {row["provider"]}')
           PY
+      - name: Run non-overlapping shared-capital walk-forward validation
+        run: |
+          python top10_shared_capital_research.py \
+            --input data/top10_adjusted \
+            --output artifacts/top10_shared_capital_research
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("artifacts/top10_shared_capital_research/research_report.json").read_text(encoding="utf-8"))
+          assert report["validation_selected"] is not None, "No validation strategy met minimum sample size"
+          assert report["locked_configuration_test_result"] is not None, "Locked configuration missing OOS test result"
+          assert report["equal_weight_buy_hold_benchmark"], "Benchmark metrics missing"
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          PY
       - name: Upload adjusted price data and provenance
         uses: actions/upload-artifact@v4
         with:
           name: top10-adjusted-prices
           path: data/top10_adjusted/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload shared-capital research outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: top10-shared-capital-walkforward
+          path: artifacts/top10_shared_capital_research/
           if-no-files-found: error
           retention-days: 30
