@@ -8,6 +8,8 @@ on:
       - tests/test_collect_top10_adjusted_prices.py
       - top10_shared_capital_research.py
       - tests/test_top10_shared_capital_research.py
+      - swing_turning_point_research.py
+      - tests/test_swing_turning_point_research.py
       - research_engine.py
       - .github/workflows/top10-adjusted-price.yml
   workflow_dispatch:
@@ -47,6 +49,7 @@ jobs:
         run: |
           python -m unittest tests.test_collect_top10_adjusted_prices -v
           python -m unittest tests.test_top10_shared_capital_research -v
+          python -m unittest tests.test_swing_turning_point_research -v
       - name: Collect adjusted OHLCV (FinMind first, Yahoo fallback)
         env:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
@@ -82,6 +85,35 @@ jobs:
           assert report["equal_weight_buy_hold_benchmark"], "Benchmark metrics missing"
           print(json.dumps(report, ensure_ascii=False, indent=2))
           PY
+      - name: Run causal swing turning-point model and blind OOS portfolio
+        run: |
+          python swing_turning_point_research.py \
+            --input data/top10_adjusted \
+            --output artifacts/swing_turning_point
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("artifacts/swing_turning_point/swing_turning_point_report.json").read_text(encoding="utf-8"))
+          assert report["validation_selected_config"]["hold_bars"] > 0
+          assert report["test_locked_portfolio"]["trades"] >= 10
+          assert report["low_point_model"]["test_auc"] > 0.50
+          print(json.dumps({
+              "data_last_date": report["data_last_date"],
+              "validation_selected_config": report["validation_selected_config"],
+              "validation_portfolio": report["validation_portfolio"],
+              "test_locked_portfolio": report["test_locked_portfolio"],
+              "test_equal_weight_benchmark": report["test_equal_weight_benchmark"],
+              "low_point_model": report["low_point_model"],
+              "high_point_model_diagnostic_only": report["high_point_model_diagnostic_only"],
+          }, ensure_ascii=False, indent=2))
+          PY
+      - name: Upload swing turning-point research outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: swing-turning-point-walkforward
+          path: artifacts/swing_turning_point/
+          if-no-files-found: error
+          retention-days: 30
       - name: Upload adjusted price data and provenance
         uses: actions/upload-artifact@v4
         with:
