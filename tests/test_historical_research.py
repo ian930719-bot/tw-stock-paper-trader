@@ -68,7 +68,7 @@ class HistoricalResearchTests(unittest.TestCase):
         )
 
     def test_factor_evaluation_returns_registry_without_auto_selecting(self):
-        panel = build_factor_panel(sample_panel(n=300))
+        panel = build_factor_panel(sample_panel(n=300, symbols=tuple(f"{i:04d}" for i in range(10))))
         results, registry = evaluate_factor_panel(panel)
         self.assertFalse(registry.empty)
         self.assertTrue(registry["selection_status"].eq("UNSELECTED").all())
