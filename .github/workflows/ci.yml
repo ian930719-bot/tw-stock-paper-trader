@@ -2,6 +2,9 @@ name: Validate app
 on:
   push:
     branches: [main, research/200cagr-blind-validation]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
 concurrency:
   group: validate-${{ github.ref }}
   cancel-in-progress: true
