@@ -95,6 +95,35 @@ class HistoricalCollectorTests(unittest.TestCase):
                 self.assertEqual(discover.call_count, 1)
                 self.assertTrue(second["candidate_universe_frozen"])
 
+    def test_empty_cached_symbol_is_not_downloaded_again(self):
+        current = pd.DataFrame([
+            {"stock_id": "2330", "stock_name": "台積電", "industry_category": "半導體業", "type": "twse"},
+        ])
+        delisted = pd.DataFrame(columns=["stock_id", "stock_name", "date"])
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("historical_data_collector.discover_symbols", return_value=(current, delisted)), \
+                 patch("historical_data_collector._api_get", return_value=[]) as api_get:
+                first = collect_history(tmp, "2010-01-04", token="test-token", pause_seconds=0)
+                self.assertEqual(first["empty_symbols"], 1)
+                self.assertTrue(first["collection_complete"])
+                second = collect_history(tmp, "2010-01-04", token="test-token", pause_seconds=0)
+                self.assertEqual(second["empty_symbols"], 1)
+                self.assertTrue(second["collection_complete"])
+                self.assertEqual(api_get.call_count, 1)
+
+    def test_failed_symbol_is_not_marked_complete(self):
+        current = pd.DataFrame([
+            {"stock_id": "2330", "stock_name": "台積電", "industry_category": "半導體業", "type": "twse"},
+        ])
+        delisted = pd.DataFrame(columns=["stock_id", "stock_name", "date"])
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("historical_data_collector.discover_symbols", return_value=(current, delisted)), \
+                 patch("historical_data_collector._api_get", side_effect=RuntimeError("temporary API failure")):
+                result = collect_history(tmp, "2010-01-04", token="test-token", pause_seconds=0)
+                self.assertEqual(result["failed_symbols"], 1)
+                self.assertEqual(result["remaining_symbols"], 1)
+                self.assertFalse(result["collection_complete"])
+
     def test_empty_response_has_stable_schema(self):
         self.assertEqual(len(_normalize_bars([], "2330").columns), 8)
 
