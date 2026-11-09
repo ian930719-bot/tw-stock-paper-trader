@@ -164,6 +164,8 @@ def run_streaming_research(input_dir: str, output_dir: str, *, split_date: str =
                 (numeric["high"] >= numeric[["open", "close", "low"]].max(axis=1))
                 & (numeric["low"] <= numeric[["open", "close", "high"]].min(axis=1))
             )
+            usable_ohlc = valid_date & price_ok & vol_ok & ohlc_ok
+            usable_ohlc_count = int(usable_ohlc.sum()) if len(numeric) else 0
             invalid_count = int((~(price_ok & vol_ok & ohlc_ok)).sum()) if len(numeric) else 0
             clean_dates = raw_dates[valid_date].sort_values()
             clean = raw.loc[valid_date].copy()
@@ -172,6 +174,7 @@ def run_streaming_research(input_dir: str, output_dir: str, *, split_date: str =
             quality.append({
                 "symbol": symbol, "input_rows": int(len(raw)), "valid_date_rows": int(len(clean)),
                 "factor_rows": int(len(factors)),
+                "usable_ohlc_rows": usable_ohlc_count,
                 "first_date": clean_dates.min().date().isoformat() if len(clean_dates) else "",
                 "last_date": clean_dates.max().date().isoformat() if len(clean_dates) else "",
                 "duplicate_dates": duplicate_count, "missing_numeric_rows": required_missing,
@@ -268,10 +271,10 @@ def run_streaming_research(input_dir: str, output_dir: str, *, split_date: str =
     if "symbol" not in candidates:
         candidates = candidates.rename(columns={candidates.columns[0]: "symbol"})
     candidates["symbol"] = candidates["symbol"].astype(str)
-    coverage_cols = [c for c in ("symbol", "input_rows", "valid_date_rows", "factor_rows") if c in qdf.columns]
+    coverage_cols = [c for c in ("symbol", "input_rows", "valid_date_rows", "factor_rows", "usable_ohlc_rows") if c in qdf.columns]
     candidate_coverage = candidates.merge(qdf[coverage_cols], on="symbol", how="left")
     candidate_coverage["has_bar_file"] = candidate_coverage["symbol"].isin({p.stem for p in files})
-    candidate_coverage["has_valid_bars"] = candidate_coverage.get("valid_date_rows", pd.Series(0, index=candidate_coverage.index)).fillna(0) > 0
+    candidate_coverage["has_valid_bars"] = candidate_coverage.get("usable_ohlc_rows", pd.Series(0, index=candidate_coverage.index)).fillna(0) > 0
     candidate_coverage["has_factor_rows"] = candidate_coverage.get("factor_rows", pd.Series(0, index=candidate_coverage.index)).fillna(0) > 0
     candidate_coverage.to_csv(out / "candidate_coverage.csv", index=False)
     missing_candidate_files = int((~candidate_coverage["has_bar_file"]).sum())
@@ -289,6 +292,7 @@ def run_streaming_research(input_dir: str, output_dir: str, *, split_date: str =
         "symbols_with_valid_rows": int((qdf["valid_date_rows"] > 0).sum()) if not qdf.empty else 0,
         "input_rows": int(qdf["input_rows"].sum()) if not qdf.empty else 0,
         "valid_date_rows": int(qdf["valid_date_rows"].sum()) if not qdf.empty else 0,
+        "usable_ohlc_rows": int(qdf["usable_ohlc_rows"].sum()) if not qdf.empty else 0,
         "first_date": qdf.loc[qdf["valid_date_rows"] > 0, "first_date"].min() if not qdf.empty and (qdf["valid_date_rows"] > 0).any() else None,
         "last_date": qdf["last_date"].max() if not qdf.empty else None,
         "duplicate_dates": int(qdf["duplicate_dates"].sum()) if not qdf.empty else 0,

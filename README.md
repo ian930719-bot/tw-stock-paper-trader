@@ -158,3 +158,6 @@ The research branch includes a resumable FinMind raw daily-bar collector and a r
 - Add a repository Actions secret named `FINMIND_TOKEN` to use the higher FinMind request allowance. Without it, collection uses conservative pacing and may require multiple automatically chained runs.
 
 Manual full-universe collection is available through the GitHub Actions workflow_dispatch input `max_symbols=0`; bounded smoke tests use a positive cap.
+
+
+The full-universe research workflow uses `streaming_factor_research.py` after collection. It processes one symbol at a time, partitions factor panels by year, and reports daily cross-sectional rank IC, gross quintile spreads, horizon-aware HAC t-statistics, Benjamini-Hochberg q-values, per-symbol OHLC quality, candidate-to-file coverage, and SHA-256 manifest checks. Its post-split segment is explicitly descriptive, not a final blind test. It never labels the result research-grade while the PIT-universe and official-source gates remain unresolved.
