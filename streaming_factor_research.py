@@ -17,6 +17,8 @@ import tempfile
 import numpy as np
 import pandas as pd
 
+from corporate_action_adjustments import apply_back_adjustments
+
 FACTOR_FAMILIES = {
     "momentum": ["ret_5", "ret_20", "ret_60", "ret_120"],
     "reversal": ["reversal_1", "reversal_5", "distance_sma_5", "distance_sma_20"],
@@ -50,7 +52,12 @@ def build_symbol_factors(raw: pd.DataFrame, symbol: str) -> pd.DataFrame:
     z = z.loc[valid].drop_duplicates("date", keep="last").copy()
     if z.empty:
         return pd.DataFrame(columns=["date", "symbol", *FACTORS, *[f"fwd_{h}d_next_open" for h in HORIZONS]])
-    close, open_, high, low, volume = z["close"], z["open"], z["high"], z["low"], z["volume"]
+    adjusted = all(f"adj_{col}" in z.columns for col in ("open", "high", "low", "close"))
+    prefix = "adj_" if adjusted else ""
+    close, open_, high, low, volume = (
+        z[f"{prefix}close"], z[f"{prefix}open"], z[f"{prefix}high"],
+        z[f"{prefix}low"], z["volume"]
+    )
     prev_close = close.shift(1)
     z["symbol"] = str(symbol)
     for n in (5, 20, 60, 120):
@@ -72,8 +79,13 @@ def build_symbol_factors(raw: pd.DataFrame, symbol: str) -> pd.DataFrame:
     avg_vol = volume.shift(1).rolling(20, min_periods=20).mean()
     z["relative_volume_20"] = volume / avg_vol.replace(0, np.nan)
     z["volume_trend_20"] = volume.rolling(5, min_periods=5).mean() / volume.rolling(20, min_periods=20).mean().replace(0, np.nan)
+    if "corporate_action_window" in z:
+        action_window = z["corporate_action_window"].fillna(False).astype(bool)
+        z.loc[action_window, ["relative_volume_20", "volume_trend_20"]] = np.nan
     money = pd.to_numeric(z["turnover"], errors="coerce") if "turnover" in z else close * volume
     z["turnover_shock_20"] = money / money.shift(1).rolling(20, min_periods=20).mean().replace(0, np.nan)
+    if "corporate_action_window" in z and "turnover" not in z:
+        z.loc[z["corporate_action_window"].fillna(False).astype(bool), "turnover_shock_20"] = np.nan
     tr = pd.concat([high-low, (high-prev_close).abs(), (low-prev_close).abs()], axis=1).max(axis=1)
     z["atr_pct_14"] = tr.ewm(alpha=1/14, adjust=False, min_periods=14).mean() / close
     daily_ret = close.pct_change()
@@ -142,6 +154,9 @@ def run_streaming_research(input_dir: str, output_dir: str, *, split_date: str =
     manifest_path = root / "download_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
     expected_hashes = manifest.get("data_files_sha256", {})
+    action_events_path = root / "corporate_actions" / "events.csv"
+    action_events = pd.read_csv(action_events_path, dtype={"symbol": str}) if action_events_path.exists() else pd.DataFrame()
+    corporate_actions_complete = bool(manifest.get("corporate_actions_complete", False))
     quality, integrity = [], []
     split = pd.Timestamp(split_date)
     with tempfile.TemporaryDirectory(prefix="tw_factor_") as tmp:
@@ -151,6 +166,10 @@ def run_streaming_research(input_dir: str, output_dir: str, *, split_date: str =
         for path in files:
             raw = pd.read_csv(path)
             symbol = path.stem
+            if not action_events.empty and {"symbol", "date", "adjustment_ratio"}.issubset(action_events.columns):
+                symbol_events = action_events.loc[action_events["symbol"].astype(str) == str(symbol)]
+                if not symbol_events.empty:
+                    raw = apply_back_adjustments(raw, symbol_events)
             raw_dates = pd.to_datetime(raw.get("date"), errors="coerce")
             valid_date = raw_dates.notna()
             numeric = raw.copy()
@@ -303,13 +322,17 @@ def run_streaming_research(input_dir: str, output_dir: str, *, split_date: str =
         "collection_complete": bool(manifest.get("collection_complete", False)),
         "point_in_time_universe_complete": bool(manifest.get("point_in_time_universe_complete", False)),
         "delisted_price_coverage_verified": bool(manifest.get("delisted_price_coverage_verified", False)),
+        "corporate_actions_complete": corporate_actions_complete,
+        "corporate_action_event_rows": int(len(action_events)),
+        "price_basis_for_signals": "event-adjusted historical OHLC; raw execution bars preserved" if corporate_actions_complete else "partial or unavailable event-adjusted OHLC; descriptive only",
         "research_grade_eligible": False,
         "research_grade_blockers": [
             "Historical point-in-time universe membership is not verified",
             f"{missing_candidate_files} candidate symbols have no downloaded bar file",
             f"{candidates_without_bars} candidate symbols have no valid price bars",
             "Delisted and suspended security price coverage is not verified",
-            "Corporate actions have not been reconciled against official exchange records",
+            *([] if corporate_actions_complete else ["Corporate-action event collection is incomplete"]),
+            "Corporate actions have not been independently reconciled against official exchange records",
             "Official trading-calendar completeness has not been verified",
             "Vendor raw bars have not been reconciled against official exchange samples",
             "Factor IC and quintile spreads are gross descriptive screens, not a costed portfolio backtest",
