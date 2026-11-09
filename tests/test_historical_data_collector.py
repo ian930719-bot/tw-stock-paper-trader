@@ -140,8 +140,9 @@ class HistoricalCollectorTests(unittest.TestCase):
                         "before_price": 100, "reference_price": 95,
                     }]
                 return []
-            with patch("historical_data_collector._api_get", side_effect=fake_api) as api_get, \\
-                 patch("historical_data_collector.time.sleep"):
+            with patch("historical_data_collector._api_get", side_effect=fake_api) as api_get:
+                sleep_patch = patch("historical_data_collector.time.sleep")
+                sleep_patch.start()
                 first = collect_corporate_actions(tmp, "2010-01-04", token="test-token", pause_seconds=0)
                 self.assertTrue(first["corporate_actions_complete"])
                 self.assertEqual(first["event_rows"], 1)
@@ -149,6 +150,7 @@ class HistoricalCollectorTests(unittest.TestCase):
                 second = collect_corporate_actions(tmp, "2010-01-04", token="test-token", pause_seconds=0)
                 self.assertTrue(second["corporate_actions_complete"])
                 self.assertEqual(api_get.call_count, 4)
+                sleep_patch.stop()
             events = pd.read_csv(f"{tmp}/corporate_actions/events.csv")
             self.assertAlmostEqual(events.iloc[0]["adjustment_ratio"], 0.95)
 
