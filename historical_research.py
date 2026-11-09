@@ -32,8 +32,9 @@ def normalize_panel(frame: pd.DataFrame) -> pd.DataFrame:
     z = frame.copy()
     z["symbol"] = z["symbol"].astype(str).str.strip()
     z["date"] = pd.to_datetime(z["date"], errors="coerce").dt.normalize()
-    for col in ("open", "high", "low", "close", "volume"):
-        z[col] = pd.to_numeric(z[col], errors="coerce")
+    for col in ("open", "high", "low", "close", "volume", "turnover"):
+        if col in z.columns:
+            z[col] = pd.to_numeric(z[col], errors="coerce")
     z = z.dropna(subset=["symbol", "date", "open", "high", "low", "close", "volume"])
     return z.sort_values(["symbol", "date"], kind="mergesort").reset_index(drop=True)
 
@@ -42,10 +43,19 @@ def audit_historical_panel(frame: pd.DataFrame, *, source: str = "unspecified",
                            price_basis: str = "unknown",
                            point_in_time_universe: bool = False,
                            delisted_coverage: bool = False,
+                           corporate_actions_reconciled: bool = False,
+                           trading_calendar_verified: bool = False,
+                           official_source_reconciled: bool = False,
                            trading_calendar: pd.DatetimeIndex | None = None) -> tuple[pd.DataFrame, dict]:
-    """Audit raw panel quality and expose survivorship/source limitations."""
+    """Audit raw panel quality; fail closed on missing historical evidence."""
+    missing_required_rows = (
+        int(frame[list(REQUIRED)].isna().any(axis=1).sum())
+        if REQUIRED.issubset(frame.columns) else int(len(frame))
+    )
     z = normalize_panel(frame)
-    duplicate_count = int(z.duplicated(["symbol", "date"], keep=False).sum())
+    duplicate_mask = z.duplicated(["symbol", "date"], keep=False)
+    duplicate_count = int(duplicate_mask.sum())
+    duplicate_by_symbol = z.loc[duplicate_mask].groupby("symbol").size().to_dict()
     valid_price = (z[["open", "high", "low", "close"]] > 0).all(axis=1)
     valid_volume = z["volume"] >= 0
     valid_ohlc = (
@@ -58,16 +68,14 @@ def audit_historical_panel(frame: pd.DataFrame, *, source: str = "unspecified",
     rows = []
     for symbol, g in z.groupby("symbol", sort=True):
         dates = g["date"].sort_values()
-        gaps = int((dates.diff().dt.days > 7).sum())
         rows.append({
             "symbol": symbol, "rows": int(len(g)),
             "first_date": dates.min().date().isoformat(),
             "last_date": dates.max().date().isoformat(),
             "years": int(g["year"].nunique()),
             "zero_volume_rows": int((g["volume"] == 0).sum()),
-            "calendar_gaps_over_7d": gaps,
-            "duplicate_rows_removed": int(frame.assign(date=pd.to_datetime(frame["date"], errors="coerce").dt.normalize())
-                                          .duplicated(["symbol", "date"], keep=False).sum()) if len(frame) else 0,
+            "calendar_gaps_over_7d": int((dates.diff().dt.days > 7).sum()),
+            "duplicate_rows_in_groups": int(duplicate_by_symbol.get(symbol, 0)),
         })
     by_symbol = pd.DataFrame(rows)
     if trading_calendar is not None:
@@ -77,9 +85,11 @@ def audit_historical_panel(frame: pd.DataFrame, *, source: str = "unspecified",
             expected = cal[(cal >= g["date"].min()) & (cal <= g["date"].max())]
             actual = pd.DatetimeIndex(g["date"].unique())
             missing_sessions = len(expected.difference(actual))
-            coverage.append({"symbol": symbol, "expected_sessions": len(expected),
-                             "observed_sessions": len(actual), "missing_sessions": missing_sessions,
-                             "session_coverage": len(actual) / len(expected) if len(expected) else np.nan})
+            coverage.append({
+                "symbol": symbol, "expected_sessions": len(expected),
+                "observed_sessions": len(actual), "missing_sessions": missing_sessions,
+                "session_coverage": len(actual) / len(expected) if len(expected) else np.nan,
+            })
         if not by_symbol.empty:
             by_symbol = by_symbol.merge(pd.DataFrame(coverage), on="symbol", how="left")
     limitations = []
@@ -89,6 +99,14 @@ def audit_historical_panel(frame: pd.DataFrame, *, source: str = "unspecified",
         limitations.append("缺少完整 point-in-time 歷史股票池")
     if not delisted_coverage:
         limitations.append("下市／下櫃證券覆蓋未驗證")
+    if not corporate_actions_reconciled:
+        limitations.append("公司行動尚未與官方資料完成核對")
+    if not trading_calendar_verified or trading_calendar is None:
+        limitations.append("尚未以官方交易日曆驗證缺漏交易日")
+    if not official_source_reconciled:
+        limitations.append("尚未將供應商資料與交易所官方樣本完成核對")
+    if missing_required_rows:
+        limitations.append(f"原始資料有 {missing_required_rows} 筆必要欄位缺漏")
     if duplicate_count:
         limitations.append(f"原始資料存在 {duplicate_count} 筆重複 symbol-date rows")
     if invalid.any():
@@ -96,12 +114,16 @@ def audit_historical_panel(frame: pd.DataFrame, *, source: str = "unspecified",
     summary = {
         "source": source, "price_basis": price_basis,
         "input_rows": int(len(frame)), "valid_rows": int(len(z)),
+        "missing_required_rows": missing_required_rows,
         "symbols": int(z["symbol"].nunique()),
         "first_date": z["date"].min().date().isoformat() if not z.empty else None,
         "last_date": z["date"].max().date().isoformat() if not z.empty else None,
         "duplicate_rows": duplicate_count, "invalid_rows": int(invalid.sum()),
         "point_in_time_universe": bool(point_in_time_universe),
         "delisted_coverage": bool(delisted_coverage),
+        "corporate_actions_reconciled": bool(corporate_actions_reconciled),
+        "trading_calendar_verified": bool(trading_calendar_verified and trading_calendar is not None),
+        "official_source_reconciled": bool(official_source_reconciled),
         "research_grade_eligible": not limitations,
         "limitations": limitations,
     }
@@ -214,12 +236,18 @@ def evaluate_factor_panel(panel: pd.DataFrame, *, split_date: str | None = None)
 
 def run_research(input_csv: str, output_dir: str, *, split_date: str | None = None,
                  source: str = "user-supplied CSV", price_basis: str = "unknown",
-                 point_in_time_universe: bool = False, delisted_coverage: bool = False,\n                 corporate_actions_reconciled: bool = False, trading_calendar_verified: bool = False,\n                 official_source_reconciled: bool = False) -> dict:
+                 point_in_time_universe: bool = False, delisted_coverage: bool = False,
+                 corporate_actions_reconciled: bool = False,
+                 trading_calendar_verified: bool = False,
+                 official_source_reconciled: bool = False) -> dict:
     raw = pd.read_csv(input_csv)
     audit, summary = audit_historical_panel(
         raw, source=source, price_basis=price_basis,
         point_in_time_universe=point_in_time_universe,
         delisted_coverage=delisted_coverage,
+        corporate_actions_reconciled=corporate_actions_reconciled,
+        trading_calendar_verified=trading_calendar_verified,
+        official_source_reconciled=official_source_reconciled,
     )
     factors = build_factor_panel(raw)
     results, registry = evaluate_factor_panel(factors, split_date=split_date)
@@ -244,11 +272,17 @@ def main():
     parser.add_argument("--price-basis", choices=["raw", "adjusted", "unknown"], default="unknown")
     parser.add_argument("--point-in-time-universe", action="store_true")
     parser.add_argument("--delisted-coverage", action="store_true")
+    parser.add_argument("--corporate-actions-reconciled", action="store_true")
+    parser.add_argument("--trading-calendar-verified", action="store_true")
+    parser.add_argument("--official-source-reconciled", action="store_true")
     args = parser.parse_args()
     summary = run_research(
         args.input, args.output, split_date=args.split_date, source=args.source,
         price_basis=args.price_basis, point_in_time_universe=args.point_in_time_universe,
         delisted_coverage=args.delisted_coverage,
+        corporate_actions_reconciled=args.corporate_actions_reconciled,
+        trading_calendar_verified=args.trading_calendar_verified,
+        official_source_reconciled=args.official_source_reconciled,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
