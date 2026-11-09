@@ -161,3 +161,12 @@ Manual full-universe collection is available through the GitHub Actions workflow
 
 
 The full-universe research workflow uses `streaming_factor_research.py` after collection. It processes one symbol at a time, partitions factor panels by year, and reports daily cross-sectional rank IC, gross quintile spreads, horizon-aware HAC t-statistics, Benjamini-Hochberg q-values, per-symbol OHLC quality, candidate-to-file coverage, and SHA-256 manifest checks. Its post-split segment is explicitly descriptive, not a final blind test. It never labels the result research-grade while the PIT-universe and official-source gates remain unresolved.
+
+
+## Corporate-action-aware historical research (research branch)
+
+- The historical collector can resume collection of `TaiwanStockDividendResult` per symbol plus market-wide `TaiwanStockSplitPrice`, `TaiwanStockCapitalReductionReferencePrice`, and `TaiwanStockParValueChange` events. It writes raw source files, a normalized event table, and a separate manifest. Empty event responses are recorded as completed responses; API failures remain retryable.
+- The factor screen uses event-adjusted OHLC for relative price signals and forward-return labels while preserving the original raw OHLCV files for execution-price provenance. Each event's reference-price / pre-event-price ratio is applied only to bars strictly before its effective date. This removes mechanical ex-right / split gaps from realized returns without changing the raw execution bars.
+- Volume-based factors are suppressed for 20 sessions after a corporate action because the collector does not yet have a fully reconciled share-count adjustment history. Conflicting same-day event ratios are excluded rather than guessed and are reported as blockers.
+- The GitHub Actions pipeline now waits for the resumable corporate-action collection stage before running the factor screen. With the unauthenticated FinMind request allowance, collecting event data for the full candidate list can take multiple batches; set the repository Actions secret `FINMIND_TOKEN` if an appropriately entitled token is available. Never paste the token into source code or chat.
+- This stage does not create a historical point-in-time universe, prove complete delisted/suspended-price coverage, or independently reconcile vendor data against official TWSE / TPEx records. The research eligibility gate remains closed until those requirements and a costed continuous-capital blind OOS portfolio backtest are completed.
