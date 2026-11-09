@@ -1,6 +1,9 @@
 """Tests for resumable historical data collector normalization."""
 import unittest
-from historical_data_collector import _normalize_bars, build_candidate_universe, select_candidate_metadata
+import tempfile
+from unittest.mock import patch
+import pandas as pd
+from historical_data_collector import _normalize_bars, build_candidate_universe, select_candidate_metadata, collect_history
 
 
 class HistoricalCollectorTests(unittest.TestCase):
@@ -68,6 +71,29 @@ class HistoricalCollectorTests(unittest.TestCase):
         import pandas as pd
         candidates = pd.DataFrame({"stock_id": ["1101", "2330"], "candidate_source": ["current_common_equity"] * 2})
         self.assertEqual(len(select_candidate_metadata(candidates, None)), 2)
+
+
+    def test_full_candidate_universe_is_frozen_across_resume_runs(self):
+        current = pd.DataFrame([
+            {"stock_id": "1101", "stock_name": "台泥", "industry_category": "水泥工業", "type": "twse"},
+            {"stock_id": "2330", "stock_name": "台積電", "industry_category": "半導體業", "type": "twse"},
+        ])
+        delisted = pd.DataFrame(columns=["stock_id", "stock_name", "date"])
+        bars = [{
+            "date": "2024-01-02", "open": 50, "max": 51, "min": 49,
+            "close": 50.5, "Trading_Volume": 1000, "Trading_money": 50000,
+        }]
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("historical_data_collector.discover_symbols", return_value=(current, delisted)) as discover, \
+                 patch("historical_data_collector._api_get", return_value=bars):
+                first = collect_history(tmp, "2010-01-04", token="test-token", pause_seconds=0)
+                self.assertTrue(first["candidate_universe_frozen"])
+                self.assertEqual(first["requested_symbols"], 2)
+                self.assertTrue(first["collection_complete"])
+                second = collect_history(tmp, "2010-01-04", token="test-token", pause_seconds=0)
+                self.assertEqual(second["requested_symbols"], 2)
+                self.assertEqual(discover.call_count, 1)
+                self.assertTrue(second["candidate_universe_frozen"])
 
     def test_empty_response_has_stable_schema(self):
         self.assertEqual(len(_normalize_bars([], "2330").columns), 8)
