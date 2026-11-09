@@ -144,12 +144,14 @@ def apply_cooldown(panel: pd.DataFrame, signal_col: str, cooldown: int = 40) -> 
 
 def fit_probability_model(panel: pd.DataFrame, label: str) -> tuple[object, dict]:
     train = panel.loc[panel.date < pd.Timestamp(TRAIN_END)].dropna(subset=FEATURES+[label])
-    val = panel.loc[
+    val_features = panel.loc[
         (panel.date >= pd.Timestamp(VALIDATION_START))
         & (panel.date < pd.Timestamp(VALIDATION_END))
-    ].dropna(subset=FEATURES+[label])
-    test = panel.loc[panel.date >= pd.Timestamp(TEST_START)].dropna(subset=FEATURES+[label])
-    if len(train)<1000 or len(val)<500 or len(test)<500:
+    ].dropna(subset=FEATURES)
+    test_features = panel.loc[panel.date >= pd.Timestamp(TEST_START)].dropna(subset=FEATURES)
+    val_eval = val_features.dropna(subset=[label])
+    test_eval = test_features.dropna(subset=[label])
+    if len(train)<1000 or len(val_eval)<500 or len(test_eval)<500:
         raise ValueError("訓練/驗證/測試樣本不足")
     model = make_pipeline(
         SimpleImputer(strategy="median"),
@@ -157,17 +159,21 @@ def fit_probability_model(panel: pd.DataFrame, label: str) -> tuple[object, dict
         LogisticRegression(C=.01,class_weight="balanced",max_iter=1000),
     )
     model.fit(train[FEATURES],train[label].astype(int))
-    p_val = model.predict_proba(val[FEATURES])[:,1]
-    p_test = model.predict_proba(test[FEATURES])[:,1]
+    p_val_all = model.predict_proba(val_features[FEATURES])[:,1]
+    p_test_all = model.predict_proba(test_features[FEATURES])[:,1]
+    p_val_eval = pd.Series(p_val_all,index=val_features.index).loc[val_eval.index].to_numpy()
+    p_test_eval = pd.Series(p_test_all,index=test_features.index).loc[test_eval.index].to_numpy()
     report = {
-        "train_rows":int(len(train)),"validation_rows":int(len(val)),"test_rows":int(len(test)),
-        "validation_auc":float(roc_auc_score(val[label],p_val)),
-        "test_auc":float(roc_auc_score(test[label],p_test)),
-        "validation_average_precision":float(average_precision_score(val[label],p_val)),
-        "test_average_precision":float(average_precision_score(test[label],p_test)),
-        "validation_positive_rate":float(val[label].mean()),
-        "test_positive_rate":float(test[label].mean()),
-        "validation_threshold_95pct":float(np.quantile(p_val,.95)),
+        "train_rows":int(len(train)),"validation_scored_rows":int(len(val_features)),
+        "validation_labeled_rows":int(len(val_eval)),"test_scored_rows":int(len(test_features)),
+        "test_labeled_rows":int(len(test_eval)),
+        "validation_auc":float(roc_auc_score(val_eval[label],p_val_eval)),
+        "test_auc":float(roc_auc_score(test_eval[label],p_test_eval)),
+        "validation_average_precision":float(average_precision_score(val_eval[label],p_val_eval)),
+        "test_average_precision":float(average_precision_score(test_eval[label],p_test_eval)),
+        "validation_positive_rate":float(val_eval[label].mean()),
+        "test_positive_rate":float(test_eval[label].mean()),
+        "validation_threshold_95pct":float(np.quantile(p_val_all,.95)),
     }
     imputer, scaler, classifier = model.named_steps["simpleimputer"],model.named_steps["standardscaler"],model.named_steps["logisticregression"]
     formula = {
@@ -182,10 +188,9 @@ def fit_probability_model(panel: pd.DataFrame, label: str) -> tuple[object, dict
         ],
     }
     scores = pd.Series(np.nan,index=panel.index,dtype=float)
-    scores.loc[val.index] = p_val
-    scores.loc[test.index] = p_test
-    return model, {"report":report,"formula":formula,"scores":scores,"validation":val,"test":test}
-
+    scores.loc[val_features.index] = p_val_all
+    scores.loc[test_features.index] = p_test_all
+    return model, {"report":report,"formula":formula,"scores":scores,"validation":val_eval,"test":test_eval}
 
 def simulate_portfolio(
     panel: pd.DataFrame, start: str, end: str, *,
