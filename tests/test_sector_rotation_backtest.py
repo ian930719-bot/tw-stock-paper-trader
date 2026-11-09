@@ -32,7 +32,7 @@ class SectorRotationBacktestTests(unittest.TestCase):
             "close": np.array([10, 10, 11], dtype=np.float32),
             "sma50": np.array([9, 9, 9], dtype=np.float32),
             "high20": np.array([10, 10, 11], dtype=np.float32),
-            "avg_volume20": np.array([1_000_000, 1_000_000, 1_000_000], dtype=np.float32),
+            "avg_volume20": np.array([100, 1_000_000, 1_000_000], dtype=np.float32),
             "ret5": np.zeros(3, dtype=np.float32), "ret20": np.zeros(3, dtype=np.float32),
             "ret60": np.zeros(3, dtype=np.float32), "ret120": np.zeros(3, dtype=np.float32),
         }}
@@ -42,7 +42,7 @@ class SectorRotationBacktestTests(unittest.TestCase):
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades.iloc[0].entry_date, "2024-01-03")
         self.assertEqual(trades.iloc[0].exit_date, "2024-01-04")
-        self.assertGreater(trades.iloc[0].shares, 0)
+        self.assertEqual(trades.iloc[0].shares, 1)  # Uses prior-session ADV, not same-day volume
         self.assertGreater(costs["fees"], 0)
         self.assertEqual(len(eq), 3)
 
