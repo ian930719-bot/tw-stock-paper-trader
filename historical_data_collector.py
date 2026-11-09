@@ -314,6 +314,168 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
     return manifest
 
 
+def collect_corporate_actions(output_dir: str, start_date: str, end_date: str | None = None, *,
+                              token: str | None = None, pause_seconds: float = 6.1,
+                              max_runtime_minutes: float | None = None) -> dict:
+    """Collect per-symbol dividend results and market-wide split/reduction/par-value events.
+
+    The stage is resumable. Empty event files are valid completed responses;
+    failed requests remain retryable and never count as complete.
+    """
+    from corporate_action_adjustments import normalize_corporate_action_events
+
+    api_token = (token or os.getenv("FINMIND_TOKEN", "")).strip()
+    pause = max(float(pause_seconds), 12.1 if not api_token else 6.1)
+    out = Path(output_dir)
+    action_dir = out / "corporate_actions"
+    symbol_dir = action_dir / "by_symbol"
+    symbol_dir.mkdir(parents=True, exist_ok=True)
+    candidates_path = out / "candidate_symbols.csv"
+    if not candidates_path.exists():
+        raise RuntimeError("candidate_symbols.csv is required before corporate-action collection")
+    candidates = pd.read_csv(candidates_path, dtype={"symbol": str, "stock_id": str})
+    symbol_col = "symbol" if "symbol" in candidates else "stock_id"
+    if symbol_col not in candidates:
+        raise RuntimeError("candidate_symbols.csv has no symbol/stock_id column")
+    symbols = candidates[symbol_col].dropna().astype(str).str.strip().unique().tolist()
+
+    global_specs = {
+        "TaiwanStockSplitPrice": ("before_price", "after_price"),
+        "TaiwanStockCapitalReductionReferencePrice": (
+            "ClosingPriceonTheLastTradingDay", "PostReductionReferencePrice"
+        ),
+        "TaiwanStockParValueChange": ("before_close", "after_ref_close"),
+    }
+    global_frames = {}
+    global_status = {}
+    for dataset in global_specs:
+        path = action_dir / f"{dataset}.csv"
+        if path.exists() and path.stat().st_size > 20:
+            try:
+                global_frames[dataset] = pd.read_csv(path, dtype={"stock_id": str})
+                global_status[dataset] = "cached"
+                continue
+            except Exception:
+                path.unlink(missing_ok=True)
+        params = {"dataset": dataset, "start_date": start_date}
+        if end_date:
+            params["end_date"] = end_date
+        try:
+            rows = _api_get(params, token=api_token)
+            frame = pd.DataFrame(rows)
+            if frame.empty:
+                frame = pd.DataFrame(columns=["stock_id", "date", *global_specs[dataset]])
+                global_status[dataset] = "empty"
+            else:
+                global_status[dataset] = "downloaded"
+            frame.to_csv(path, index=False)
+            global_frames[dataset] = frame
+        except Exception as exc:
+            global_status[dataset] = f"failed: {type(exc).__name__}: {exc}"
+    global_ok = all(not value.startswith("failed") for value in global_status.values())
+
+    statuses = []
+    started = time.monotonic()
+    for index, symbol in enumerate(symbols):
+        if max_runtime_minutes is not None and (time.monotonic() - started) >= max(0.0, float(max_runtime_minutes)) * 60:
+            break
+        path = symbol_dir / f"{symbol}.csv"
+        if path.exists() and path.stat().st_size > 20:
+            try:
+                cached = pd.read_csv(path)
+                statuses.append({"symbol": symbol, "status": "cached" if len(cached) else "empty"})
+                continue
+            except Exception:
+                path.unlink(missing_ok=True)
+        try:
+            params = {
+                "dataset": "TaiwanStockDividendResult",
+                "data_id": symbol,
+                "start_date": start_date,
+            }
+            if end_date:
+                params["end_date"] = end_date
+            rows = _api_get(params, token=api_token)
+            frame = pd.DataFrame(rows)
+            if frame.empty:
+                frame = pd.DataFrame(columns=[
+                    "date", "stock_id", "before_price", "after_price",
+                    "stock_and_cache_dividend", "reference_price",
+                ])
+                status = "empty"
+            else:
+                status = "downloaded"
+            frame.to_csv(path, index=False)
+            statuses.append({"symbol": symbol, "status": status, "rows": int(len(frame))})
+        except Exception as exc:
+            statuses.append({"symbol": symbol, "status": "failed", "error": str(exc)[:300]})
+        if index + 1 < len(symbols):
+            time.sleep(pause)
+
+    completed = sum(x["status"] in {"downloaded", "cached", "empty"} for x in statuses)
+    failed = sum(x["status"] == "failed" for x in statuses)
+    all_dividend_frames = []
+    for symbol in symbols:
+        path = symbol_dir / f"{symbol}.csv"
+        if path.exists() and path.stat().st_size > 20:
+            try:
+                frame = pd.read_csv(path)
+                if not frame.empty:
+                    if "stock_id" not in frame:
+                        frame["stock_id"] = symbol
+                    all_dividend_frames.append(frame)
+            except Exception:
+                pass
+    dividend_results = pd.concat(all_dividend_frames, ignore_index=True) if all_dividend_frames else pd.DataFrame()
+    events = normalize_corporate_action_events(
+        dividend_results=dividend_results,
+        split_prices=global_frames.get("TaiwanStockSplitPrice"),
+        capital_reductions=global_frames.get("TaiwanStockCapitalReductionReferencePrice"),
+        par_value_changes=global_frames.get("TaiwanStockParValueChange"),
+    )
+    events.to_csv(action_dir / "events.csv", index=False)
+    action_manifest = {
+        "source": "FinMind API v4",
+        "start_date": start_date,
+        "end_date": end_date,
+        "token_configured": bool(api_token),
+        "requested_symbols": len(symbols),
+        "completed_symbols": completed,
+        "attempted_symbols": len(statuses),
+        "remaining_symbols": max(0, len(symbols) - completed),
+        "failed_symbols": failed,
+        "empty_symbols": sum(x["status"] == "empty" for x in statuses),
+        "global_dataset_status": global_status,
+        "global_datasets_complete": global_ok,
+        "corporate_actions_complete": completed >= len(symbols) and failed == 0 and global_ok,
+        "event_rows": int(len(events)),
+        "event_symbols": int(events["symbol"].nunique()) if not events.empty else 0,
+        "runtime_seconds": round(time.monotonic() - started, 2),
+        "status_rows": statuses,
+    }
+    (action_dir / "manifest.json").write_text(
+        json.dumps(action_manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    main_manifest_path = out / "download_manifest.json"
+    if main_manifest_path.exists():
+        main_manifest = json.loads(main_manifest_path.read_text(encoding="utf-8"))
+        main_manifest.update({
+            "corporate_actions_complete": action_manifest["corporate_actions_complete"],
+            "corporate_action_event_rows": action_manifest["event_rows"],
+            "corporate_action_symbols": action_manifest["event_symbols"],
+            "corporate_action_manifest": "corporate_actions/manifest.json",
+        })
+        main_manifest_path.write_text(
+            json.dumps(main_manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    print(
+        f"[CORPORATE ACTIONS] complete={action_manifest['corporate_actions_complete']} "
+        f"symbols={completed}/{len(symbols)} failed={failed} events={len(events)}",
+        flush=True,
+    )
+    return action_manifest
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", default="data/taiwan_history")
@@ -323,11 +485,23 @@ def main():
     parser.add_argument("--max-symbols", type=int, default=None)
     parser.add_argument("--max-runtime-minutes", type=float, default=None,
                         help="Stop cleanly after this many minutes so a later run can resume")
+    parser.add_argument("--collect-corporate-actions", action="store_true",
+                        help="Also collect resumable ex-rights, split, capital-reduction and par-value events")
     args = parser.parse_args()
     result = collect_history(args.output, args.start_date, args.end_date,
                              pause_seconds=args.pause_seconds, max_symbols=args.max_symbols,
                              max_runtime_minutes=args.max_runtime_minutes)
-    print(json.dumps({k: v for k, v in result.items() if k != "status_rows"},
+    if args.collect_corporate_actions:
+        remaining = None
+        if args.max_runtime_minutes is not None:
+            remaining = max(0.0, float(args.max_runtime_minutes) - float(result.get("runtime_seconds", 0)) / 60.0)
+        action_result = collect_corporate_actions(
+            args.output, args.start_date, args.end_date,
+            max_runtime_minutes=remaining,
+        )
+        result["corporate_actions_complete"] = action_result["corporate_actions_complete"]
+        result["corporate_action_event_rows"] = action_result["event_rows"]
+    print(json.dumps({k: v for k, v in result.items() if k != "status_rows"}, 
                      ensure_ascii=False, indent=2))
 
 
