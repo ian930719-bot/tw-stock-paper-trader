@@ -247,13 +247,13 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
         path = bars_dir / f"{symbol}.csv"
         if path.exists() and path.stat().st_size > 20:
             cached_rows = int(len(pd.read_csv(path)))
-            if cached_rows > 0:
-                statuses.append({"symbol": symbol, "status": "cached", "rows": cached_rows})
-                write_checkpoint()
-                done = sum(x["status"] in {"downloaded", "cached", "empty"} for x in statuses)
-                if done % 10 == 0 or done == len(symbols):
-                    print(f"[COLLECT PROGRESS] {done}/{len(symbols)} successful_or_empty; cached={sum(x['status']=='cached' for x in statuses)} failed={sum(x['status']=='failed' for x in statuses)} current={symbol}", flush=True)
-                continue
+            cached_status = "cached" if cached_rows > 0 else "empty"
+            statuses.append({"symbol": symbol, "status": cached_status, "rows": cached_rows, "cache_hit": True})
+            write_checkpoint()
+            done = sum(x["status"] in {"downloaded", "cached", "empty"} for x in statuses)
+            if done % 10 == 0 or done == len(symbols):
+                print(f"[COLLECT PROGRESS] {done}/{len(symbols)} successful_or_empty; cached={sum(x['status']=='cached' for x in statuses)} empty={sum(x['status']=='empty' for x in statuses)} failed={sum(x['status']=='failed' for x in statuses)} current={symbol}", flush=True)
+            continue
         params = {"dataset": "TaiwanStockPrice", "data_id": symbol, "start_date": start_date}
         if end_date:
             params["end_date"] = end_date
