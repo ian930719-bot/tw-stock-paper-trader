@@ -3,7 +3,7 @@ import unittest
 import tempfile
 from unittest.mock import patch
 import pandas as pd
-from historical_data_collector import _normalize_bars, build_candidate_universe, select_candidate_metadata, collect_history
+from historical_data_collector import _normalize_bars, build_candidate_universe, select_candidate_metadata, collect_history, collect_corporate_actions
 
 
 class HistoricalCollectorTests(unittest.TestCase):
@@ -126,6 +126,31 @@ class HistoricalCollectorTests(unittest.TestCase):
 
     def test_empty_response_has_stable_schema(self):
         self.assertEqual(len(_normalize_bars([], "2330").columns), 8)
+
+
+    def test_corporate_action_collection_is_resumable_and_writes_adjustment_events(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pd.DataFrame({"symbol": ["2330"], "name": ["台積電"]}).to_csv(
+                f"{tmp}/candidate_symbols.csv", index=False
+            )
+            def fake_api(params, **kwargs):
+                if params["dataset"] == "TaiwanStockDividendResult":
+                    return [{
+                        "date": "2024-01-04", "stock_id": "2330",
+                        "before_price": 100, "reference_price": 95,
+                    }]
+                return []
+            with patch("historical_data_collector._api_get", side_effect=fake_api) as api_get, \\
+                 patch("historical_data_collector.time.sleep"):
+                first = collect_corporate_actions(tmp, "2010-01-04", token="test-token", pause_seconds=0)
+                self.assertTrue(first["corporate_actions_complete"])
+                self.assertEqual(first["event_rows"], 1)
+                self.assertEqual(api_get.call_count, 4)
+                second = collect_corporate_actions(tmp, "2010-01-04", token="test-token", pause_seconds=0)
+                self.assertTrue(second["corporate_actions_complete"])
+                self.assertEqual(api_get.call_count, 4)
+            events = pd.read_csv(f"{tmp}/corporate_actions/events.csv")
+            self.assertAlmostEqual(events.iloc[0]["adjustment_ratio"], 0.95)
 
 
 if __name__ == "__main__":
