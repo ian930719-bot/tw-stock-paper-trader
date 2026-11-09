@@ -197,8 +197,11 @@ def simulate_portfolio(
     hold_bars: int, trail_atr: float, risk_fraction: float,
     max_positions: int = 5, max_weight: float = .40,
     adv_participation: float = .01, initial_capital: float = INITIAL_CAPITAL,
+    exclude_symbols: tuple[str,...] = (),
 ) -> tuple[dict,pd.DataFrame,pd.DataFrame]:
     """Cash-only shared-capital simulation; signal close -> next open."""
+    if exclude_symbols:
+        panel = panel.loc[~panel.symbol.isin(exclude_symbols)].copy()
     a,b = pd.Timestamp(start),pd.Timestamp(end)
     row_lookup = {
         s:{pd.Timestamp(r.date):r for r in g.sort_values("date").itertuples(index=False)}
@@ -434,6 +437,17 @@ def run_research(input_dir: str|Path,output_dir: str|Path) -> dict:
     )
     val_benchmark=equal_weight_benchmark(panel,VALIDATION_START,str(val_end.date()))
     test_benchmark=equal_weight_benchmark(panel,TEST_START,str(test_end.date()))
+    # Leave-one-name-out is a concentration diagnostic, not another tuning step.
+    leave_one_out={}
+    for symbol in SYMBOLS:
+        m,_,_=simulate_portfolio(
+            panel,TEST_START,str(test_end.date()),hold_bars=config["hold_bars"],
+            trail_atr=config["trail_atr"],risk_fraction=config["risk_fraction"],
+            max_positions=5,max_weight=.40,adv_participation=.01,
+            exclude_symbols=(symbol,),
+        )
+        leave_one_out[symbol]={"CAGR":m["CAGR"],"max_drawdown":m["max_drawdown"],
+                               "trades":m["trades"],"profit_factor":m["profit_factor"]}
     annual={}
     if not test_curve.empty:
         tmp=test_curve.copy();tmp["year"]=pd.to_datetime(tmp.date).dt.year
@@ -463,6 +477,7 @@ def run_research(input_dir: str|Path,output_dir: str|Path) -> dict:
         "test_equal_weight_benchmark":test_benchmark,
         "test_calendar_year_returns":annual,
         "test_trades_by_symbol":by_symbol,
+        "test_leave_one_symbol_out":leave_one_out,
         "validation_grid_count":len(grid),
     }
     out=Path(output_dir);out.mkdir(parents=True,exist_ok=True)
