@@ -204,8 +204,12 @@ def run_portfolio(data, calendar, targets, fee=0.001425, tax=0.003, slip=0.001,
             held = set(positions)
             candidates = [c for c in desired if c not in held and c not in sold_today
                           and c not in pending_stop and c in data]
-            marked = sum(p["shares"] * last_close.get(c, p["entry_price"])
-                         for c, p in positions.items())
+            marked = 0.0
+            for held_code, held_pos in positions.items():
+                held_idx = at(data, held_code, day)
+                held_open = float(data[held_code]["open"][held_idx]) if held_idx is not None else np.nan
+                mark_price = held_open if np.isfinite(held_open) and held_open > 0 else last_close.get(held_code, held_pos["entry_price"])
+                marked += held_pos["shares"] * mark_price
             equity_open = max(0.0, cash + marked)
             slots = max(1, min(max_positions, len(desired)))
             per_name = min(equity_open * 0.10, equity_open / slots)
@@ -215,7 +219,10 @@ def run_portfolio(data, calendar, targets, fee=0.001425, tax=0.003, slip=0.001,
                 idx = at(data, code, day)
                 if idx is None:
                     continue
-                op, adv = float(data[code]["open"][idx]), float(data[code]["avg_volume20"][idx])
+                # Liquidity sizing may use only the previous completed session, never today's volume.
+                if idx == 0:
+                    continue
+                op, adv = float(data[code]["open"][idx]), float(data[code]["avg_volume20"][idx - 1])
                 if not np.isfinite(op) or op <= 0 or not np.isfinite(adv) or adv <= 0:
                     continue
                 max_shares = max(0, int(math.floor(adv * max_participation)))
