@@ -113,13 +113,13 @@ def build_feature_panel(frames: dict[str, pd.DataFrame]) -> pd.DataFrame:
         d["obv_slope"] = obv.diff(20)/v.rolling(20,min_periods=20).sum().replace(0,np.nan)
         # This is an adjusted-price x reported-volume ADV proxy, not raw turnover.
         d["adv20_proxy"] = (c*v).shift(1).rolling(20,min_periods=20).mean()
-        d["future_max40"] = future_extreme(h,40,"max")
-        d["future_min40"] = future_extreme(l,40,"min")
-        d["low_label40"] = (
-            (d.future_max40/c-1 >= .15) & (d.future_min40/c-1 >= -.08)
+        d["future_max20"] = future_extreme(h,20,"max")
+        d["future_min20"] = future_extreme(l,20,"min")
+        d["low_label20"] = (
+            (d.future_max20/c-1 >= .20) & (d.future_min20/c-1 >= -.10)
         )
-        d["high_label40"] = (
-            (d.future_min40/c-1 <= -.15) & (d.future_max40/c-1 <= .08)
+        d["high_label20"] = (
+            (d.future_min20/c-1 <= -.20) & (d.future_max20/c-1 <= .10)
         )
         d["symbol"] = symbol
         d["name"] = NAMES[symbol]
@@ -398,12 +398,12 @@ def equal_weight_benchmark(panel: pd.DataFrame,start: str,end: str,initial: floa
 def run_research(input_dir: str|Path,output_dir: str|Path) -> dict:
     frames,manifest=load_adjusted_frames(input_dir)
     panel=build_feature_panel(frames)
-    low_model,low=fit_probability_model(panel,"low_label40")
-    high_model,high=fit_probability_model(panel,"high_label40")
+    low_model,low=fit_probability_model(panel,"low_label20")
+    high_model,high=fit_probability_model(panel,"high_label20")
     panel["low_score"]=low["scores"]
     threshold=low["report"]["validation_threshold_95pct"]
     panel["signal_low_raw"]=(panel.low_score>=threshold).fillna(False)
-    panel["signal_low_cooldown"]=apply_cooldown(panel,"signal_low_raw",40)
+    panel["signal_low_cooldown"]=apply_cooldown(panel,"signal_low_raw",20)
     latest=min(pd.Timestamp(panel.date.max()),pd.Timestamp("2026-11-09"))
     val_end=min(pd.Timestamp("2023-10-31"),latest)
     test_end=latest
@@ -466,10 +466,11 @@ def run_research(input_dir: str|Path,output_dir: str|Path) -> dict:
         "execution_note":"收盤訊號、下一交易日開盤進場；初始停損 3 ATR，移動停損為持倉後最高價減 5 ATR，持有 50 根 K 棒後下一開盤出場。現金帳戶、最多五檔、單檔權重上限 40%。",
         "cost_note":"買進手續費 0.1425% + 滑價 0.10%；賣出手續費 0.1425% + 證交稅 0.30% + 滑價 0.10%。",
         "adv_note":"1% 成交量參與率限制以還原收盤價 × Yahoo 回報量估算 ADV proxy，不是原始成交金額；本次實際成交量參與率需另以官方原始成交金額資料核對。",
-        "label_note":"低點標籤：訊號日後 40 交易日內最高價至少上漲 15%，且期間最低價不得低於訊號收盤價 8%；高點標籤反向定義。標籤只供訓練/評估，訊號特徵只使用當日收盤可得資料。",
+        "label_note":"低點標籤：訊號日後 20 交易日內最高價至少上漲 20%，且期間最低價不得低於訊號收盤價 10%；高點標籤：未來 20 日最低價至少下跌 20%，且最高價不得高於訊號收盤價 10%。標籤只供訓練/評估，訊號特徵只使用當日收盤可得資料。",
         "low_point_model":low["report"],
         "high_point_model_diagnostic_only":high["report"],
         "low_point_formula":low["formula"],
+        "high_point_formula_diagnostic_only":high["formula"],
         "validation_selected_config":config,
         "validation_portfolio":val_metrics,
         "test_locked_portfolio":test_metrics,
