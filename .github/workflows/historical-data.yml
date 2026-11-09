@@ -5,7 +5,6 @@ on:
     branches: [research/200cagr-blind-validation]
     paths:
       - .github/run-historical-smoke
-      - .github/workflows/historical-data.yml
       - historical_data_collector.py
   workflow_dispatch:
     inputs:
@@ -24,10 +23,10 @@ permissions:
   actions: write
   contents: read
 
-# Each resumable batch gets its own concurrency group. A stale runner must
-# not block a repaired batch from starting.
+# Serialize all collection batches on this branch. Each successful batch
+# dispatches exactly one successor; queued duplicates must not run in parallel.
 concurrency:
-  group: historical-data-collection-${{ github.run_id }}
+  group: historical-data-collection-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -118,12 +117,14 @@ jobs:
           TARGET_REF: ${{ github.ref_name }}
           START_DATE: ${{ inputs.start_date || '2010-01-04' }}
         run: |
-          python - <<'PY' > dispatch.json
+          python - <<'PY'
           import json, os
-          json.dump({
+          payload = {
               "ref": os.environ["TARGET_REF"],
               "inputs": {"start_date": os.environ["START_DATE"], "max_symbols": "0"}
-          }, open("dispatch.json", "w"))
+          }
+          with open("dispatch.json", "w", encoding="utf-8") as f:
+              json.dump(payload, f)
           PY
           curl --fail-with-body --silent --show-error \
             -X POST \
