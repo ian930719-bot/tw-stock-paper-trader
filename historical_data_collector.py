@@ -130,7 +130,6 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
             statuses.append({"symbol": symbol, "status": "failed", "error": str(exc)})
         if i + 1 < len(symbols):
             time.sleep(max(0.0, float(pause_seconds)))
-        (out / "download_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     manifest = {
         "source": "FinMind API v4",
         "price_dataset": "TaiwanStockPrice (raw, unadjusted execution bars)",
@@ -168,5 +167,4 @@ def main():
 
 
 if __name__ == "__main__":
-    import numpy as np
     main()
