@@ -228,6 +228,7 @@ def simulate_portfolio(
 
     for day in dates:
         today = {s: lookup[day] for s, lookup in row_lookup.items() if day in lookup}
+        closed_today = set()
 
         # Exit orders from the prior close and overnight stop gaps are filled first.
         for symbol in list(positions):
@@ -252,12 +253,13 @@ def simulate_portfolio(
                                "pnl": pnl})
                 cash += proceeds
                 del positions[symbol]
+                closed_today.add(symbol)
 
         # Rank same-day candidates by momentum; position and ADV limits are applied.
         candidates = sorted(schedules.get(day, []), key=lambda x: x["momentum"], reverse=True)
         for candidate in candidates:
             symbol = candidate["symbol"]
-            if symbol in positions or symbol not in today or len(positions) >= max_positions:
+            if symbol in positions or symbol in closed_today or symbol not in today or len(positions) >= max_positions:
                 continue
             row = today[symbol]
             entry = float(row.open) * (1 + SLIPPAGE)
@@ -302,6 +304,7 @@ def simulate_portfolio(
                                "pnl": pnl})
                 cash += proceeds
                 del positions[symbol]
+                closed_today.add(symbol)
 
         # Only completed bars update trailing protection and exit instructions.
         for symbol in list(positions):
