@@ -157,6 +157,7 @@ def run_streaming_research(input_dir: str, output_dir: str, *, split_date: str =
     action_events_path = root / "corporate_actions" / "events.csv"
     action_events = pd.read_csv(action_events_path, dtype={"symbol": str}) if action_events_path.exists() else pd.DataFrame()
     corporate_actions_complete = bool(manifest.get("corporate_actions_complete", False))
+    corporate_action_conflicts = int(manifest.get("corporate_action_conflicts", 0))
     quality, integrity = [], []
     split = pd.Timestamp(split_date)
     with tempfile.TemporaryDirectory(prefix="tw_factor_") as tmp:
@@ -324,6 +325,7 @@ def run_streaming_research(input_dir: str, output_dir: str, *, split_date: str =
         "delisted_price_coverage_verified": bool(manifest.get("delisted_price_coverage_verified", False)),
         "corporate_actions_complete": corporate_actions_complete,
         "corporate_action_event_rows": int(len(action_events)),
+        "corporate_action_conflicts": corporate_action_conflicts,
         "price_basis_for_signals": "event-adjusted historical OHLC; raw execution bars preserved" if corporate_actions_complete else "partial or unavailable event-adjusted OHLC; descriptive only",
         "research_grade_eligible": False,
         "research_grade_blockers": [
@@ -332,6 +334,7 @@ def run_streaming_research(input_dir: str, output_dir: str, *, split_date: str =
             f"{candidates_without_bars} candidate symbols have no valid price bars",
             "Delisted and suspended security price coverage is not verified",
             *([] if corporate_actions_complete else ["Corporate-action event collection is incomplete"]),
+            *([] if corporate_action_conflicts == 0 else [f"{corporate_action_conflicts} same-day corporate-action ratios conflict and were excluded"]),
             "Corporate actions have not been independently reconciled against official exchange records",
             "Official trading-calendar completeness has not been verified",
             "Vendor raw bars have not been reconciled against official exchange samples",
