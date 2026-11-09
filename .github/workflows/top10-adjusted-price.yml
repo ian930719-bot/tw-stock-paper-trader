@@ -49,8 +49,8 @@ jobs:
           python -m unittest tests.test_top10_shared_capital_research -v
       - name: Collect adjusted OHLCV (FinMind first, Yahoo fallback)
         env:
-          FINMIND_TOKEN: \${{ secrets.FINMIND_TOKEN }}
-          PRICE_PROVIDER: \${{ inputs.provider || 'auto' }}
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+          PRICE_PROVIDER: ${{ inputs.provider || 'auto' }}
         run: |
           python collect_top10_adjusted_prices.py \
             --output data/top10_adjusted \
