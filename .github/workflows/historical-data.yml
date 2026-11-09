@@ -5,6 +5,7 @@ on:
     branches: [research/200cagr-blind-validation]
     paths:
       - .github/run-historical-smoke
+      - .github/workflows/historical-data.yml
       - historical_data_collector.py
   workflow_dispatch:
     inputs:
@@ -23,14 +24,16 @@ permissions:
   actions: write
   contents: read
 
+# Each resumable batch gets its own concurrency group. A stale runner must
+# not block a repaired batch from starting.
 concurrency:
-  group: historical-data-collection
+  group: historical-data-collection-${{ github.run_id }}
   cancel-in-progress: false
 
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -76,7 +79,7 @@ jobs:
           python historical_data_collector.py \
             --output data/taiwan_history \
             --start-date "$START_DATE" \
-            --max-runtime-minutes 330 \
+            --max-runtime-minutes 45 \
             "${LIMIT_ARGS[@]}"
           python - <<'PY' >> "$GITHUB_OUTPUT"
           import json
