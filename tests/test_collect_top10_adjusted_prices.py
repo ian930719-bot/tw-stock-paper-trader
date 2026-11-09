@@ -1,5 +1,6 @@
 import unittest
-from collect_top10_adjusted_prices import normalize
+import pandas as pd
+from collect_top10_adjusted_prices import normalize, normalize_yahoo
 
 
 class AdjustedPriceNormalizationTests(unittest.TestCase):
@@ -13,6 +14,16 @@ class AdjustedPriceNormalizationTests(unittest.TestCase):
         self.assertEqual(frame.loc[0, "high"], 102)
         self.assertEqual(frame.loc[0, "volume"], 123456)
         self.assertEqual(frame.loc[0, "name"], "台積電")
+
+    def test_yahoo_auto_adjust_schema_is_normalized_and_keeps_actions(self):
+        history = pd.DataFrame({
+            "Open": [95.0], "High": [97.0], "Low": [94.0], "Close": [96.0],
+            "Volume": [1000], "Dividends": [1.0], "Stock Splits": [0.0],
+        }, index=pd.DatetimeIndex(["2024-01-02"], name="Date"))
+        frame = normalize_yahoo(history, "2330")
+        self.assertEqual(frame.loc[0, "close"], 96.0)
+        self.assertEqual(frame.loc[0, "dividends"], 1.0)
+        self.assertEqual(frame.loc[0, "stock_splits"], 0.0)
 
     def test_invalid_ohlc_is_rejected(self):
         rows = [{
