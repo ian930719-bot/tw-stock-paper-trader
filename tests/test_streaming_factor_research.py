@@ -44,6 +44,7 @@ class StreamingFactorResearchTests(unittest.TestCase):
             for i in range(12):
                 self.make_bars(str(1000+i), n=280, seed=10+i).to_csv(root / "bars" / f"{1000+i}.csv", index=False)
             import json
+            pd.DataFrame({"symbol": [str(1000+i) for i in range(12)] + ["9999"], "name": ["test"] * 13}).to_csv(root / "candidate_symbols.csv", index=False)
             (root / "download_manifest.json").write_text(json.dumps({
                 "source": "test", "price_dataset": "raw", "start_date": "2020-01-01",
                 "collection_complete": True, "data_files_sha256": {},
@@ -52,6 +53,8 @@ class StreamingFactorResearchTests(unittest.TestCase):
             out = Path(tmp) / "out"
             summary = run_streaming_research(str(root), str(out), split_date="2021-01-01")
             self.assertEqual(summary["symbols_with_valid_rows"], 12)
+            self.assertEqual(summary["missing_candidate_files"], 1)
+            self.assertTrue((out / "candidate_coverage.csv").exists())
             self.assertFalse(summary["research_grade_eligible"])
             self.assertTrue((out / "data_quality.csv").exists())
             self.assertTrue((out / "factor_research_results.csv").exists())

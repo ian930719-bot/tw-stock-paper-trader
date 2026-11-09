@@ -260,11 +260,32 @@ def run_streaming_research(input_dir: str, output_dir: str, *, split_date: str =
 
     qdf = pd.DataFrame(quality)
     idf = pd.DataFrame(integrity)
+    candidate_path = root / "candidate_symbols.csv"
+    if candidate_path.exists():
+        candidates = pd.read_csv(candidate_path, dtype={"symbol": str})
+    else:
+        candidates = pd.DataFrame({"symbol": [Path(f).stem for f in files]})
+    if "symbol" not in candidates:
+        candidates = candidates.rename(columns={candidates.columns[0]: "symbol"})
+    candidates["symbol"] = candidates["symbol"].astype(str)
+    coverage_cols = [c for c in ("symbol", "input_rows", "valid_date_rows", "factor_rows") if c in qdf.columns]
+    candidate_coverage = candidates.merge(qdf[coverage_cols], on="symbol", how="left")
+    candidate_coverage["has_bar_file"] = candidate_coverage["symbol"].isin({p.stem for p in files})
+    candidate_coverage["has_valid_bars"] = candidate_coverage.get("valid_date_rows", pd.Series(0, index=candidate_coverage.index)).fillna(0) > 0
+    candidate_coverage["has_factor_rows"] = candidate_coverage.get("factor_rows", pd.Series(0, index=candidate_coverage.index)).fillna(0) > 0
+    candidate_coverage.to_csv(out / "candidate_coverage.csv", index=False)
+    missing_candidate_files = int((~candidate_coverage["has_bar_file"]).sum())
+    candidates_without_bars = int((~candidate_coverage["has_valid_bars"]).sum())
     summary = {
         "source": manifest.get("source", "unknown"),
         "price_dataset": manifest.get("price_dataset", "unknown"),
         "start_date_requested": manifest.get("start_date"),
+        "candidate_symbols": int(len(candidate_coverage)),
         "symbols_with_files": int(len(files)),
+        "missing_candidate_files": missing_candidate_files,
+        "candidate_symbols_without_valid_bars": candidates_without_bars,
+        "failed_download_symbols": int(manifest.get("failed_symbols", 0)),
+        "empty_download_symbols": int(manifest.get("empty_symbols", 0)),
         "symbols_with_valid_rows": int((qdf["valid_date_rows"] > 0).sum()) if not qdf.empty else 0,
         "input_rows": int(qdf["input_rows"].sum()) if not qdf.empty else 0,
         "valid_date_rows": int(qdf["valid_date_rows"].sum()) if not qdf.empty else 0,
@@ -281,6 +302,8 @@ def run_streaming_research(input_dir: str, output_dir: str, *, split_date: str =
         "research_grade_eligible": False,
         "research_grade_blockers": [
             "Historical point-in-time universe membership is not verified",
+            f"{missing_candidate_files} candidate symbols have no downloaded bar file",
+            f"{candidates_without_bars} candidate symbols have no valid price bars",
             "Delisted and suspended security price coverage is not verified",
             "Corporate actions have not been reconciled against official exchange records",
             "Official trading-calendar completeness has not been verified",
