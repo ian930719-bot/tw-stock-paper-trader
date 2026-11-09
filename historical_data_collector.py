@@ -112,10 +112,34 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
     current.to_csv(out / "current_security_master.csv", index=False)
     delisted.to_csv(out / "delisting_announcements.csv", index=False)
     statuses = []
+
+    def write_checkpoint() -> None:
+        checkpoint = {
+            "source": "FinMind API v4",
+            "price_dataset": "TaiwanStockPrice (raw, unadjusted execution bars)",
+            "start_date": start_date, "end_date": end_date,
+            "token_configured": bool(api_token),
+            "requested_symbols": len(symbols),
+            "completed_symbols": len(statuses),
+            "successful_symbols": sum(x["status"] in {"downloaded", "cached"} for x in statuses),
+            "failed_symbols": sum(x["status"] == "failed" for x in statuses),
+            "empty_symbols": sum(x["status"] == "empty" for x in statuses),
+            "status_rows": statuses,
+            "data_files_sha256": {},
+            "checkpoint_only": True,
+            "point_in_time_universe_complete": False,
+            "delisted_price_coverage_verified": False,
+            "note": "Checkpoint written during collection; hashes are finalized only after the run completes. Candidate symbols are not a verified historical point-in-time universe.",
+        }
+        (out / "download_manifest.json").write_text(
+            json.dumps(checkpoint, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
     for i, symbol in enumerate(symbols):
         path = bars_dir / f"{symbol}.csv"
         if path.exists() and path.stat().st_size > 20:
             statuses.append({"symbol": symbol, "status": "cached", "rows": int(len(pd.read_csv(path)))})
+            write_checkpoint()
             continue
         params = {"dataset": "TaiwanStockPrice", "data_id": symbol, "start_date": start_date}
         if end_date:
@@ -128,6 +152,7 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
                              "rows": int(len(frame))})
         except Exception as exc:
             statuses.append({"symbol": symbol, "status": "failed", "error": str(exc)})
+        write_checkpoint()
         if i + 1 < len(symbols):
             time.sleep(max(0.0, float(pause_seconds)))
     manifest = {
@@ -143,6 +168,7 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
         "status_rows": statuses,
         "point_in_time_universe_complete": False,
         "delisted_price_coverage_verified": False,
+        "checkpoint_only": False,
         "note": "Current master plus delisting announcements is a candidate list, not a verified historical point-in-time universe. Reconcile coverage before research-grade use.",
     }
     manifest["data_files_sha256"] = {}
