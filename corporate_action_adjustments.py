@@ -62,7 +62,7 @@ def normalize_corporate_action_events(
             "symbol", "date", "adjustment_ratio", "sources", "source_count", "conflict"
         ])
     # Multiple datasets can describe the same effective event. Identical ratios
-    # are deduplicated; distinct same-day ratios are multiplied as separate events.
+    # are deduplicated; distinct same-day ratios are ambiguous and fail closed.
     out = []
     for (symbol, date), group in rows.groupby(["symbol", "date"], sort=True):
         unique_ratios = sorted({round(float(x), 10) for x in group["ratio"]})
@@ -103,6 +103,8 @@ def apply_back_adjustments(bars: pd.DataFrame, events: pd.DataFrame | None) -> p
         before = z["date"] < event.date
         for col in PRICE_COLUMNS:
             z.loc[before, f"adj_{col}"] *= float(event.adjustment_ratio)
+        if z.empty or event.date < z["date"].min() or event.date > z["date"].max():
+            continue
         event_positions = np.flatnonzero(z["date"].to_numpy() >= np.datetime64(event.date))
         if len(event_positions):
             first = int(event_positions[0])
@@ -118,6 +120,6 @@ def audit_action_coverage(symbols: list[str], events: pd.DataFrame,
         "corporate_action_symbols_with_events": len(valid_symbols.intersection(set(map(str, symbols)))),
         "corporate_action_event_rows": int(len(events)) if events is not None else 0,
         "corporate_action_conflicts": int(events["conflict"].fillna(False).sum()) if events is not None and "conflict" in events else 0,
-        "corporate_action_symbols_without_events": int(max(0, expected_symbols - len(valid_symbols))),
+        "corporate_action_symbols_without_reported_events": int(max(0, expected_symbols - len(valid_symbols)),
         "corporate_action_source": "FinMind TaiwanStockDividendResult, TaiwanStockSplitPrice, TaiwanStockCapitalReductionReferencePrice, TaiwanStockParValueChange",
     }
