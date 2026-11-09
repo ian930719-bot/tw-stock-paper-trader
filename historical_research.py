@@ -36,16 +36,6 @@ def normalize_panel(frame: pd.DataFrame) -> pd.DataFrame:
         if col in z.columns:
             z[col] = pd.to_numeric(z[col], errors="coerce")
     z = z.dropna(subset=["symbol", "date", "open", "high", "low", "close", "volume"])
-    valid_price = (z[["open", "high", "low", "close"]] > 0).all(axis=1)
-    valid_volume = z["volume"] >= 0
-    valid_ohlc = (
-        (z["high"] >= z[["open", "close", "low"]].max(axis=1))
-        & (z["low"] <= z[["open", "close", "high"]].min(axis=1))
-    )
-    z = z.loc[valid_price & valid_volume & valid_ohlc]
-    # A symbol/date must have one deterministic observation before rolling
-    # features or forward labels are calculated.
-    z = z.drop_duplicates(["symbol", "date"], keep="last")
     return z.sort_values(["symbol", "date"], kind="mergesort").reset_index(drop=True)
 
 
@@ -143,6 +133,15 @@ def audit_historical_panel(frame: pd.DataFrame, *, source: str = "unspecified",
 def build_factor_panel(frame: pd.DataFrame, benchmark: pd.Series | None = None) -> pd.DataFrame:
     """Build interpretable close-known factors and next-open forward returns."""
     z = normalize_panel(frame)
+    valid_price = (z[["open", "high", "low", "close"]] > 0).all(axis=1)
+    valid_volume = z["volume"] >= 0
+    valid_ohlc = (
+        (z["high"] >= z[["open", "close", "low"]].max(axis=1))
+        & (z["low"] <= z[["open", "close", "high"]].min(axis=1))
+    )
+    z = z.loc[valid_price & valid_volume & valid_ohlc]
+    # Resolve duplicates before calculating rolling factors and forward labels.
+    z = z.drop_duplicates(["symbol", "date"], keep="last")
     outputs = []
     for symbol, g0 in z.groupby("symbol", sort=False):
         g = g0.sort_values("date").copy()
