@@ -49,24 +49,22 @@ def _api_get(params: dict, *, token: str = "", timeout: int = 20,
     raise RuntimeError(f"FinMind request failed: {error}") from error
 
 
-def snapshot_current_universe(output_dir: str, *, token: str | None = None) -> dict:
+def save_universe_snapshot(output_dir: str, frame: pd.DataFrame) -> dict:
     """Persist the first security-master observation for each Taiwan calendar day."""
-    api_token = (token or os.getenv("FINMIND_TOKEN", "")).strip()
     now = datetime.now(ZoneInfo("Asia/Taipei"))
     snapshot_date = now.date().isoformat()
     directory = Path(output_dir) / "universe_snapshots"
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{snapshot_date}.csv"
     if not path.exists():
-        rows = _api_get({"dataset": "TaiwanStockInfo"}, token=api_token, timeout=30)
-        frame = pd.DataFrame(rows)
-        if frame.empty or not {"stock_id", "type"}.issubset(frame.columns):
+        snapshot = frame.copy()
+        if snapshot.empty or not {"stock_id", "type"}.issubset(snapshot.columns):
             raise RuntimeError("TaiwanStockInfo did not return a usable daily universe snapshot")
-        frame["stock_id"] = frame["stock_id"].astype(str).str.strip()
-        frame["snapshot_date"] = snapshot_date
-        frame["captured_at_taipei"] = now.isoformat()
-        frame["source"] = "FinMind TaiwanStockInfo"
-        frame.to_csv(path, index=False)
+        snapshot["stock_id"] = snapshot["stock_id"].astype(str).str.strip()
+        snapshot["snapshot_date"] = snapshot_date
+        snapshot["captured_at_taipei"] = now.isoformat()
+        snapshot["source"] = "FinMind TaiwanStockInfo"
+        snapshot.to_csv(path, index=False)
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     return {
         "snapshot_date": snapshot_date,
@@ -74,6 +72,17 @@ def snapshot_current_universe(output_dir: str, *, token: str | None = None) -> d
         "snapshot_sha256": digest,
         "snapshot_rows": int(len(pd.read_csv(path))),
     }
+
+
+def snapshot_current_universe(output_dir: str, *, token: str | None = None) -> dict:
+    """Fetch and persist today's master only when today's immutable snapshot is absent."""
+    now = datetime.now(ZoneInfo("Asia/Taipei"))
+    path = Path(output_dir) / "universe_snapshots" / f"{now.date().isoformat()}.csv"
+    if path.exists():
+        return save_universe_snapshot(output_dir, pd.read_csv(path, dtype={"stock_id": str}))
+    api_token = (token or os.getenv("FINMIND_TOKEN", "")).strip()
+    rows = _api_get({"dataset": "TaiwanStockInfo"}, token=api_token, timeout=30)
+    return save_universe_snapshot(output_dir, pd.DataFrame(rows))
 
 
 def discover_symbols(start_date: str, end_date: str | None = None, *,
@@ -216,16 +225,17 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
     out = Path(output_dir)
     bars_dir = out / "bars"
     bars_dir.mkdir(parents=True, exist_ok=True)
-    universe_snapshot = snapshot_current_universe(out, token=api_token if "api_token" in locals() else token)
     frozen_universe_path = out / "candidate_universe_full.csv"
     if max_symbols is None and frozen_universe_path.exists():
         # Reuse the exact initial full-universe snapshot across chained batches.
         candidate_meta = pd.read_csv(frozen_universe_path, dtype={"stock_id": str})
+        universe_snapshot = snapshot_current_universe(out, token=api_token)
     else:
         current, delisted = discover_symbols(start_date, end_date, token=api_token)
         candidate_meta = build_candidate_universe(current, delisted)
         current.to_csv(out / "current_security_master.csv", index=False)
         delisted.to_csv(out / "delisting_announcements.csv", index=False)
+        universe_snapshot = save_universe_snapshot(out, current)
         if max_symbols is None:
             candidate_meta.to_csv(frozen_universe_path, index=False)
     candidate_meta = select_candidate_metadata(candidate_meta, max_symbols)
