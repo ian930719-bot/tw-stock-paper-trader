@@ -3,7 +3,7 @@ import unittest
 import tempfile
 from unittest.mock import patch
 import pandas as pd
-from historical_data_collector import _normalize_bars, build_candidate_universe, select_candidate_metadata, collect_history, collect_corporate_actions
+from historical_data_collector import _normalize_bars, build_candidate_universe, select_candidate_metadata, collect_history, collect_corporate_actions, save_universe_snapshot
 
 
 class HistoricalCollectorTests(unittest.TestCase):
@@ -153,6 +153,17 @@ class HistoricalCollectorTests(unittest.TestCase):
                 sleep_patch.stop()
             events = pd.read_csv(f"{tmp}/corporate_actions/events.csv")
             self.assertAlmostEqual(events.iloc[0]["adjustment_ratio"], 0.95)
+
+
+    def test_daily_universe_snapshot_is_immutable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            first = pd.DataFrame([{"stock_id": "2330", "type": "twse"}])
+            second = pd.DataFrame([{"stock_id": "1101", "type": "twse"}])
+            a = save_universe_snapshot(tmp, first)
+            b = save_universe_snapshot(tmp, second)
+            self.assertEqual(a["snapshot_sha256"], b["snapshot_sha256"])
+            saved = pd.read_csv(f"{tmp}/{a['snapshot_path']}", dtype={"stock_id": str})
+            self.assertEqual(saved["stock_id"].tolist(), ["2330"])
 
 
 if __name__ == "__main__":
