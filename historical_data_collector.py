@@ -8,6 +8,8 @@ universe membership; that remains an explicit research limitation.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import hashlib
 import json
 import os
@@ -45,6 +47,33 @@ def _api_get(params: dict, *, token: str = "", timeout: int = 20,
                 print(f"[API RETRY] attempt={attempt + 2}/{retries} delay={delay:.1f}s error={type(exc).__name__}: {exc}", flush=True)
                 time.sleep(delay)
     raise RuntimeError(f"FinMind request failed: {error}") from error
+
+
+def snapshot_current_universe(output_dir: str, *, token: str | None = None) -> dict:
+    """Persist the first security-master observation for each Taiwan calendar day."""
+    api_token = (token or os.getenv("FINMIND_TOKEN", "")).strip()
+    now = datetime.now(ZoneInfo("Asia/Taipei"))
+    snapshot_date = now.date().isoformat()
+    directory = Path(output_dir) / "universe_snapshots"
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{snapshot_date}.csv"
+    if not path.exists():
+        rows = _api_get({"dataset": "TaiwanStockInfo"}, token=api_token, timeout=30)
+        frame = pd.DataFrame(rows)
+        if frame.empty or not {"stock_id", "type"}.issubset(frame.columns):
+            raise RuntimeError("TaiwanStockInfo did not return a usable daily universe snapshot")
+        frame["stock_id"] = frame["stock_id"].astype(str).str.strip()
+        frame["snapshot_date"] = snapshot_date
+        frame["captured_at_taipei"] = now.isoformat()
+        frame["source"] = "FinMind TaiwanStockInfo"
+        frame.to_csv(path, index=False)
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    return {
+        "snapshot_date": snapshot_date,
+        "snapshot_path": str(path.relative_to(Path(output_dir))),
+        "snapshot_sha256": digest,
+        "snapshot_rows": int(len(pd.read_csv(path))),
+    }
 
 
 def discover_symbols(start_date: str, end_date: str | None = None, *,
@@ -187,6 +216,7 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
     out = Path(output_dir)
     bars_dir = out / "bars"
     bars_dir.mkdir(parents=True, exist_ok=True)
+    universe_snapshot = snapshot_current_universe(out, token=api_token if "api_token" in locals() else token)
     frozen_universe_path = out / "candidate_universe_full.csv"
     if max_symbols is None and frozen_universe_path.exists():
         # Reuse the exact initial full-universe snapshot across chained batches.
@@ -296,6 +326,7 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
         "empty_symbols": sum(x["status"] == "empty" for x in statuses),
         "status_rows": statuses,
         "point_in_time_universe_complete": False,
+        "daily_universe_snapshot": universe_snapshot,
         "delisted_price_coverage_verified": False,
         "checkpoint_only": False,
         "note": "Current master plus delisting announcements is a candidate list, not a verified historical point-in-time universe. Reconcile coverage before research-grade use.",
