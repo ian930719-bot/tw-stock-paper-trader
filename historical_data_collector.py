@@ -450,6 +450,7 @@ def collect_corporate_actions(output_dir: str, start_date: str, end_date: str | 
         "corporate_actions_complete": completed >= len(symbols) and failed == 0 and global_ok,
         "event_rows": int(len(events)),
         "event_symbols": int(events["symbol"].nunique()) if not events.empty else 0,
+        "event_conflicts": int(events["conflict"].fillna(False).sum()) if not events.empty and "conflict" in events else 0,
         "runtime_seconds": round(time.monotonic() - started, 2),
         "status_rows": statuses,
     }
@@ -463,6 +464,7 @@ def collect_corporate_actions(output_dir: str, start_date: str, end_date: str | 
             "corporate_actions_complete": action_manifest["corporate_actions_complete"],
             "corporate_action_event_rows": action_manifest["event_rows"],
             "corporate_action_symbols": action_manifest["event_symbols"],
+            "corporate_action_conflicts": action_manifest["event_conflicts"],
             "corporate_action_manifest": "corporate_actions/manifest.json",
         })
         main_manifest_path.write_text(
