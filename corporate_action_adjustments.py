@@ -120,6 +120,6 @@ def audit_action_coverage(symbols: list[str], events: pd.DataFrame,
         "corporate_action_symbols_with_events": len(valid_symbols.intersection(set(map(str, symbols)))),
         "corporate_action_event_rows": int(len(events)) if events is not None else 0,
         "corporate_action_conflicts": int(events["conflict"].fillna(False).sum()) if events is not None and "conflict" in events else 0,
-        "corporate_action_symbols_without_reported_events": int(max(0, expected_symbols - len(valid_symbols)),
+        "corporate_action_symbols_without_reported_events": int(max(0, expected_symbols - len(valid_symbols))),
         "corporate_action_source": "FinMind TaiwanStockDividendResult, TaiwanStockSplitPrice, TaiwanStockCapitalReductionReferencePrice, TaiwanStockParValueChange",
     }
