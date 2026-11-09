@@ -219,14 +219,10 @@ def run_streaming_research(input_dir: str, output_dir: str, *, split_date: str =
                             "top_quintile_return": float(top), "bottom_quintile_return": float(bottom),
                             "n": int(len(pair)),
                         }
-                        daily_rows.append(record)
+                        full_record = dict(record, segment="FULL_DESCRIPTIVE")
+                        daily_rows.append(full_record)
                         if day >= split:
-                            record2 = dict(record)
-                            record2["segment"] = "POST_SPLIT_DESCRIPTIVE"
-                            daily_rows.append(record2)
-                        record["segment"] = "FULL_DESCRIPTIVE"
-                        # Store a separate full row; the first record is already referenced in daily_rows.
-                        daily_rows.append(dict(record))
+                            daily_rows.append(dict(record, segment="POST_SPLIT_DESCRIPTIVE"))
 
         daily = pd.DataFrame(daily_rows)
         if not daily.empty:

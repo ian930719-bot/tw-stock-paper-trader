@@ -95,12 +95,10 @@ jobs:
       - name: Run exploratory factor research after full collection
         if: steps.collect.outcome == 'success' && steps.collect.outputs.collection_complete == 'true'
         run: |
-          python historical_research.py \
+          python streaming_factor_research.py \
             --input data/taiwan_history \
-            --output artifacts/historical_research \
-            --split-date 2024-01-01 \
-            --source "FinMind TaiwanStockPrice" \
-            --price-basis raw
+            --output artifacts/streaming_factor_research \
+            --split-date 2024-01-01
       - name: Upload raw data, provenance, and research outputs
         if: always()
         uses: actions/upload-artifact@v4
