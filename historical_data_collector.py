@@ -182,15 +182,22 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
     out = Path(output_dir)
     bars_dir = out / "bars"
     bars_dir.mkdir(parents=True, exist_ok=True)
-    current, delisted = discover_symbols(start_date, end_date, token=api_token)
-    candidate_meta = build_candidate_universe(current, delisted)
+    frozen_universe_path = out / "candidate_universe_full.csv"
+    if max_symbols is None and frozen_universe_path.exists():
+        # Reuse the exact initial full-universe snapshot across chained batches.
+        candidate_meta = pd.read_csv(frozen_universe_path, dtype={"stock_id": str})
+    else:
+        current, delisted = discover_symbols(start_date, end_date, token=api_token)
+        candidate_meta = build_candidate_universe(current, delisted)
+        current.to_csv(out / "current_security_master.csv", index=False)
+        delisted.to_csv(out / "delisting_announcements.csv", index=False)
+        if max_symbols is None:
+            candidate_meta.to_csv(frozen_universe_path, index=False)
     candidate_meta = select_candidate_metadata(candidate_meta, max_symbols)
     symbols = candidate_meta["stock_id"].astype(str).tolist()
     candidate_meta.rename(columns={"stock_id": "symbol", "stock_name": "name"}).to_csv(
         out / "candidate_symbols.csv", index=False
     )
-    current.to_csv(out / "current_security_master.csv", index=False)
-    delisted.to_csv(out / "delisting_announcements.csv", index=False)
     statuses = []
 
     def write_checkpoint() -> None:
@@ -200,6 +207,8 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
             "start_date": start_date, "end_date": end_date,
             "token_configured": bool(api_token),
             "requested_symbols": len(symbols),
+            "candidate_universe_frozen": max_symbols is None and frozen_universe_path.exists(),
+            "candidate_universe_sha256": hashlib.sha256(frozen_universe_path.read_bytes()).hexdigest() if max_symbols is None and frozen_universe_path.exists() else None,
             "completed_symbols": len(statuses),
             "remaining_symbols": max(0, len(symbols) - len(statuses)),
             "collection_complete": len(statuses) >= len(symbols),
@@ -248,6 +257,8 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
         "start_date": start_date, "end_date": end_date,
         "token_configured": bool(api_token),
         "requested_symbols": len(symbols),
+        "candidate_universe_frozen": max_symbols is None and frozen_universe_path.exists(),
+        "candidate_universe_sha256": hashlib.sha256(frozen_universe_path.read_bytes()).hexdigest() if max_symbols is None and frozen_universe_path.exists() else None,
         "completed_symbols": len(statuses),
         "remaining_symbols": max(0, len(symbols) - len(statuses)),
         "collection_complete": len(statuses) >= len(symbols),
