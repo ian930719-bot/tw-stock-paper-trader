@@ -62,5 +62,19 @@ class CorporateActionAdjustmentTests(unittest.TestCase):
         self.assertEqual(events.iloc[0]["source_count"], 1)
 
 
+    def test_conflicting_same_day_action_ratios_are_flagged_not_guessed(self):
+        dividend = pd.DataFrame([{
+            "stock_id": "2330", "date": "2024-01-04",
+            "before_price": 100.0, "reference_price": 95.0,
+        }])
+        split = pd.DataFrame([{
+            "stock_id": "2330", "date": "2024-01-04",
+            "before_price": 100.0, "after_price": 50.0,
+        }])
+        events = normalize_corporate_action_events(dividend, split)
+        self.assertTrue(bool(events.iloc[0]["conflict"]))
+        self.assertTrue(pd.isna(events.iloc[0]["adjustment_ratio"]))
+
+
 if __name__ == "__main__":
     unittest.main()
