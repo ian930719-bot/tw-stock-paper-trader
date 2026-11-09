@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 
 from top10_shared_capital_research import (
-    prepare_bars, simulate_portfolio, equal_weight_buy_hold,
+    prepare_bars, apply_universe_breadth, simulate_portfolio, equal_weight_buy_hold,
     _trade_cost_return, BUY_FEE, SELL_FEE_TAX,
 )
 
@@ -81,6 +81,26 @@ class Top10SharedCapitalTests(unittest.TestCase):
                 "sig_KD_low", "sig_Oversold3", "sig_Trend_RSI",
                 "sig_TrendBreakout", "sig_SqueezeBreakout", "sig_TrendPullback"]
         pd.testing.assert_frame_equal(original.loc[:259, cols], revised.loc[:259, cols])
+
+    def test_breadth_filter_uses_same_day_completed_closes_and_thresholds(self):
+        dates = pd.bdate_range("2020-01-02", periods=3)
+        frames = {}
+        for i in range(10):
+            above = i < 5
+            close = 110.0 if above else 90.0
+            d = pd.DataFrame({
+                "date": dates, "close": [close] * 3, "sma200": [100.0] * 3,
+                "sig_KD_low": [True] * 3, "sig_Oversold3": [True] * 3,
+                "sig_Trend_RSI": [True] * 3, "sig_TrendBreakout": [True] * 3,
+                "sig_SqueezeBreakout": [True] * 3,
+            })
+            frames[str(i)] = d
+        apply_universe_breadth(frames, min_symbols=8)
+        self.assertTrue((frames["0"].universe_breadth == 0.5).all())
+        self.assertTrue(frames["0"].sig_KD_low_Breadth50.all())
+        self.assertFalse(frames["0"].sig_KD_low_Breadth70.any())
+        self.assertTrue(frames["0"].sig_TrendBreakout_Breadth50.all())
+        self.assertFalse(frames["0"].sig_TrendBreakout_Breadth70.any())
 
     def test_equal_weight_benchmark_charges_round_trip_costs(self):
         a = toy_frame(5, symbol="A")
