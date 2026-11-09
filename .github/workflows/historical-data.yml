@@ -1,5 +1,8 @@
 name: Historical Taiwan Data Collection
 on:
+  push:
+    branches: [research/200cagr-blind-validation]
+    paths: [.github/run-historical-smoke]
   workflow_dispatch:
     inputs:
       start_date:
@@ -31,6 +34,9 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Validate collection inputs
         shell: bash
+        env:
+          START_DATE: ${{ inputs.start_date || '2010-01-04' }}
+          MAX_SYMBOLS: ${{ inputs.max_symbols || '20' }}
         run: |
           python - <<'PY'
           from datetime import date
@@ -41,20 +47,19 @@ jobs:
               raise SystemExit("max_symbols must be 0 or greater")
           print(f"Collection start: {start}; symbol limit: {limit or 'all'}")
           PY
-        env:
-          START_DATE: ${{ inputs.start_date }}
-          MAX_SYMBOLS: ${{ inputs.max_symbols }}
       - name: Collect raw daily bars
         env:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+          START_DATE: ${{ inputs.start_date || '2010-01-04' }}
+          MAX_SYMBOLS: ${{ inputs.max_symbols || '20' }}
         run: |
           LIMIT_ARGS=()
-          if [ "${{ inputs.max_symbols }}" != "0" ]; then
-            LIMIT_ARGS+=(--max-symbols "${{ inputs.max_symbols }}")
+          if [ "$MAX_SYMBOLS" != "0" ]; then
+            LIMIT_ARGS+=(--max-symbols "$MAX_SYMBOLS")
           fi
           python historical_data_collector.py \
             --output data/taiwan_history \
-            --start-date "${{ inputs.start_date }}" \
+            --start-date "$START_DATE" \
             "${LIMIT_ARGS[@]}"
       - name: Upload raw data and provenance
         if: always()
