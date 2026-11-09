@@ -21,15 +21,15 @@ import requests
 API_URL = "https://api.finmindtrade.com/api/v4/data"
 
 
-def _api_get(params: dict, *, token: str = "", timeout: int = 30,
-             retries: int = 4, pause_seconds: float = 6.1) -> list[dict]:
+def _api_get(params: dict, *, token: str = "", timeout: int = 20,
+             retries: int = 3, pause_seconds: float = 2.0) -> list[dict]:
     query = dict(params)
     if token:
         query["token"] = token
     error = None
     for attempt in range(retries):
         try:
-            response = requests.get(API_URL, params=query, timeout=timeout)
+            response = requests.get(API_URL, params=query, timeout=(8, timeout))
             response.raise_for_status()
             payload = response.json()
             if not isinstance(payload, dict) or str(payload.get("status", "200")) not in {"200", "success", "Success"}:
@@ -41,7 +41,9 @@ def _api_get(params: dict, *, token: str = "", timeout: int = 30,
         except (requests.RequestException, ValueError, RuntimeError) as exc:
             error = exc
             if attempt + 1 < retries:
-                time.sleep(min(60, 2 ** attempt * 3))
+                delay = min(20, 2 ** (attempt + 1) * pause_seconds)
+                print(f"[API RETRY] attempt={attempt + 2}/{retries} delay={delay:.1f}s error={type(exc).__name__}: {exc}", flush=True)
+                time.sleep(delay)
     raise RuntimeError(f"FinMind request failed: {error}") from error
 
 
@@ -177,8 +179,11 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
     """Resume per-symbol downloads and write raw CSV plus provenance manifest."""
     api_token = (token or os.getenv("FINMIND_TOKEN", "")).strip()
     if not api_token:
-        # Free-tier limits are lower; use a conservative interval.
+        # FinMind free-tier requests are rate-limited; keep a conservative
+        # inter-symbol delay while still bounding each failed request.
         pause_seconds = max(float(pause_seconds), 12.1)
+    else:
+        pause_seconds = max(float(pause_seconds), 2.1)
     out = Path(output_dir)
     bars_dir = out / "bars"
     bars_dir.mkdir(parents=True, exist_ok=True)
@@ -227,6 +232,11 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
         )
 
     collection_started = time.monotonic()
+    print(
+        f"[COLLECT START] candidates={len(symbols)} cached_files={len(list(bars_dir.glob('*.csv')))} "
+        f"token_configured={bool(api_token)} pause_seconds={pause_seconds:.1f}",
+        flush=True,
+    )
     for i, symbol in enumerate(symbols):
         if max_runtime_minutes is not None and (time.monotonic() - collection_started) >= max(0.0, float(max_runtime_minutes)) * 60:
             break
@@ -236,6 +246,9 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
             if cached_rows > 0:
                 statuses.append({"symbol": symbol, "status": "cached", "rows": cached_rows})
                 write_checkpoint()
+                done = sum(x["status"] in {"downloaded", "cached", "empty"} for x in statuses)
+                if done % 10 == 0 or done == len(symbols):
+                    print(f"[COLLECT PROGRESS] {done}/{len(symbols)} successful_or_empty; cached={sum(x['status']=='cached' for x in statuses)} failed={sum(x['status']=='failed' for x in statuses)} current={symbol}", flush=True)
                 continue
         params = {"dataset": "TaiwanStockPrice", "data_id": symbol, "start_date": start_date}
         if end_date:
@@ -244,13 +257,23 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
             rows = _api_get(params, token=api_token)
             frame = _normalize_bars(rows, symbol)
             frame.to_csv(path, index=False)
-            statuses.append({"symbol": symbol, "status": "downloaded" if not frame.empty else "empty",
-                             "rows": int(len(frame))})
+            status = "downloaded" if not frame.empty else "empty"
+            statuses.append({"symbol": symbol, "status": status, "rows": int(len(frame))})
         except Exception as exc:
-            statuses.append({"symbol": symbol, "status": "failed", "error": str(exc)})
+            statuses.append({"symbol": symbol, "status": "failed", "error": str(exc)[:500]})
         write_checkpoint()
+        done = sum(x["status"] in {"downloaded", "cached", "empty"} for x in statuses)
+        failed = sum(x["status"] == "failed" for x in statuses)
+        print(
+            f"[COLLECT PROGRESS] attempted={len(statuses)}/{len(symbols)} "
+            f"successful_or_empty={done} failed={failed} current={symbol} "
+            f"status={statuses[-1]['status']}",
+            flush=True,
+        )
         if i + 1 < len(symbols):
             time.sleep(max(0.0, float(pause_seconds)))
+    processed_count = sum(x["status"] in {"downloaded", "cached", "empty"} for x in statuses)
+    failed_count = sum(x["status"] == "failed" for x in statuses)
     manifest = {
         "source": "FinMind API v4",
         "price_dataset": "TaiwanStockPrice (raw, unadjusted execution bars)",
@@ -259,12 +282,13 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
         "requested_symbols": len(symbols),
         "candidate_universe_frozen": max_symbols is None and frozen_universe_path.exists(),
         "candidate_universe_sha256": hashlib.sha256(frozen_universe_path.read_bytes()).hexdigest() if max_symbols is None and frozen_universe_path.exists() else None,
-        "completed_symbols": len(statuses),
-        "remaining_symbols": max(0, len(symbols) - len(statuses)),
-        "collection_complete": len(statuses) >= len(symbols),
+        "completed_symbols": processed_count,
+        "attempted_symbols": len(statuses),
+        "remaining_symbols": max(0, len(symbols) - processed_count),
+        "collection_complete": processed_count >= len(symbols) and failed_count == 0,
         "runtime_seconds": round(time.monotonic() - collection_started, 2),
         "successful_symbols": sum(x["status"] in {"downloaded", "cached"} for x in statuses),
-        "failed_symbols": sum(x["status"] == "failed" for x in statuses),
+        "failed_symbols": failed_count,
         "empty_symbols": sum(x["status"] == "empty" for x in statuses),
         "status_rows": statuses,
         "point_in_time_universe_complete": False,
@@ -276,6 +300,13 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
     for path in sorted(bars_dir.glob("*.csv")):
         manifest["data_files_sha256"][path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
     (out / "download_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(
+        f"[COLLECT END] complete={manifest['collection_complete']} "
+        f"successful={manifest['successful_symbols']} empty={manifest['empty_symbols']} "
+        f"failed={manifest['failed_symbols']} remaining={manifest['remaining_symbols']} "
+        f"runtime_seconds={manifest['runtime_seconds']:.1f}",
+        flush=True,
+    )
     return manifest
 
 
