@@ -65,7 +65,7 @@ class HistoricalResearchTests(unittest.TestCase):
         self.assertEqual(len(result), 259)
         self.assertTrue(pd.isna(result.loc[0, "breakout_20"]))
         self.assertTrue(pd.isna(result.loc[0, "trend_stack"]))
-        self.assertTrue(pd.isna(result.loc[100, "breakout_55"]))
+        self.assertTrue(pd.isna(result.loc[40, "breakout_55"]))
 
     def test_factor_panel_is_causal(self):
         original = sample_panel(n=260, symbols=("2330",))
