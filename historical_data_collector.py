@@ -130,22 +130,22 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
             statuses.append({"symbol": symbol, "status": "failed", "error": str(exc)})
         if i + 1 < len(symbols):
             time.sleep(max(0.0, float(pause_seconds)))
-        manifest = {
-            "source": "FinMind API v4",
-            "price_dataset": "TaiwanStockPrice (raw, unadjusted execution bars)",
-            "start_date": start_date, "end_date": end_date,
-            "token_configured": bool(api_token),
-            "requested_symbols": len(symbols),
-            "completed_symbols": len(statuses),
-            "successful_symbols": sum(x["status"] in {"downloaded", "cached"} for x in statuses),
-            "failed_symbols": sum(x["status"] == "failed" for x in statuses),
-            "empty_symbols": sum(x["status"] == "empty" for x in statuses),
-            "status_rows": statuses,
-            "point_in_time_universe_complete": False,
-            "delisted_price_coverage_verified": False,
-            "note": "Current master plus delisting announcements is a candidate list, not a verified historical point-in-time universe. Reconcile coverage before research-grade use.",
-        }
         (out / "download_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    manifest = {
+        "source": "FinMind API v4",
+        "price_dataset": "TaiwanStockPrice (raw, unadjusted execution bars)",
+        "start_date": start_date, "end_date": end_date,
+        "token_configured": bool(api_token),
+        "requested_symbols": len(symbols),
+        "completed_symbols": len(statuses),
+        "successful_symbols": sum(x["status"] in {"downloaded", "cached"} for x in statuses),
+        "failed_symbols": sum(x["status"] == "failed" for x in statuses),
+        "empty_symbols": sum(x["status"] == "empty" for x in statuses),
+        "status_rows": statuses,
+        "point_in_time_universe_complete": False,
+        "delisted_price_coverage_verified": False,
+        "note": "Current master plus delisting announcements is a candidate list, not a verified historical point-in-time universe. Reconcile coverage before research-grade use.",
+    }
     manifest["data_files_sha256"] = {}
     for path in sorted(bars_dir.glob("*.csv")):
         manifest["data_files_sha256"][path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
