@@ -115,6 +115,14 @@ After a successful FinMind TaiwanStockInfo fetch, the app stores the first obser
 
 A research-only command is available in `historical_research.py`. It audits an OHLCV panel and computes a broad, auditable set of momentum, reversal, trend, breakout, volume, volatility, gap/range and relative-strength factors. Signals are formed from completed closes; forward outcomes assume entry at the next session open.
 
+Download a resumable raw-history candidate panel (current TWSE/TPEx master plus historical delisting announcements):
+
+\x60\x60\x60bash
+python historical_data_collector.py --output data/taiwan_history --start-date 2010-01-04
+\x60\x60\x60
+
+Set `FINMIND_TOKEN` in the environment to use the higher documented request allowance. The collector writes one CSV per symbol, a candidate symbol list, source snapshots, and a SHA-256 manifest. It resumes by skipping already-downloaded symbol files. The API request allowance is rate-limited (documented as 300/hour without a token and 600/hour with a token), so a full-market pull can take hours and may need multiple resumable runs. The collector does not claim full historical point-in-time constituents or verified delisted-price coverage.
+
 Prepare a CSV with columns:
 
 ```text
@@ -133,6 +141,6 @@ Outputs: `data_coverage.csv`, `data_audit_summary.json`, `historical_factor_pane
 Important limitations:
 - This command does not download the whole Taiwan market. The panel must be acquired and archived separately; use official exchange sources where available and reconcile vendor feeds.
 - `--point-in-time-universe` and `--delisted-coverage` are explicit evidence assertions, not switches that create missing data. Only pass them when the supplied panel's provenance proves the coverage.
-- A current security master or 0050 constituent snapshot is not historical membership. Without verified point-in-time constituents and delisted securities, the audit intentionally remains research-grade-ineligible.
+- A current security master plus delisting notices is only a candidate symbol list, not historical membership. A current 0050 constituent snapshot is not historical membership. Without verified point-in-time constituents and delisted securities, the audit intentionally remains research-grade-ineligible.
 - Factor IC and top-minus-bottom spreads are descriptive screens, not net strategy returns. They do not include transaction costs, portfolio constraints, capacity, or multiple-testing correction; candidates must proceed to nested walk-forward and blind forward paper tests.
 - Never pass retrospectively adjusted prices as executable raw fills without a separately validated corporate-action treatment.
