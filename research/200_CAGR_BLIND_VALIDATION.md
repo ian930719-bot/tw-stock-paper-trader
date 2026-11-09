@@ -69,6 +69,35 @@ Before the blind period begins, write an immutable manifest containing:
 
 During the blind period, do not retune, change symbols, or revise fills retrospectively. Log every signal, intended order, simulated fill, rejected order, position, cash movement, corporate action, and daily equity. Evaluate the frozen version at predeclared checkpoints only.
 
+
+### F. Strategy-family search (no five-strategy ceiling)
+
+The five strategies already present in the codebase are legacy baselines only. They are not the permitted strategy universe, and weak results must not be rescued through endless parameter tuning. Research may add, combine, or reject entirely different families, subject to data availability and realistic execution:
+
+- Cross-sectional momentum, relative strength rotation, sector/industry rotation, dual momentum, and trend-following across multiple horizons.
+- Mean reversion: short-horizon reversal, gap fade, oversold bounce, volatility-scaled pullback, pairs/statistical arbitrage, and market-neutral residual reversal.
+- Breakout/expansion: volatility squeeze, range expansion, opening-range breakout, price-volume confirmation, and post-consolidation continuation.
+- Regime-adaptive and allocation strategies: trend/risk-on filters, breadth thrust, volatility targeting, defensive rotation, and dynamic cash allocation.
+- Event-driven effects: earnings/publication-date reactions, dividend/corporate-action effects, index additions/deletions, and other timestamp-verifiable public events. Only information public by the decision time is eligible.
+- Intraday and time-of-day effects, overnight/intraday separation, opening/closing auction effects, and multi-day holding strategies, only if the underlying data resolution and historical market microstructure support credible fills.
+- Portfolio construction strategies: risk parity variants, volatility scaling, hierarchical/sector constraints, rank aggregation, ensemble voting, and portfolio-level stop/rotation logic.
+- Market-neutral and hedged strategies where instrument availability, borrow/short constraints, financing, and hedge execution can be modeled honestly.
+- Fundamental/quality/value-growth signals only when point-in-time financial statements, release timestamps, revisions, and survivorship-safe coverage exist.
+- Machine-learning candidates (regularized linear models, tree ensembles, sequence models) only after leakage-safe feature generation, nested chronological validation, calibration checks, and strict complexity controls.
+
+Each family receives a comparable research budget and identical data, cost, and OOS standards. Register hypotheses before running them; log failed experiments as well as winners. Separate family-level discovery from final selection to control multiple testing. No family receives privileged status because it is already implemented.
+
+### G. Candidate generation and promotion
+
+1. Start with broad, economically motivated hypotheses across the families above; include simple baselines and deliberately different holding periods.
+2. Run cheap data/leakage checks and low-cost screening first. Do not promote candidates on in-sample CAGR alone.
+3. Promote only candidates with positive net expectancy in chronological validation, sufficient independent trades, and acceptable turnover/capacity.
+4. Re-test promoted candidates in outer walk-forward windows with fixed costs and portfolio constraints. Evaluate family diversity and correlation between candidate return streams.
+5. Compare standalone candidates with diversified combinations; ensembles must be trained only on prior data and must beat their complexity/cost penalty OOS.
+6. Retire weak families/candidates with a recorded reason. Do not keep them alive by repeatedly searching nearby parameters.
+7. Reserve a genuinely untouched final period and future forward period for the selected frozen candidate. The selection process itself must be documented to expose winner's curse.
+
+
 ## Proposed acceptance gates
 
 These are initial research gates and may be tightened before blind testing; they must not be relaxed after seeing blind results.
