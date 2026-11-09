@@ -240,7 +240,14 @@ def run_research(input_csv: str, output_dir: str, *, split_date: str | None = No
                  corporate_actions_reconciled: bool = False,
                  trading_calendar_verified: bool = False,
                  official_source_reconciled: bool = False) -> dict:
-    raw = pd.read_csv(input_csv)
+    input_path = Path(input_csv)
+    if input_path.is_dir():
+        files = sorted((input_path / "bars").glob("*.csv")) if (input_path / "bars").is_dir() else sorted(input_path.glob("*.csv"))
+        if not files:
+            raise ValueError(f"資料目錄沒有可讀取的 CSV：{input_path}")
+        raw = pd.concat([pd.read_csv(path) for path in files], ignore_index=True)
+    else:
+        raw = pd.read_csv(input_path)
     audit, summary = audit_historical_panel(
         raw, source=source, price_basis=price_basis,
         point_in_time_universe=point_in_time_universe,
@@ -265,7 +272,7 @@ def run_research(input_csv: str, output_dir: str, *, split_date: str | None = No
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", required=True, help="CSV with symbol,date,open,high,low,close,volume")
+    parser.add_argument("--input", required=True, help="CSV file or collector output directory containing per-symbol CSVs")
     parser.add_argument("--output", default="artifacts/historical_research")
     parser.add_argument("--split-date", default=None, help="Predeclared OOS start date, YYYY-MM-DD")
     parser.add_argument("--source", default="user-supplied CSV")
