@@ -214,9 +214,13 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
             "requested_symbols": len(symbols),
             "candidate_universe_frozen": max_symbols is None and frozen_universe_path.exists(),
             "candidate_universe_sha256": hashlib.sha256(frozen_universe_path.read_bytes()).hexdigest() if max_symbols is None and frozen_universe_path.exists() else None,
-            "completed_symbols": len(statuses),
-            "remaining_symbols": max(0, len(symbols) - len(statuses)),
-            "collection_complete": len(statuses) >= len(symbols),
+            "completed_symbols": sum(x["status"] in {"downloaded", "cached", "empty"} for x in statuses),
+            "attempted_symbols": len(statuses),
+            "remaining_symbols": max(0, len(symbols) - sum(x["status"] in {"downloaded", "cached", "empty"} for x in statuses)),
+            "collection_complete": (
+                sum(x["status"] in {"downloaded", "cached", "empty"} for x in statuses) >= len(symbols)
+                and not any(x["status"] == "failed" for x in statuses)
+            ),
             "successful_symbols": sum(x["status"] in {"downloaded", "cached"} for x in statuses),
             "failed_symbols": sum(x["status"] == "failed" for x in statuses),
             "empty_symbols": sum(x["status"] == "empty" for x in statuses),
