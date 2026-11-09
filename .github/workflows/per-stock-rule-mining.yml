@@ -1,0 +1,63 @@
+name: Per-Stock Historical Rule Mining
+
+on:
+  push:
+    branches: [research/200cagr-blind-validation]
+    paths:
+      - per_stock_rule_mining.py
+      - .github/workflows/per-stock-rule-mining.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: per-stock-rule-mining-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  mine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/200cagr-blind-validation
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Restore latest historical data cache
+        uses: actions/cache/restore@v4
+        with:
+          path: data/taiwan_history/
+          key: taiwan-history-${{ github.ref_name }}-nonexistent
+          restore-keys: |
+            taiwan-history-${{ github.ref_name }}-
+      - name: Verify historical data is available
+        run: |
+          test -s data/taiwan_history/candidate_symbols.csv
+          test -s data/taiwan_history/download_manifest.json
+          test -d data/taiwan_history/bars
+          python - <<'PY'
+          import json
+          p="data/taiwan_history/download_manifest.json"
+          m=json.load(open(p,encoding="utf-8"))
+          print({k:m.get(k) for k in ("requested_symbols","successful_symbols","empty_symbols","failed_symbols","collection_complete","token_configured")})
+          if not m.get("collection_complete"):
+              raise SystemExit("Historical collection is incomplete; exploratory mining must wait for a complete batch.")
+          PY
+      - name: Install analysis dependencies
+        run: pip install numpy pandas
+      - name: Mine stock-specific rules
+        run: |
+          python per_stock_rule_mining.py \
+            --input data/taiwan_history \
+            --output artifacts/per_stock_rule_mining \
+            --split 0.70
+      - name: Upload per-stock and industry rule reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: per-stock-rule-mining-${{ github.run_id }}
+          path: artifacts/per_stock_rule_mining/
+          if-no-files-found: error
+          retention-days: 30
