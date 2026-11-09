@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 
 from top10_shared_capital_research import (
-    prepare_bars, apply_universe_breadth, simulate_portfolio, equal_weight_buy_hold,
+    prepare_bars, apply_universe_breadth, build_simulation_cache, simulate_portfolio, equal_weight_buy_hold,
     _trade_cost_return, BUY_FEE, SELL_FEE_TAX,
 )
 
@@ -36,6 +36,31 @@ class Top10SharedCapitalTests(unittest.TestCase):
         self.assertEqual(pd.Timestamp(trades.iloc[0].entry_date), pd.Timestamp(frame.date.iloc[1]))
         self.assertEqual(pd.Timestamp(trades.iloc[0].exit_date), pd.Timestamp(frame.date.iloc[-1]))
         self.assertEqual(trades.iloc[0].exit_reason, "period_end_close")
+
+    def test_closed_position_cannot_reenter_same_symbol_on_same_open(self):
+        frame = toy_frame(6)
+        frame.loc[1, "sig_KD_low"] = True
+        frame.loc[2, ["open", "high", "low", "close"]] = [90.0, 91.0, 89.0, 90.0]
+        _, trades, _ = simulate_portfolio(
+            {"2330": frame}, "KD_low", "fixed_20",
+            str(frame.date.iloc[0].date()), str(frame.date.iloc[-1].date()), max_positions=1,
+        )
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades.iloc[0].exit_reason, "gap_stop")
+
+    def test_cached_and_uncached_simulations_are_identical(self):
+        frame = toy_frame(8)
+        frames = {"2330": frame}
+        uncached = simulate_portfolio(
+            frames, "KD_low", "fixed_20", "2024-01-02", "2024-01-11", max_positions=1,
+        )
+        cache = build_simulation_cache(frames)
+        cached = simulate_portfolio(
+            frames, "KD_low", "fixed_20", "2024-01-02", "2024-01-11", max_positions=1, cache=cache,
+        )
+        self.assertEqual(uncached[0], cached[0])
+        pd.testing.assert_frame_equal(uncached[1], cached[1])
+        pd.testing.assert_frame_equal(uncached[2], cached[2])
 
     def test_integer_shares_and_adv_participation_cap(self):
         frame = toy_frame(6, adv20=100_000.0)
