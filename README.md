@@ -144,3 +144,17 @@ Important limitations:
 - A current security master plus delisting notices is only a candidate symbol list, not historical membership. A current 0050 constituent snapshot is not historical membership. Without verified point-in-time constituents and delisted securities, the audit intentionally remains research-grade-ineligible.
 - Factor IC and top-minus-bottom spreads are descriptive screens, not net strategy returns. They do not include transaction costs, portfolio constraints, capacity, or multiple-testing correction; candidates must proceed to nested walk-forward and blind forward paper tests.
 - Never pass retrospectively adjusted prices as executable raw fills without a separately validated corporate-action treatment.
+
+
+## Historical Taiwan market research pipeline
+
+The research branch includes a resumable FinMind raw daily-bar collector and a research-only factor screening stage.
+
+- The full collection workflow builds a stock-only candidate list, including current common equities and historical delisting candidates; ETF/bond/warrant products are filtered from the common-stock universe.
+- Smoke tests use deterministic industry-stratified sampling and reserve a portion for delisted candidates. A smoke test is not a representative performance backtest.
+- Full collection runs in bounded 330-minute batches. Each batch restores the prior GitHub Actions cache, skips successfully downloaded symbols, checkpoints per symbol, saves the cache, and dispatches the next batch until all candidates have been attempted.
+- The workflow only runs factor screening after the candidate collection is complete. It does not assert that the candidate list is a complete historical point-in-time universe.
+- The resulting factor IC and quintile spreads are exploratory diagnostics, not a tradable portfolio backtest. Research-grade approval remains blocked until point-in-time universe, delisted-price, corporate-action, official-calendar and exchange-source reconciliation are independently verified.
+- Add a repository Actions secret named `FINMIND_TOKEN` to use the higher FinMind request allowance. Without it, collection uses conservative pacing and may require multiple automatically chained runs.
+
+Manual full-universe collection is available through the GitHub Actions workflow_dispatch input `max_symbols=0`; bounded smoke tests use a positive cap.

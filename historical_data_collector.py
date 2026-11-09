@@ -66,38 +66,79 @@ def discover_symbols(start_date: str, end_date: str | None = None, *,
 def build_candidate_universe(current: pd.DataFrame, delisted: pd.DataFrame) -> pd.DataFrame:
     """Build a stock-only candidate list, excluding ETFs, bonds and warrants.
 
-    Current common equities are prioritized for bounded smoke tests. Historical
-    delisting notices add likely delisted common shares, but do not establish
-    full historical listing or point-in-time universe coverage.
+    Current common equities and historical delisting notices are candidates,
+    not proof of complete point-in-time membership or delisted-price coverage.
     """
     id_pattern = r"^[1-9][0-9]{3}(?:-[A-Z]+)?$"
     current = current.copy()
-    if "stock_name" not in current:
-        current["stock_name"] = ""
-    industry = current.get("industry_category", pd.Series("", index=current.index)).astype(str)
+    for col in ("stock_name", "industry_category", "type"):
+        if col not in current:
+            current[col] = ""
+    industry = current["industry_category"].astype(str)
     current_equities = current[
         current["stock_id"].astype(str).str.fullmatch(id_pattern, na=False)
         & ~industry.str.contains(
             r"ETF|指數股票型基金|債|受益證券|權證|認購|認售|牛熊", case=False, regex=True
         )
-    ][["stock_id", "stock_name"]].copy()
+    ][["stock_id", "stock_name", "industry_category", "type"]].copy()
     current_equities["candidate_source"] = "current_common_equity"
     current_equities["delisting_date"] = ""
 
-    delisted_equities = pd.DataFrame(columns=["stock_id", "stock_name", "candidate_source", "delisting_date"])
+    delisted_equities = pd.DataFrame(columns=[
+        "stock_id", "stock_name", "industry_category", "type", "candidate_source", "delisting_date"
+    ])
     if not delisted.empty and "stock_id" in delisted:
         old = delisted.copy()
-        if "stock_name" not in old:
-            old["stock_name"] = ""
+        for col in ("stock_name", "industry_category", "type"):
+            if col not in old:
+                old[col] = ""
         old["stock_id"] = old["stock_id"].astype(str).str.strip()
         old = old[old["stock_id"].str.fullmatch(id_pattern, na=False)]
-        delisted_equities = old[["stock_id", "stock_name"]].copy()
+        delisted_equities = old[["stock_id", "stock_name", "industry_category", "type"]].copy()
         delisted_equities["candidate_source"] = "delisted_common_equity_candidate"
         delisted_equities["delisting_date"] = old["date"].astype(str) if "date" in old else ""
 
     candidates = pd.concat([current_equities, delisted_equities], ignore_index=True)
     candidates = candidates.drop_duplicates("stock_id", keep="first")
     return candidates.sort_values(["candidate_source", "stock_id"]).reset_index(drop=True)
+
+
+def select_candidate_metadata(candidates: pd.DataFrame, max_symbols: int | None,
+                              *, seed: int = 20261109) -> pd.DataFrame:
+    """Select a deterministic, industry-stratified smoke-test sample.
+
+    Reserve up to 20% for delisted candidates, then round-robin current names
+    across industry groups. Full-universe collection passes max_symbols=None.
+    """
+    if max_symbols is None or len(candidates) <= max_symbols:
+        return candidates.reset_index(drop=True)
+    if max_symbols <= 0:
+        return candidates.iloc[0:0].copy()
+    z = candidates.copy()
+    old = z[z["candidate_source"] == "delisted_common_equity_candidate"]
+    current = z[z["candidate_source"] == "current_common_equity"]
+    old_n = min(len(old), max(1, int(round(max_symbols * 0.20)))) if len(old) and max_symbols >= 5 else 0
+    current_n = max_symbols - old_n
+    selected_current = []
+    groups = []
+    for _, group in current.groupby("industry_category", dropna=False, sort=True):
+        shuffled = group.sample(frac=1, random_state=seed).reset_index(drop=True)
+        groups.append(shuffled)
+    while len(selected_current) < current_n and any(len(g) for g in groups):
+        for group in groups:
+            if len(selected_current) >= current_n:
+                break
+            if len(group):
+                selected_current.append(group.iloc[0])
+                group.drop(index=0, inplace=True)
+                group.reset_index(drop=True, inplace=True)
+    selected_old = old.sample(n=old_n, random_state=seed) if old_n else old.iloc[0:0]
+    if selected_current:
+        current_pick = pd.DataFrame(selected_current)
+    else:
+        current_pick = current.iloc[0:0]
+    selected = pd.concat([current_pick, selected_old], ignore_index=True)
+    return selected.sort_values(["candidate_source", "industry_category", "stock_id"]).reset_index(drop=True)
 
 
 def _normalize_bars(rows: list[dict], symbol: str) -> pd.DataFrame:
@@ -131,7 +172,8 @@ def _normalize_bars(rows: list[dict], symbol: str) -> pd.DataFrame:
 
 def collect_history(output_dir: str, start_date: str, end_date: str | None = None, *,
                     token: str | None = None, pause_seconds: float = 6.1,
-                    max_symbols: int | None = None) -> dict:
+                    max_symbols: int | None = None,
+                    max_runtime_minutes: float | None = None) -> dict:
     """Resume per-symbol downloads and write raw CSV plus provenance manifest."""
     api_token = (token or os.getenv("FINMIND_TOKEN", "")).strip()
     if not api_token:
@@ -142,10 +184,8 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
     bars_dir.mkdir(parents=True, exist_ok=True)
     current, delisted = discover_symbols(start_date, end_date, token=api_token)
     candidate_meta = build_candidate_universe(current, delisted)
+    candidate_meta = select_candidate_metadata(candidate_meta, max_symbols)
     symbols = candidate_meta["stock_id"].astype(str).tolist()
-    if max_symbols is not None:
-        symbols = symbols[:max(0, int(max_symbols))]
-        candidate_meta = candidate_meta[candidate_meta["stock_id"].isin(symbols)]
     candidate_meta.rename(columns={"stock_id": "symbol", "stock_name": "name"}).to_csv(
         out / "candidate_symbols.csv", index=False
     )
@@ -161,6 +201,8 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
             "token_configured": bool(api_token),
             "requested_symbols": len(symbols),
             "completed_symbols": len(statuses),
+            "remaining_symbols": max(0, len(symbols) - len(statuses)),
+            "collection_complete": len(statuses) >= len(symbols),
             "successful_symbols": sum(x["status"] in {"downloaded", "cached"} for x in statuses),
             "failed_symbols": sum(x["status"] == "failed" for x in statuses),
             "empty_symbols": sum(x["status"] == "empty" for x in statuses),
@@ -175,12 +217,17 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
             json.dumps(checkpoint, ensure_ascii=False, indent=2), encoding="utf-8"
         )
 
+    collection_started = time.monotonic()
     for i, symbol in enumerate(symbols):
+        if max_runtime_minutes is not None and (time.monotonic() - collection_started) >= max(0.0, float(max_runtime_minutes)) * 60:
+            break
         path = bars_dir / f"{symbol}.csv"
         if path.exists() and path.stat().st_size > 20:
-            statuses.append({"symbol": symbol, "status": "cached", "rows": int(len(pd.read_csv(path)))})
-            write_checkpoint()
-            continue
+            cached_rows = int(len(pd.read_csv(path)))
+            if cached_rows > 0:
+                statuses.append({"symbol": symbol, "status": "cached", "rows": cached_rows})
+                write_checkpoint()
+                continue
         params = {"dataset": "TaiwanStockPrice", "data_id": symbol, "start_date": start_date}
         if end_date:
             params["end_date"] = end_date
@@ -202,6 +249,9 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
         "token_configured": bool(api_token),
         "requested_symbols": len(symbols),
         "completed_symbols": len(statuses),
+        "remaining_symbols": max(0, len(symbols) - len(statuses)),
+        "collection_complete": len(statuses) >= len(symbols),
+        "runtime_seconds": round(time.monotonic() - collection_started, 2),
         "successful_symbols": sum(x["status"] in {"downloaded", "cached"} for x in statuses),
         "failed_symbols": sum(x["status"] == "failed" for x in statuses),
         "empty_symbols": sum(x["status"] == "empty" for x in statuses),
@@ -225,9 +275,12 @@ def main():
     parser.add_argument("--end-date", default=None)
     parser.add_argument("--pause-seconds", type=float, default=6.1)
     parser.add_argument("--max-symbols", type=int, default=None)
+    parser.add_argument("--max-runtime-minutes", type=float, default=None,
+                        help="Stop cleanly after this many minutes so a later run can resume")
     args = parser.parse_args()
     result = collect_history(args.output, args.start_date, args.end_date,
-                             pause_seconds=args.pause_seconds, max_symbols=args.max_symbols)
+                             pause_seconds=args.pause_seconds, max_symbols=args.max_symbols,
+                             max_runtime_minutes=args.max_runtime_minutes)
     print(json.dumps({k: v for k, v in result.items() if k != "status_rows"},
                      ensure_ascii=False, indent=2))
 

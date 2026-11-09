@@ -1,6 +1,6 @@
 """Tests for resumable historical data collector normalization."""
 import unittest
-from historical_data_collector import _normalize_bars, build_candidate_universe
+from historical_data_collector import _normalize_bars, build_candidate_universe, select_candidate_metadata
 
 
 class HistoricalCollectorTests(unittest.TestCase):
@@ -40,7 +40,34 @@ class HistoricalCollectorTests(unittest.TestCase):
             {"stock_id": "00732", "stock_name": "ETF", "date": "2023-04-21"},
         ])
         result = build_candidate_universe(current, delisted)
-        self.assertEqual(result["stock_id"].tolist(), ["1101", "2330", "6208", "2384"])
+        self.assertEqual(set(result["stock_id"]), {"1101", "2330", "6208", "2384"})
+
+
+    def test_smoke_sample_is_industry_stratified_and_includes_delisted(self):
+        import pandas as pd
+        rows = []
+        for i in range(1, 13):
+            rows.append({
+                "stock_id": str(1000 + i), "stock_name": f"Current {i}",
+                "industry_category": f"Industry {i % 4}", "type": "twse",
+                "candidate_source": "current_common_equity", "delisting_date": "",
+            })
+        for i in range(1, 6):
+            rows.append({
+                "stock_id": str(2000 + i), "stock_name": f"Delisted {i}",
+                "industry_category": "", "type": "twse",
+                "candidate_source": "delisted_common_equity_candidate", "delisting_date": "2018-01-01",
+            })
+        candidates = pd.DataFrame(rows)
+        picked = select_candidate_metadata(candidates, 10, seed=7)
+        self.assertEqual(len(picked), 10)
+        self.assertGreaterEqual((picked["candidate_source"] == "delisted_common_equity_candidate").sum(), 1)
+        self.assertGreaterEqual(picked.loc[picked["candidate_source"] == "current_common_equity", "industry_category"].nunique(), 3)
+
+    def test_unlimited_candidate_selection_keeps_every_candidate(self):
+        import pandas as pd
+        candidates = pd.DataFrame({"stock_id": ["1101", "2330"], "candidate_source": ["current_common_equity"] * 2})
+        self.assertEqual(len(select_candidate_metadata(candidates, None)), 2)
 
     def test_empty_response_has_stable_schema(self):
         self.assertEqual(len(_normalize_bars([], "2330").columns), 8)
