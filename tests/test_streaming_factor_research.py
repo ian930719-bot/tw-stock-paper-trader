@@ -63,15 +63,14 @@ class StreamingFactorResearchTests(unittest.TestCase):
 
     def test_factor_builder_uses_adjusted_prices_for_signals_and_forward_returns(self):
         bars = self.make_bars("2330", n=280, seed=44)
-        bars["adj_open"] = bars["open"] * 0.5
-        bars["adj_high"] = bars["high"] * 0.5
-        bars["adj_low"] = bars["low"] * 0.5
-        bars["adj_close"] = bars["close"] * 0.5
+        for col in ("open", "high", "low", "close"):
+            bars[f"adj_{col}"] = bars[col]
+            bars.loc[:149, f"adj_{col}"] *= 0.5
         f = build_symbol_factors(bars, "2330")
-        expected = bars.iloc[5]["adj_close"] / bars.iloc[1]["adj_open"] - 1
-        raw_expected = bars.iloc[5]["close"] / bars.iloc[1]["open"] - 1
-        self.assertAlmostEqual(f.iloc[0]["fwd_5d_next_open"], expected, places=10)
-        self.assertNotAlmostEqual(f.iloc[0]["fwd_5d_next_open"], raw_expected, places=8)
+        expected = bars.iloc[150]["adj_close"] / bars.iloc[146]["adj_open"] - 1
+        raw_expected = bars.iloc[150]["close"] / bars.iloc[146]["open"] - 1
+        self.assertAlmostEqual(f.iloc[145]["fwd_5d_next_open"], expected, places=10)
+        self.assertNotAlmostEqual(f.iloc[145]["fwd_5d_next_open"], raw_expected, places=8)
 
 
 if __name__ == "__main__":
