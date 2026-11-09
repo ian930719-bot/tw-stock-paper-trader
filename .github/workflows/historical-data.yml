@@ -6,7 +6,6 @@ on:
     paths:
       - .github/run-historical-smoke
       - historical_data_collector.py
-      - .github/workflows/historical-data.yml
   workflow_dispatch:
     inputs:
       start_date:
@@ -106,7 +105,7 @@ jobs:
           name: taiwan-history-${{ github.run_id }}
           path: |
             data/taiwan_history/
-            artifacts/historical_research/
+            artifacts/streaming_factor_research/
           if-no-files-found: warn
           retention-days: 30
       - name: Dispatch next resumable batch
