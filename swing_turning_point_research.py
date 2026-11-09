@@ -396,11 +396,56 @@ def equal_weight_benchmark(panel: pd.DataFrame,start: str,end: str,initial: floa
             "max_drawdown":float(dd.min())}
 
 
+
+def cross_symbol_generalization(panel: pd.DataFrame) -> dict:
+    """Train on nine names and evaluate the tenth, using only pre-2020 training data."""
+    train_all = panel.loc[panel.date < pd.Timestamp(TRAIN_END)]
+    test_all = panel.loc[panel.date >= pd.Timestamp(TEST_START)]
+    results = {}
+    for symbol in SYMBOLS:
+        train = train_all.loc[train_all.symbol != symbol].dropna(
+            subset=FEATURES+["low_label20","high_label20"]
+        )
+        test = test_all.loc[test_all.symbol == symbol].dropna(
+            subset=FEATURES+["low_label20","high_label20"]
+        )
+        if len(train)<500 or len(test)<100:
+            continue
+        low_model = make_pipeline(
+            SimpleImputer(strategy="median"),StandardScaler(),
+            LogisticRegression(C=.01,class_weight="balanced",max_iter=1000),
+        )
+        high_model = make_pipeline(
+            SimpleImputer(strategy="median"),StandardScaler(),
+            LogisticRegression(C=.01,class_weight="balanced",max_iter=1000),
+        )
+        low_model.fit(train[FEATURES],train.low_label20.astype(int))
+        high_model.fit(train[FEATURES],train.high_label20.astype(int))
+        low_score = low_model.predict_proba(test[FEATURES])[:,1]
+        high_score = high_model.predict_proba(test[FEATURES])[:,1]
+        results[symbol] = {
+            "test_rows":int(len(test)),
+            "low_auc":float(roc_auc_score(test.low_label20,low_score)),
+            "high_auc":float(roc_auc_score(test.high_label20,high_score)),
+            "low_positive_rate":float(test.low_label20.mean()),
+            "high_positive_rate":float(test.high_label20.mean()),
+        }
+    if results:
+        results["_aggregate"] = {
+            "symbols_tested":len(results),
+            "mean_low_auc":float(np.mean([x["low_auc"] for x in results.values()])),
+            "median_low_auc":float(np.median([x["low_auc"] for x in results.values()])),
+            "mean_high_auc":float(np.mean([x["high_auc"] for x in results.values()])),
+            "median_high_auc":float(np.median([x["high_auc"] for x in results.values()])),
+        }
+    return results
+
 def run_research(input_dir: str|Path,output_dir: str|Path) -> dict:
     frames,manifest=load_adjusted_frames(input_dir)
     panel=build_feature_panel(frames)
     low_model,low=fit_probability_model(panel,"low_label20")
     high_model,high=fit_probability_model(panel,"high_label20")
+    cross_symbol = cross_symbol_generalization(panel)
     panel["low_score"]=low["scores"]
     threshold=low["report"]["validation_threshold_95pct"]
     panel["signal_low_raw"]=(panel.low_score>=threshold).fillna(False)
@@ -472,6 +517,7 @@ def run_research(input_dir: str|Path,output_dir: str|Path) -> dict:
         "high_point_model_diagnostic_only":high["report"],
         "low_point_formula":low["formula"],
         "high_point_formula_diagnostic_only":high["formula"],
+        "cross_symbol_generalization":cross_symbol,
         "validation_selected_config":config,
         "validation_portfolio":val_metrics,
         "test_locked_portfolio":test_metrics,
