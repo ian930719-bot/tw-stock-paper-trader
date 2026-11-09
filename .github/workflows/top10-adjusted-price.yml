@@ -1,0 +1,55 @@
+name: Top 10 Adjusted Price Research Data
+
+on:
+  push:
+    branches: [research/200cagr-blind-validation]
+    paths:
+      - collect_top10_adjusted_prices.py
+      - tests/test_collect_top10_adjusted_prices.py
+      - .github/workflows/top10-adjusted-price.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: top10-adjusted-price-research
+  cancel-in-progress: false
+
+jobs:
+  collect-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/200cagr-blind-validation
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - run: pip install -r requirements.txt
+      - name: Unit tests
+        run: python -m unittest tests.test_collect_top10_adjusted_prices -v
+      - name: Collect official adjusted OHLCV for the ten stocks
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: |
+          python collect_top10_adjusted_prices.py --output data/top10_adjusted --start-date 2010-01-04
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          m = json.loads(Path("data/top10_adjusted/manifest.json").read_text(encoding="utf-8"))
+          assert m["collection_complete"], "Adjusted price collection incomplete"
+          assert m["symbols_collected"] == 10, "Expected exactly ten stocks"
+          assert all(x["rows"] > 1000 for x in m["status_rows"]), "Unexpectedly short price history"
+          print(json.dumps({k:v for k,v in m.items() if k != "status_rows"}, ensure_ascii=False, indent=2))
+          PY
+      - name: Upload adjusted price data and provenance
+        uses: actions/upload-artifact@v4
+        with:
+          name: top10-adjusted-prices
+          path: data/top10_adjusted/
+          if-no-files-found: error
+          retention-days: 30
