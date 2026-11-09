@@ -133,11 +133,12 @@ def build_feature_panel(frames: dict[str, pd.DataFrame]) -> pd.DataFrame:
 def apply_cooldown(panel: pd.DataFrame, signal_col: str, cooldown: int = 40) -> pd.Series:
     result = pd.Series(False,index=panel.index)
     for _, group in panel.groupby("symbol",sort=False):
-        last = -cooldown
-        for idx, flag in zip(group.index,group[signal_col].fillna(False).to_numpy()):
-            if flag and idx-last >= cooldown:
+        group = group.sort_values("date")
+        last_position = -cooldown
+        for position, (idx, flag) in enumerate(zip(group.index,group[signal_col].fillna(False).to_numpy())):
+            if flag and position-last_position >= cooldown:
                 result.loc[idx] = True
-                last = idx
+                last_position = position
     return result
 
 
