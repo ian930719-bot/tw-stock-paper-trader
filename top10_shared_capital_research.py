@@ -167,43 +167,58 @@ def _trade_cost_return(entry: float, exit_: float) -> float:
     return (exit_ / entry) * (1 - BUY_FEE) * (1 - SELL_FEE_TAX) - 1
 
 
+def build_simulation_cache(frames: dict[str, pd.DataFrame]) -> dict:
+    """Precompute immutable date lookups and next-open candidate schedules once."""
+    row_lookup = {
+        symbol: {pd.Timestamp(row.date): row for row in frame.itertuples(index=False)}
+        for symbol, frame in frames.items()
+    }
+    all_dates = sorted(set().union(*[set(rows) for rows in row_lookup.values()]))
+    schedules_by_strategy = {}
+    for strategy in STRATEGIES:
+        schedules = {}
+        signal_col = f"sig_{strategy}"
+        for symbol, frame in frames.items():
+            if signal_col not in frame:
+                continue
+            for i in np.flatnonzero(frame[signal_col].fillna(False).to_numpy()):
+                if i + 1 >= len(frame):
+                    continue
+                signal = frame.iloc[i]
+                if pd.isna(signal.atr) or signal.atr <= 0:
+                    continue
+                entry_date = pd.Timestamp(frame.date.iloc[i + 1])
+                schedules.setdefault(entry_date, []).append({
+                    "symbol": symbol,
+                    "signal_date": pd.Timestamp(frame.date.iloc[i]),
+                    "atr": float(signal.atr),
+                    "momentum": float(signal.momentum20) if pd.notna(signal.momentum20) else -999.0,
+                    "adv20": float(signal.adv20) if pd.notna(signal.adv20) else 0.0,
+                })
+        for day in schedules:
+            schedules[day].sort(key=lambda x: x["momentum"], reverse=True)
+        schedules_by_strategy[strategy] = schedules
+    return {"row_lookup": row_lookup, "all_dates": all_dates,
+            "schedules_by_strategy": schedules_by_strategy}
+
+
 def simulate_portfolio(
     frames: dict[str, pd.DataFrame], strategy: str, exit_mode: str,
     start: str, end: str, *, initial_capital: float = INITIAL_CAPITAL,
     risk_fraction: float = RISK_FRACTION, max_positions: int = MAX_POSITIONS,
     max_weight: float = MAX_POSITION_WEIGHT,
     max_participation: float = MAX_ADV_PARTICIPATION,
+    cache: dict | None = None,
 ) -> tuple[dict, pd.DataFrame, pd.DataFrame]:
     """Run a single-cash, non-overlapping portfolio with next-open execution."""
     if strategy not in STRATEGIES or exit_mode not in EXIT_MODES:
         raise ValueError("未知策略或出場設定")
     start_ts, end_ts = pd.Timestamp(start), pd.Timestamp(end)
-    row_lookup = {
-        s: {pd.Timestamp(r.date): r for r in d.itertuples(index=False)}
-        for s, d in frames.items()
-    }
-    all_dates = sorted(set().union(*[set(x) for x in row_lookup.values()]))
-    dates = [d for d in all_dates if start_ts <= d <= end_ts]
+    cache = cache or build_simulation_cache(frames)
+    row_lookup = cache["row_lookup"]
+    dates = [d for d in cache["all_dates"] if start_ts <= d <= end_ts]
     last_dates = {s: max((d for d in lookup if start_ts <= d <= end_ts), default=None) for s, lookup in row_lookup.items()}
-    schedules: dict[pd.Timestamp, list[dict]] = {}
-    for symbol, d in frames.items():
-        signal_col = f"sig_{strategy}"
-        for i in np.flatnonzero(d[signal_col].fillna(False).to_numpy()):
-            if i + 1 >= len(d):
-                continue
-            signal_date = pd.Timestamp(d.date.iloc[i])
-            entry_date = pd.Timestamp(d.date.iloc[i + 1])
-            if not (start_ts <= signal_date < entry_date <= end_ts):
-                continue
-            signal = d.iloc[i]
-            if pd.isna(signal.atr) or signal.atr <= 0:
-                continue
-            schedules.setdefault(entry_date, []).append({
-                "symbol": symbol, "signal_date": signal_date,
-                "atr": float(signal.atr),
-                "momentum": float(signal.momentum20) if pd.notna(signal.momentum20) else -999.0,
-                "adv20": float(signal.adv20) if pd.notna(signal.adv20) else 0.0,
-            })
+    schedules = cache["schedules_by_strategy"][strategy]
 
     cash = float(initial_capital)
     positions: dict[str, dict] = {}
@@ -455,6 +470,7 @@ def run_research(input_dir: str | Path, output_dir: str | Path) -> dict:
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     metric_rows, trade_frames, equity_frames, benchmark_rows, benchmark_curves = [], [], [], [], []
+    simulation_cache = build_simulation_cache(frames)
     for period, (start, configured_end) in PERIODS.items():
         end = min(pd.Timestamp(configured_end), latest) if configured_end else latest
         if end <= pd.Timestamp(start):
@@ -462,7 +478,7 @@ def run_research(input_dir: str | Path, output_dir: str | Path) -> dict:
         for strategy in STRATEGIES:
             for exit_mode in EXIT_MODES:
                 metrics, trades, equity = simulate_portfolio(
-                    frames, strategy, exit_mode, start, str(end.date()),
+                    frames, strategy, exit_mode, start, str(end.date()), cache=simulation_cache,
                 )
                 metrics["period"] = period
                 metric_rows.append(metrics)
