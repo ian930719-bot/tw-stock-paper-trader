@@ -1,8 +1,9 @@
 """Causal swing-low scoring and shared-capital validation on adjusted Taiwan OHLCV.
 
 The low label is retrospective and is used only for model training/evaluation:
-within the next 40 sessions, price must reach +15% upside while avoiding an
-8% adverse excursion. The live signal uses only features known at the close.
+within the next 20 sessions, price must reach +20% upside while avoiding a
+10% adverse excursion. The high label is the mirrored downside event. The
+live signal uses only features known at the close.
 All fills are simulated on the next session's adjusted open; this is research,
 not a broker-fill replay or a claim of guaranteed future performance.
 """
@@ -463,7 +464,7 @@ def run_research(input_dir: str|Path,output_dir: str|Path) -> dict:
         "data_provider_by_symbol":{x["symbol"]:x["provider"] for x in manifest.get("status_rows",[])},
         "price_basis_note":"Yahoo Finance auto_adjust=True 還原 OHLC；股利/拆併股已反映於調整價格，不另加股利。",
         "universe_bias_note":"十檔股票依 2026 年近期流動性事後選取，存在存活者及選股偏誤；不是歷史逐日可投資股票池。",
-        "execution_note":"收盤訊號、下一交易日開盤進場；初始停損 3 ATR，移動停損為持倉後最高價減 5 ATR，持有 50 根 K 棒後下一開盤出場。現金帳戶、最多五檔、單檔權重上限 40%。",
+        "execution_note":f"收盤訊號、下一交易日開盤進場；初始停損 3 ATR，移動停損為持倉後最高價減 {config['trail_atr']} ATR，持有 {config['hold_bars']} 根 K 棒後下一開盤出場。現金帳戶、最多五檔、單檔權重上限 40%。",
         "cost_note":"買進手續費 0.1425% + 滑價 0.10%；賣出手續費 0.1425% + 證交稅 0.30% + 滑價 0.10%。",
         "adv_note":"1% 成交量參與率限制以還原收盤價 × Yahoo 回報量估算 ADV proxy，不是原始成交金額；本次實際成交量參與率需另以官方原始成交金額資料核對。",
         "label_note":"低點標籤：訊號日後 20 交易日內最高價至少上漲 20%，且期間最低價不得低於訊號收盤價 10%；高點標籤：未來 20 日最低價至少下跌 20%，且最高價不得高於訊號收盤價 10%。標籤只供訓練/評估，訊號特徵只使用當日收盤可得資料。",
