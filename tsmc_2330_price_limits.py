@@ -149,8 +149,7 @@ def build(bars_path: str, dividends_path: str, output_path: str) -> dict:
         if np.isfinite(reference):
             up = limit_price(reference, band, "UP")
             down = limit_price(reference, band, "DOWN")
-            tick_tol = float(tick_size(max(float(row.high), float(row.low))))
-            if float(row.high) > up + tick_tol * 0.51 or float(row.low) < down - tick_tol * 0.51:
+            if float(row.high) > up + 1e-6 or float(row.low) < down - 1e-6:
                 conflicts.append({
                     "date": day.date().isoformat(), "high": float(row.high),
                     "low": float(row.low), "limit_up": up, "limit_down": down,
