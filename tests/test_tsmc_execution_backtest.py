@@ -4,6 +4,7 @@ import pandas as pd
 
 from tsmc_2330_execution_backtest import (
     commission, sell_tax, is_limit_locked, buy_quantity, build_signals,
+    trailing_atr_stop_hit,
 )
 
 
@@ -23,6 +24,11 @@ class TSMCExecutionBacktestTests(unittest.TestCase):
         self.assertTrue(is_limit_locked("BUY", 110.0, 111.0, 109.5, 110.0, 90.0))
         self.assertTrue(is_limit_locked("SELL", 90.0, 90.0, 89.0, 110.0, 90.0))
         self.assertTrue(is_limit_locked("SELL", 90.0, 91.0, 89.0, 110.0, 90.0))
+
+    def test_atr_trailing_stop_uses_peak_and_current_atr(self):
+        self.assertTrue(trailing_atr_stop_hit(90.0, 100.0, 0.02, 3.0))
+        self.assertFalse(trailing_atr_stop_hit(98.0, 100.0, 0.02, 3.0))
+        self.assertFalse(trailing_atr_stop_hit(90.0, 100.0, 0.0, 3.0))
 
     def test_frozen_rule_signals_are_causal_threshold_comparisons(self):
         frame = pd.DataFrame({
