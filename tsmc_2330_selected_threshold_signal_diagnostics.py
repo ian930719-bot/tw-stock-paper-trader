@@ -105,8 +105,11 @@ def run(features_path: str, oracle_path: str, output_dir: str) -> dict:
         valid_rows &= ~features["corporate_action_window"].fillna(True).astype(bool).to_numpy()
     train_end = "2016-12-31"
     validation_end = "2021-12-31"
-    validation_mask = ((dates >= VALIDATION_START) & (dates <= validation_end)).to_numpy() & valid_rows
+    validation_mask_base = ((dates >= VALIDATION_START) & (dates <= validation_end)).to_numpy()
     test_mask = (dates >= TEST_START).to_numpy() & valid_rows
+    validation_start_idx = int(np.flatnonzero((dates >= pd.Timestamp(VALIDATION_START)).to_numpy())[0])
+    test_start_idx = int(np.flatnonzero((dates >= pd.Timestamp(TEST_START)).to_numpy())[0])
+    train_end_idx = int(np.flatnonzero((dates <= pd.Timestamp(train_end)).to_numpy())[-1])
     rows = []
     for horizon in HORIZONS:
         train_events = period_events(events, dates, "2010-01-01", train_end, horizon)
@@ -115,8 +118,8 @@ def run(features_path: str, oracle_path: str, output_dir: str) -> dict:
         train_y_by_kind = {}
         validation_y_by_kind = {}
         test_y_by_kind = {}
-        train_mask = (dates <= pd.Timestamp(train_end)).to_numpy() & valid_rows
-        train_val_y = {}
+        train_mask = (np.arange(len(features)) <= train_end_idx - horizon).astype(bool) & valid_rows
+        validation_mask = validation_mask_base & (np.arange(len(features)) <= test_start_idx - horizon - 1) & valid_rows
         for kind in ("HIGH", "LOW"):
             y_train = build_target(dates, train_events, horizon, kind)
             y_val = build_target(dates, validation_events, horizon, kind)
@@ -141,7 +144,7 @@ def run(features_path: str, oracle_path: str, output_dir: str) -> dict:
             # Refit using all labels confirmed by 2021, then evaluate the 2022+ period.
             train_val_events = pd.concat([train_events, validation_events], ignore_index=True)
             y_train_val = build_target(dates, train_val_events, horizon, kind)
-            train_val_mask = (dates <= pd.Timestamp(validation_end)).to_numpy() & valid_rows
+            train_val_mask = (np.arange(len(features)) <= test_start_idx - horizon - 1).astype(bool) & valid_rows
             if len(np.unique(y_train_val[train_val_mask])) < 2 or len(np.unique(y_test[test_mask_kind])) < 2:
                 test_metrics = {"error": "train/test target has one class"}
             else:
@@ -165,7 +168,7 @@ def run(features_path: str, oracle_path: str, output_dir: str) -> dict:
                 "test_rows": int(test_mask.sum()),
                 "test_event_days": int(y_test[test_mask].sum()),
                 "feature_count": len(feature_cols),
-                "validation_metrics": validation_metrics if "validation_metrics" in locals() else val_metrics,
+                "validation_metrics": val_metrics,
                 "test_metrics": test_metrics,
             })
     out = Path(output_dir)
