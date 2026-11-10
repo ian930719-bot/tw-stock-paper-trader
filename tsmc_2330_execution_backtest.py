@@ -248,9 +248,10 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
         elif pending_buy and shares == 0:
             if attempt_buy(i):
                 pending_buy = False
-            else:
-                # Do not chase a missed entry; wait for a fresh close signal.
+            elif strategy:
+                # Strategy entry is cancelled if it cannot fill at the next open.
                 pending_buy = False
+            # Buy-and-hold baseline keeps its initial order pending until fill.
 
         close = float(row.raw_close)
         equity = cash + shares * close
