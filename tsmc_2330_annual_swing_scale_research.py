@@ -173,19 +173,21 @@ def _annual_summaries(features: pd.DataFrame, pivots: pd.DataFrame, legs: pd.Dat
                     "median_reversal_pct": float(q["reversal_pct"].median()) if len(q) else None,
                 })
             for scale in ("small", "medium", "large"):
-                q = l.loc[l["scale"] == scale] if not l.empty else pd.DataFrame()
-                annual.append({
-                    "year": int(year), "threshold_id": threshold_id,
-                    "pivot_type": f"WAVE_{scale.upper()}",
-                    "trading_sessions": sessions, "pivot_count": int(len(q)),
-                    "pivots_per_100_sessions": float(len(q) / sessions * 100) if sessions else None,
-                    "median_confirmation_lag": None, "median_reversal_pct": None,
-                    "median_amplitude_pct": float(q["amplitude_pct"].median()) if len(q) else None,
-                    "q25_amplitude_pct": float(q["amplitude_pct"].quantile(.25)) if len(q) else None,
-                    "q75_amplitude_pct": float(q["amplitude_pct"].quantile(.75)) if len(q) else None,
-                    "median_duration_sessions": float(q["duration_sessions"].median()) if len(q) else None,
-                    "median_amplitude_per_session_pct": float(q["amplitude_per_session_pct"].median()) if len(q) else None,
-                })
+                scale_rows = l.loc[l["scale"] == scale] if not l.empty else pd.DataFrame()
+                for direction in ("UP", "DOWN", "ALL"):
+                    q = scale_rows if direction == "ALL" or scale_rows.empty else scale_rows.loc[scale_rows["direction"] == direction]
+                    annual.append({
+                        "year": int(year), "threshold_id": threshold_id,
+                        "pivot_type": f"WAVE_{scale.upper()}_{direction}",
+                        "trading_sessions": sessions, "pivot_count": int(len(q)),
+                        "pivots_per_100_sessions": float(len(q) / sessions * 100) if sessions else None,
+                        "median_confirmation_lag": None, "median_reversal_pct": None,
+                        "median_amplitude_pct": float(q["amplitude_pct"].median()) if len(q) else None,
+                        "q25_amplitude_pct": float(q["amplitude_pct"].quantile(.25)) if len(q) else None,
+                        "q75_amplitude_pct": float(q["amplitude_pct"].quantile(.75)) if len(q) else None,
+                        "median_duration_sessions": float(q["duration_sessions"].median()) if len(q) else None,
+                        "median_amplitude_per_session_pct": float(q["amplitude_per_session_pct"].median()) if len(q) else None,
+                    })
     return pd.DataFrame(annual)
 
 
