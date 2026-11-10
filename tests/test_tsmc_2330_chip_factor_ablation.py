@@ -2,7 +2,7 @@ import unittest
 import pandas as pd
 import numpy as np
 
-from tsmc_2330_chip_factor_ablation import feature_groups, evaluate
+from tsmc_2330_chip_factor_ablation import feature_groups, evaluate, annual_fold_years, _events_for_fold
 
 
 class TSMCChipFactorAblationTests(unittest.TestCase):
@@ -28,6 +28,26 @@ class TSMCChipFactorAblationTests(unittest.TestCase):
         self.assertIn("dealer_net_lots", groups["technical_plus_dealer_only"])
         self.assertIn("institutional_net_lots", groups["technical_plus_institutional_total_only"])
         self.assertIn("broker_net_lots", groups["technical_plus_all_chip"])
+
+    def test_annual_walk_forward_uses_expanding_training_years(self):
+        dates = pd.Series(pd.to_datetime([
+            "2010-01-04", "2010-12-31", "2011-01-03",
+            "2011-12-30", "2012-01-02", "2012-12-31",
+        ]))
+        self.assertEqual(annual_fold_years(dates), [2011, 2012])
+
+    def test_training_fold_excludes_labels_not_confirmed_by_cutoff(self):
+        dates = pd.Series(pd.date_range("2020-01-01", periods=8, freq="D"))
+        events = pd.DataFrame({
+            "pivot_date": [dates.iloc[3], dates.iloc[4]],
+            "confirmation_date": [dates.iloc[4], dates.iloc[6]],
+            "type": ["HIGH", "LOW"],
+        })
+        selected = _events_for_fold(
+            events, dates, 0, 4, 1, training=True, available_end_idx=7
+        )
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(pd.Timestamp(selected.iloc[0]["pivot_date"]), dates.iloc[3])
 
     def test_evaluate_reports_lift_against_prevalence(self):
         from sklearn.dummy import DummyClassifier
