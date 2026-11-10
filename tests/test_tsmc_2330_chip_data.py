@@ -24,6 +24,19 @@ class TSMCChipDataTests(unittest.TestCase):
         self.assertEqual(row["dealer_net_shares"], 0)
         self.assertEqual(row["institutional_net_shares"], 2000)
 
+    def test_legacy_dealer_columns_are_used_when_split_columns_are_zero(self):
+        frame = normalize_institutional([{
+            "date": "2013-06-03",
+            "Foreign_Investor_buy": 10000, "Foreign_Investor_sell": 8000,
+            "Investment_Trust_buy": 1000, "Investment_Trust_sell": 1200,
+            "Dealer_buy": 3000, "Dealer_sell": 2500,
+            "Dealer_self_buy": 0, "Dealer_self_sell": 0,
+            "Dealer_Hedging_buy": 0, "Dealer_Hedging_sell": 0,
+        }])
+        row = frame.iloc[0]
+        self.assertEqual(row["dealer_net_shares"], 500)
+        self.assertEqual(row["institutional_net_shares"], 2300)
+
     def test_institutional_streaks_start_at_one_and_use_trading_rows(self):
         frame = pd.DataFrame({
             "date": ["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"],
