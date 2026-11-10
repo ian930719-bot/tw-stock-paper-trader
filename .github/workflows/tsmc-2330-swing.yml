@@ -90,6 +90,7 @@ jobs:
           python -m py_compile tsmc_2330_walk_forward.py
           python -m py_compile tsmc_2330_oos_signal_diagnostics.py
           python -m py_compile tsmc_2330_chip_pivot_rules.py
+          python -m py_compile tests/test_tsmc_2330_chip_pivot_rules.py
           python -m py_compile tests/test_tsmc_2330_walk_forward.py
           python -m py_compile tests/test_tsmc_2330_probability_policy.py
       - name: Run TSMC swing unit tests
@@ -258,6 +259,12 @@ jobs:
             --output artifacts/tsmc_2330_swing
       # Fixed-split tree and indicator-family experiments are withheld until
       # each is migrated to annual expanding walk-forward validation.
+      - name: Evaluate annual OOF technical versus institutional pivot rules
+        run: |
+          python tsmc_2330_chip_pivot_rules.py \
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --oracle artifacts/tsmc_2330_swing/tsmc_2330_oracle_pivot_ceiling.json \
+            --output artifacts/tsmc_2330_swing
       - name: Train causal signals for the training-selected pivot definition
         run: |
           python tsmc_2330_selected_threshold_signal_diagnostics.py \
