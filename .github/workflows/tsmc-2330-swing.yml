@@ -40,6 +40,9 @@ on:
       - "tests/test_tsmc_oracle_pivot_ceiling.py"
       - "tests/test_tsmc_divergence_research.py"
       - "tsmc_2330_frozen_rule_research.py"
+      - "tsmc_2330_walk_forward.py"
+      - "tests/test_tsmc_2330_walk_forward.py"
+      - "tests/test_tsmc_2330_probability_policy.py"
       - "tsmc_2330_execution_backtest.py"
       - "tsmc_2330_reversal_confirmation_backtest.py"
       - "tsmc_2330_trend_atr_risk_research.py"
@@ -83,6 +86,10 @@ jobs:
         run: |
           python -m py_compile tsmc_2330_probability_strategy_backtest.py
           python -m py_compile tests/test_tsmc_probability_strategy_backtest.py
+          python -m py_compile tsmc_2330_frozen_rule_research.py
+          python -m py_compile tsmc_2330_walk_forward.py
+          python -m py_compile tests/test_tsmc_2330_walk_forward.py
+          python -m py_compile tests/test_tsmc_2330_probability_policy.py
       - name: Run TSMC swing unit tests
         run: python -m unittest discover -s tests -p "test_tsmc_*.py" -v
       - name: Download raw TSMC 2330 history
