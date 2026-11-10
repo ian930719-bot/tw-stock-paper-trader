@@ -26,6 +26,22 @@ ATR_STOPS = (None, 2.5, 3.0, 3.5, 4.0, 5.0)
 SELECTION_SLIPPAGE_BPS = 10
 
 
+def build_atr_regime_masks(features: pd.DataFrame) -> dict[str, np.ndarray]:
+    """Causal regime masks built only from indicators available at each close."""
+    distance_200 = pd.to_numeric(features["distance_sma_200"], errors="coerce")
+    slope_50 = pd.to_numeric(features["sma50_slope_10"], errors="coerce")
+    below_200 = distance_200.lt(0).fillna(False).to_numpy(dtype=bool)
+    above_200 = distance_200.ge(0).fillna(False).to_numpy(dtype=bool)
+    negative_slope = slope_50.lt(0).fillna(False).to_numpy(dtype=bool)
+    return {
+        "always": np.ones(len(features), dtype=bool),
+        "below_sma200": below_200,
+        "negative_sma50_slope": negative_slope,
+        "below_sma200_and_negative_sma50_slope": below_200 & negative_slope,
+        "above_sma200": above_200,
+    }
+
+
 def score(result: dict) -> float:
     return float(result["cagr"]) - 0.5 * abs(float(result["max_drawdown"]))
 
@@ -54,22 +70,25 @@ def run(features_path: str, rules_path: str, limits_path: str,
         for row in limits.itertuples(index=False)
         if np.isfinite(row.limit_up) and np.isfinite(row.limit_down)
     }
+    regime_masks = build_atr_regime_masks(bars)
     results = {}
     for stop in ATR_STOPS:
         stop_name = "none" if stop is None else f"{stop:g}atr"
-        for period_name, (start, end) in {
-            "validation_2017_2021": VALIDATION,
-            "historical_check_2022_plus": (
-                HOLDOUT_START, bars["date"].max().date().isoformat()
-            ),
-        }.items():
-            for slip in SLIPPAGE_BPS:
-                result = _simulate_period(
-                    bars, low_signal, high_signal, limit_lookup, dividends,
-                    start, end, slip, initial_capital, True,
-                    atr_stop_multiple=stop,
-                )
-                results[f"{period_name}_{stop_name}_{slip}bps"] = result
+        policies = {"always": regime_masks["always"]} if stop is None else regime_masks
+        for policy_name, stop_mask in policies.items():
+            for period_name, (start, end) in {
+                "validation_2017_2021": VALIDATION,
+                "historical_check_2022_plus": (
+                    HOLDOUT_START, bars["date"].max().date().isoformat()
+                ),
+            }.items():
+                for slip in SLIPPAGE_BPS:
+                    result = _simulate_period(
+                        bars, low_signal, high_signal, limit_lookup, dividends,
+                        start, end, slip, initial_capital, True,
+                        atr_stop_multiple=stop, atr_stop_mask=stop_mask,
+                    )
+                    results[f"{period_name}_{stop_name}_{policy_name}_{slip}bps"] = result
 
     validation_10 = {
         k: v for k, v in results.items()
@@ -88,16 +107,24 @@ def run(features_path: str, rules_path: str, limits_path: str,
         "frozen_entry": "return_1 <= -0.0025693492 AND close_location <= 0.25657895; next-session open",
         "frozen_exit": "high setup, then close below SMA20 AND return_1 < 0 within 5 sessions; next-session open",
         "atr_stop_grid": [None if x is None else float(x) for x in ATR_STOPS],
+        "atr_stop_regime_policies": list(regime_masks),
+        "regime_policy_definitions": {
+            "always": "ATR stop checked every held session",
+            "below_sma200": "ATR stop checked only when close is below SMA200",
+            "negative_sma50_slope": "ATR stop checked only when 10-session SMA50 slope is negative",
+            "below_sma200_and_negative_sma50_slope": "ATR stop checked only when both bearish conditions hold",
+            "above_sma200": "ATR stop checked only when close is at or above SMA200",
+        },
         "selection_metric": "CAGR - 0.5 * abs(max_drawdown), at 10 bps one-way slippage",
         "selection_period": list(VALIDATION),
-        "selected_atr_stop": selected_name,
+        "selected_atr_stop_policy": selected_name,
         "selected_validation_result": compact(validation_10[selected_key]),
         "selected_historical_check_result": compact(results[holdout_key]),
         "historical_check_buy_hold_10bps": compact(buy_hold),
         "all_results": {k: compact(v) for k, v in results.items()},
         "test_period_used_for_stop_selection": False,
         "historical_check_is_pristine": False,
-        "warning": "ATR stop selection uses 2017-2021 only. 2022+ was previously inspected and is descriptive, not a pristine blind test. Stops trigger at close and execute at the next tradable open; limit-locked exits remain pending."
+        "warning": "ATR stop and regime policy selection uses 2017-2021 only. 2022+ was previously inspected and is descriptive, not a pristine blind test. Regime masks use same-day close indicators and stop orders execute at the next tradable open; limit-locked exits remain pending."
     }
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
