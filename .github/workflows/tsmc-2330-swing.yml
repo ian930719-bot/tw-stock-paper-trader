@@ -12,6 +12,8 @@ on:
       - "tsmc_2330_divergence_research.py"
       - "tsmc_2330_hybrid_divergence_backtest.py"
       - "tsmc_2330_hybrid_risk_research.py"
+      - "tsmc_2330_oracle_pivot_ceiling.py"
+      - "tests/test_tsmc_oracle_pivot_ceiling.py"
       - "tests/test_tsmc_divergence_research.py"
       - "tsmc_2330_frozen_rule_research.py"
       - "tsmc_2330_execution_backtest.py"
@@ -184,6 +186,11 @@ jobs:
             --output data/tsmc_2330/corporate_actions/price_limits_2330.csv
       - name: Run causal swing pivot and lead-lag research
         run: python tsmc_swing_research.py --input data/tsmc_2330 --output artifacts/tsmc_2330_swing --corporate-actions data/tsmc_2330/corporate_actions/events_2330.csv
+      - name: Calculate perfect-foresight pivot-to-pivot upper bound (not tradable)
+        run: |
+          python tsmc_2330_oracle_pivot_ceiling.py \
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --output artifacts/tsmc_2330_swing
       - name: Run purged chronological OOS signal diagnostics
         run: |
           python tsmc_2330_oos_signal_diagnostics.py \
