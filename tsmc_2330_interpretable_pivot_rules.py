@@ -125,13 +125,19 @@ def run(features_path: str, oracle_path: str, output_dir: str) -> dict:
     events = detect_confirmed_pivots(x, float(min_reversal), float(atr_multiple))
     if events.empty:
         raise ValueError("No pivots for training-selected threshold")
+    dates = x["date"]
+    train_period_mask = ((dates >= "2010-01-01") & (dates <= "2016-12-31")).to_numpy(copy=True)
     cols = [c for c in x.columns if c not in EXCLUDE and not c.startswith("raw_")
             and pd.api.types.is_numeric_dtype(x[c])]
-    X = x[cols].replace([np.inf, -np.inf], np.nan)
+    X_all = x[cols].replace([np.inf, -np.inf], np.nan)
+    # Drop features entirely missing in the training period before fitting.
+    # SimpleImputer otherwise removes these columns and silently shifts tree
+    # feature indices, which can make the exported human-readable rules wrong.
+    cols = [c for c in cols if X_all.loc[train_period_mask, c].notna().any()]
+    X = X_all[cols]
     valid = X.notna().any(axis=1).to_numpy(copy=True)
     if "corporate_action_window" in x:
         valid &= ~x["corporate_action_window"].fillna(True).astype(bool).to_numpy()
-    dates = x["date"]
     idx = np.arange(len(x))
     train_start = int(np.flatnonzero((dates >= pd.Timestamp("2010-01-01")).to_numpy())[0])
     val_start = int(np.flatnonzero((dates >= pd.Timestamp(VALIDATION_START)).to_numpy())[0])
@@ -220,7 +226,7 @@ def run(features_path: str, oracle_path: str, output_dir: str) -> dict:
         "test_period_used_for_selection": False,
         "test_period_is_pristine": False,
         "strategy_backtest": False,
-        "warning": "These are interpretable event-classification rules, not yet executable buy/sell rules. Pivot labels are retrospective. 2022+ has previously been inspected and is descriptive only. Leaf precision is sample-dependent; inspect row counts and repeated stability before adopting any rule."
+        "warning": "Features with no observations in the training period are excluded before fitting to preserve tree feature-name alignment. These are interpretable event-classification rules, not yet executable buy/sell rules. Pivot labels are retrospective. 2022+ has previously been inspected and is descriptive only. Leaf precision is sample-dependent; inspect row counts and repeated stability before adopting any rule."
     }
     (out / "tsmc_2330_interpretable_pivot_rules.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2, default=float), encoding="utf-8"
