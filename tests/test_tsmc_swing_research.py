@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 
 from tsmc_swing_research import build_causal_features, detect_confirmed_pivots, build_lead_lag, load_tsmc
+from corporate_action_adjustments import apply_back_adjustments
 
 
 class TSMCSwingResearchTests(unittest.TestCase):
@@ -42,6 +43,26 @@ class TSMCSwingResearchTests(unittest.TestCase):
         events = detect_confirmed_pivots(features, 0.03, 2.0)
         lead = build_lead_lag(events, features)
         self.assertTrue((pd.to_datetime(lead["feature_date"]) < pd.to_datetime(lead["pivot_date"])).all())
+
+    def test_corporate_action_adjustment_only_changes_pre_event_prices(self):
+        bars = self.make_bars(np.linspace(100, 150, 300))
+        events = pd.DataFrame([{
+            "symbol": "2330", "date": bars.loc[200, "date"].date().isoformat(),
+            "adjustment_ratio": 0.95, "conflict": False,
+        }])
+        adjusted = apply_back_adjustments(bars, events)
+        self.assertAlmostEqual(adjusted.loc[199, "adj_close"], bars.loc[199, "close"] * 0.95)
+        self.assertAlmostEqual(adjusted.loc[200, "adj_close"], bars.loc[200, "close"])
+        self.assertTrue(adjusted.loc[200:220, "corporate_action_window"].all())
+        self.assertFalse(adjusted.loc[221, "corporate_action_window"])
+
+    def test_volume_features_are_masked_after_corporate_action(self):
+        bars = self.make_bars(np.linspace(100, 150, 320))
+        bars["corporate_action_window"] = False
+        bars.loc[250:270, "corporate_action_window"] = True
+        features = build_causal_features(bars)
+        self.assertTrue(features.loc[250:270, "relative_volume20"].isna().all())
+        self.assertTrue(features.loc[250:270, "turnover_ratio20"].isna().all())
 
     def test_loader_filters_to_2330_and_rejects_other_symbols(self):
         with tempfile.TemporaryDirectory() as tmp:
