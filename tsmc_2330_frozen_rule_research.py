@@ -138,6 +138,13 @@ def run(features_path: str, events_path: str, output_dir: str) -> dict:
         "validation_years": years, "features": list(FEATURES),
         "predeclared_combinations": [list(c) for c in COMBINATIONS],
         "annual_results": rows, "pooled_out_of_fold_results": pooled_rows,
+        # Legacy consumers expect this key. No single rule is selected from
+        # validation results; therefore downstream legacy backtests receive
+        # explicitly disabled rules rather than a misleading fitted rule.
+        "rules": {
+            "LOW": {"selected": False, "reason": "annual diagnostics report all rules; no global frozen rule selected"},
+            "HIGH": {"selected": False, "reason": "annual diagnostics report all rules; no global frozen rule selected"},
+        },
         "selection_performed": False, "strategy_backtest": False,
         "test_period_is_pristine": False,
         "warning": "Legacy filename retained for workflow compatibility. No fixed 2010-2016/2017-2021/2022+ split remains. Thresholds are fit inside each training fold; all combinations are reported without selecting on validation. Metrics are event-day classification diagnostics, not executable returns or CAGR.",
