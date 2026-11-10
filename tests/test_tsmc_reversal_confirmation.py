@@ -17,7 +17,7 @@ class TSMCReversalConfirmationTests(unittest.TestCase):
     def frame(self):
         return pd.DataFrame({
             "bb_position20": [0.1, 0.5, 0.5, 0.5],
-            "close_location": [0.2, 0.8, 0.5, 0.2],
+            "close_location": [0.2, 0.8, 0.7, 0.2],
             "return_3": [0.0, 0.0, 0.02, 0.0],
             "distance_sma_20": [0.0, 0.0, 0.03, 0.0],
             "return_1": [-0.02, 0.01, 0.02, -0.01],
