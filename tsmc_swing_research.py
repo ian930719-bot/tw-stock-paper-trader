@@ -260,7 +260,8 @@ def build_lead_lag(events: pd.DataFrame, features: pd.DataFrame) -> pd.DataFrame
     return pd.DataFrame(rows)
 
 
-def run(input_path: str, output_dir: str, corporate_actions_path: str | None = None) -> dict:
+def run(input_path: str, output_dir: str, corporate_actions_path: str | None = None,
+        chip_data_path: str | None = None) -> dict:
     raw_bars = load_tsmc(input_path)
     bars = raw_bars.copy()
     action_events = pd.DataFrame()
@@ -281,6 +282,26 @@ def run(input_path: str, output_dir: str, corporate_actions_path: str | None = N
             bars[f"raw_{col}"] = bars[col]
             bars[col] = adjusted[f"adj_{col}"]
         bars["corporate_action_window"] = adjusted["corporate_action_window"].astype(bool)
+    chip_manifest = {"status": "not_supplied"}
+    if chip_data_path:
+        chip_path = Path(chip_data_path)
+        if not chip_path.exists():
+            raise FileNotFoundError(f"Chip-data file not found: {chip_path}")
+        chip = pd.read_csv(chip_path)
+        if "date" not in chip:
+            raise ValueError("Chip-data file missing date")
+        chip["date"] = pd.to_datetime(chip["date"], errors="coerce").dt.normalize()
+        chip = chip.dropna(subset=["date"]).drop_duplicates("date", keep="last")
+        chip_columns = [c for c in chip.columns if c != "date"]
+        bars = bars.merge(chip, on="date", how="left", validate="one_to_one")
+        chip_manifest = {
+            "status": "merged",
+            "rows": int(len(chip)),
+            "columns": chip_columns,
+            "institutional_available_rows": int(bars.get("institutional_data_available", pd.Series(0, index=bars.index)).fillna(0).sum()),
+            "broker_available_rows": int(bars.get("broker_data_available", pd.Series(np.nan, index=bars.index)).notna().sum()),
+            "broker_note": "Broker fields remain null on dates without licensed branch-level data; null is not zero trading."
+        }
     features = build_causal_features(bars)
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -318,6 +339,7 @@ def run(input_path: str, output_dir: str, corporate_actions_path: str | None = N
         "corporate_action_events": int(len(action_events)),
         "corporate_action_window_rows_excluded": int(features["corporate_action_window"].sum()),
         "corporate_action_adjustment_source": "FinMind normalized event ratios" if corporate_actions_path else "not supplied; unadjusted research is not final-grade",
+        "chip_data": chip_manifest,
         "thresholds": [{"min_reversal_pct": p, "atr_multiple": a} for p, a in THRESHOLDS],
         "events": int(len(events_all)),
         "high_events": int((events_all["type"] == "HIGH").sum()) if not events_all.empty else 0,
@@ -339,8 +361,9 @@ def main() -> None:
     parser.add_argument("--input", required=True, help="CSV file or directory containing TSMC 2330 bars")
     parser.add_argument("--output", default="artifacts/tsmc_2330_swing")
     parser.add_argument("--corporate-actions", default=None, help="Normalized 2330 corporate-action event CSV")
+    parser.add_argument("--chip-data", default=None, help="Daily 2330 institutional and broker-branch feature CSV")
     args = parser.parse_args()
-    print(json.dumps(run(args.input, args.output, args.corporate_actions), ensure_ascii=False, indent=2))
+    print(json.dumps(run(args.input, args.output, args.corporate_actions, args.chip_data), ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
