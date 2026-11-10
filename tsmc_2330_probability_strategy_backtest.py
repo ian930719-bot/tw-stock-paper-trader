@@ -1,13 +1,11 @@
-"""Probability-ranked TSMC 2330 swing strategy with validation-only signal calibration.
+"""Annual walk-forward, costed TSMC 2330 probability strategy.
 
-A next-session pivot classifier is trained on 2010-2016.
-Model family and low/high probability cutoffs are selected on 2017-2021 only.
-The frozen models and cutoffs are then evaluated on 2022+ as descriptive data;
-that period has previously been inspected and is not a pristine blind holdout.
-
-Signals are computed after close t and traded no earlier than next session open.
-The execution simulator includes commissions, sell tax, slippage, dividends,
-historical price limits, and one-share cash constraints.
+Each calendar-year fold fits on confirmed labels from prior years only. A fixed
+logistic model and predeclared causal 85th-percentile signal policy avoid
+choosing model families or probability cutoffs on the validation year. Signals
+are formed at close t and orders execute no earlier than the next session.
+Each annual simulation is liquidated at year end and carries resulting cash
+into the next fold; no position is carried across fold boundaries.
 """
 from __future__ import annotations
 
@@ -17,104 +15,59 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.utils.class_weight import compute_sample_weight
 
 from tsmc_swing_research import detect_confirmed_pivots
-from tsmc_2330_selected_threshold_signal_diagnostics import (
-    period_events, build_target,
+from tsmc_2330_walk_forward import (
+    annual_fold_years, event_target, fold_events, fold_masks,
 )
 from tsmc_2330_execution_backtest import (
     SLIPPAGE_BPS, INITIAL_CAPITAL, load_inputs, _simulate_period,
 )
 
-TRAIN_START, TRAIN_END = "2010-01-01", "2016-12-31"
-VALID_START, VALID_END = "2017-01-01", "2021-12-31"
-TEST_START = "2022-01-01"
 HORIZON = 1
-MODEL_NAMES = ("logistic", "random_forest", "hist_gradient_boosting")
-QUANTILES = (0.70, 0.80, 0.85, 0.90, 0.95)
+SIGNAL_QUANTILE = 0.85
+ROLLING_WINDOW = 252
+ROLLING_MIN_PERIODS = 60
 EXCLUDE = {
     "obv", "symbol", "date", "open", "high", "low", "close", "volume",
     "turnover", "corporate_action_window", "atr14",
 }
 
 
-def make_model(name: str):
-    if name == "logistic":
-        return make_pipeline(
-            SimpleImputer(strategy="median"), StandardScaler(),
-            LogisticRegression(max_iter=2000, class_weight="balanced",
-                               C=0.2, random_state=0),
-        )
-    if name == "random_forest":
-        return make_pipeline(
-            SimpleImputer(strategy="median"),
-            RandomForestClassifier(
-                n_estimators=400, max_depth=6, min_samples_leaf=15,
-                max_features=0.6, class_weight="balanced_subsample",
-                random_state=0, n_jobs=1,
-            ),
-        )
-    if name == "hist_gradient_boosting":
-        return make_pipeline(
-            SimpleImputer(strategy="median"),
-            HistGradientBoostingClassifier(
-                max_iter=250, max_leaf_nodes=15, learning_rate=0.04,
-                l2_regularization=5.0, max_bins=127,
-                early_stopping=False, random_state=0,
-            ),
-        )
-    raise ValueError(f"Unknown model: {name}")
-
-
-def fit_model(model, name: str, X: pd.DataFrame, y: np.ndarray):
-    if name == "hist_gradient_boosting":
-        model.fit(X, y, histgradientboostingclassifier__sample_weight=
-                  compute_sample_weight("balanced", y))
-    else:
-        model.fit(X, y)
-    return model
-
-
-def probability_signal(probability: np.ndarray, threshold: float) -> np.ndarray:
-    p = np.asarray(probability, dtype=float)
-    return np.isfinite(p) & (p >= float(threshold))
+def make_model():
+    return make_pipeline(
+        SimpleImputer(strategy="median"),
+        StandardScaler(),
+        LogisticRegression(
+            max_iter=2000, class_weight="balanced", C=0.2, random_state=0
+        ),
+    )
 
 
 def rolling_probability_threshold(
-    probability: np.ndarray, quantile: float, window: int = 252,
-    min_periods: int = 60,
+    probability: np.ndarray, quantile: float = SIGNAL_QUANTILE,
+    window: int = ROLLING_WINDOW, min_periods: int = ROLLING_MIN_PERIODS,
 ) -> np.ndarray:
-    """Causal rolling cutoff; today's score is never used to set today's threshold."""
+    """Causal rolling cutoff: only probabilities from earlier sessions count."""
     if not 0 < float(quantile) < 1:
         raise ValueError("quantile must be between 0 and 1")
-    if window < 1 or min_periods < 1 or min_periods > window:
-        raise ValueError("Require 1 <= min_periods <= window")
     values = pd.Series(np.asarray(probability, dtype=float))
-    thresholds = values.shift(1).rolling(
+    return values.shift(1).rolling(
         window=window, min_periods=min_periods
-    ).quantile(float(quantile))
-    return thresholds.to_numpy(dtype=float)
+    ).quantile(float(quantile)).to_numpy(dtype=float)
 
 
 def rolling_probability_signal(
-    probability: np.ndarray, quantile: float, window: int = 252,
-    min_periods: int = 60,
+    probability: np.ndarray, quantile: float = SIGNAL_QUANTILE,
 ) -> tuple[np.ndarray, np.ndarray]:
     p = np.asarray(probability, dtype=float)
-    threshold = rolling_probability_threshold(p, quantile, window, min_periods)
-    signal = np.isfinite(p) & np.isfinite(threshold) & (p >= threshold)
-    return signal.astype(bool), threshold
-
-
-def score(result: dict) -> float:
-    return float(result["cagr"]) - 0.5 * abs(float(result["max_drawdown"]))
+    threshold = rolling_probability_threshold(p, quantile)
+    return (np.isfinite(p) & np.isfinite(threshold) & (p >= threshold)), threshold
 
 
 def compact(result: dict) -> dict:
@@ -125,7 +78,7 @@ def compact(result: dict) -> dict:
         "total_commission", "total_sell_tax", "estimated_slippage_cost",
         "blocked_limit_orders", "missing_price_limit_orders",
     )
-    return {k: result[k] for k in keys}
+    return {k: result.get(k) for k in keys}
 
 
 def run(features_path: str, oracle_path: str, limits_path: str,
@@ -136,7 +89,8 @@ def run(features_path: str, oracle_path: str, limits_path: str,
     )
     oracle = json.loads(Path(oracle_path).read_text(encoding="utf-8"))
     selected = oracle.get("threshold_selected_using_training_period_only", {})
-    min_reversal, atr_multiple = selected.get("min_reversal_pct"), selected.get("atr_multiple")
+    min_reversal = selected.get("min_reversal_pct")
+    atr_multiple = selected.get("atr_multiple")
     if min_reversal is None or atr_multiple is None:
         raise ValueError("Missing training-only pivot threshold")
     events = detect_confirmed_pivots(bars, float(min_reversal), float(atr_multiple))
@@ -146,156 +100,177 @@ def run(features_path: str, oracle_path: str, limits_path: str,
     feature_cols = [
         c for c in bars.columns
         if c not in EXCLUDE and not c.startswith("raw_")
-        and pd.api.types.is_numeric_dtype(bars[c])
-        and bars[c].notna().any()
+        and pd.api.types.is_numeric_dtype(bars[c]) and bars[c].notna().any()
     ]
+    if not feature_cols:
+        raise ValueError("No numeric model features")
     X = bars[feature_cols].replace([np.inf, -np.inf], np.nan)
-    dates = bars["date"]
-    idx = np.arange(len(bars))
-    train_start_idx = int(np.flatnonzero((dates >= pd.Timestamp(TRAIN_START)).to_numpy())[0])
-    valid_start_idx = int(np.flatnonzero((dates >= pd.Timestamp(VALID_START)).to_numpy())[0])
-    test_start_idx = int(np.flatnonzero((dates >= pd.Timestamp(TEST_START)).to_numpy())[0])
+    dates = pd.to_datetime(bars["date"]).reset_index(drop=True)
     valid_rows = X.notna().any(axis=1).to_numpy(copy=True)
-    action = bars["corporate_action_window"].fillna(True).astype(bool).to_numpy()
-    valid_rows &= ~action
+    if "corporate_action_window" in bars:
+        valid_rows &= ~bars["corporate_action_window"].fillna(True).astype(bool).to_numpy()
 
-    train_events = period_events(events, dates, TRAIN_START, TRAIN_END, HORIZON)
-    valid_events = period_events(events, dates, VALID_START, VALID_END, HORIZON)
-    test_events = period_events(events, dates, TEST_START, dates.max().date().isoformat(), HORIZON)
-    train_mask = (idx >= train_start_idx + HORIZON) & (idx <= valid_start_idx - HORIZON - 1) & valid_rows
-    valid_mask = ((dates >= VALID_START) & (dates <= VALID_END)).to_numpy(copy=True)
-    valid_mask &= (idx >= valid_start_idx + HORIZON) & (idx <= test_start_idx - HORIZON - 1) & valid_rows
-    test_mask = (idx >= test_start_idx + HORIZON) & valid_rows
+    years = annual_fold_years(dates)
+    if not years:
+        raise ValueError("At least two calendar years are required")
+    probabilities = {kind: np.full(len(bars), np.nan, dtype=float) for kind in ("LOW", "HIGH")}
+    fold_metadata = {kind: [] for kind in ("LOW", "HIGH")}
+    skipped = []
 
-    models, probabilities, model_metrics = {}, {}, {}
-    for kind in ("LOW", "HIGH"):
-        y_train = build_target(dates, train_events, HORIZON, kind)
-        y_valid = build_target(dates, valid_events, HORIZON, kind)
-        if len(np.unique(y_train[train_mask])) != 2 or len(np.unique(y_valid[valid_mask])) != 2:
-            raise ValueError(f"{kind}: training or validation target has one class")
-        candidates = {}
-        for name in MODEL_NAMES:
-            model = fit_model(make_model(name), name, X.loc[train_mask], y_train[train_mask])
-            p_valid = model.predict_proba(X.loc[valid_mask])[:, 1]
-            candidates[name] = {
-                "pr_auc": float(average_precision_score(y_valid[valid_mask], p_valid)),
-                "validation_prevalence": float(y_valid[valid_mask].mean()),
-            }
-        chosen = max(MODEL_NAMES, key=lambda n: candidates[n]["pr_auc"])
-        model = fit_model(make_model(chosen), chosen, X.loc[train_mask], y_train[train_mask])
-        p_all = np.full(len(bars), np.nan, dtype=float)
-        p_all[valid_mask] = model.predict_proba(X.loc[valid_mask])[:, 1]
-        p_all[test_mask] = model.predict_proba(X.loc[test_mask])[:, 1]
-        models[kind] = model
-        probabilities[kind] = p_all
-        model_metrics[kind] = {
-            "selected_model": chosen, "validation_candidates": candidates,
-            "validation_pr_auc": candidates[chosen]["pr_auc"],
-            "validation_event_prevalence": candidates[chosen]["validation_prevalence"],
-        }
+    for year in years:
+        fold = fold_masks(dates, valid_rows, year, HORIZON)
+        if fold is None or not fold["validation_mask"].any():
+            skipped.append({"year": year, "reason": "no eligible validation rows"})
+            continue
+        train_events, val_events = fold_events(events, dates, fold, HORIZON)
+        train_mask = fold["train_mask"]
+        val_mask = fold["validation_mask"]
+        if not train_mask.any() or not val_mask.any():
+            skipped.append({"year": year, "reason": "empty train or validation mask"})
+            continue
+        year_ok = True
+        for kind in ("LOW", "HIGH"):
+            y_train = event_target(dates, train_events, HORIZON, kind)
+            y_val = event_target(dates, val_events, HORIZON, kind)
+            if len(np.unique(y_train[train_mask])) < 2:
+                skipped.append({
+                    "year": year, "pivot_type": kind,
+                    "reason": "training fold has one target class",
+                    "training_rows": int(train_mask.sum()),
+                    "training_events": int(y_train[train_mask].sum()),
+                })
+                year_ok = False
+                continue
+            model = make_model()
+            model.fit(X.loc[train_mask, feature_cols], y_train[train_mask])
+            probabilities[kind][val_mask] = model.predict_proba(
+                X.loc[val_mask, feature_cols]
+            )[:, 1]
+            p = probabilities[kind][val_mask]
+            truth = y_val[val_mask]
+            fold_metadata[kind].append({
+                "validation_year": year,
+                "training_start": dates.loc[train_mask].min().date().isoformat(),
+                "training_end": dates.loc[train_mask].max().date().isoformat(),
+                "validation_start": dates.loc[val_mask].min().date().isoformat(),
+                "validation_end": dates.loc[val_mask].max().date().isoformat(),
+                "partial_validation_year": year == int(dates.max().year),
+                "training_rows": int(train_mask.sum()),
+                "training_events": int(y_train[train_mask].sum()),
+                "validation_rows": int(val_mask.sum()),
+                "validation_events": int(truth.sum()),
+                "validation_prevalence": float(truth.mean()),
+                "validation_pr_auc": (
+                    float(average_precision_score(truth, p))
+                    if truth.sum() else 0.0
+                ),
+            })
+        if not year_ok:
+            # Do not execute a calendar year unless both directions have OOF scores.
+            for kind in ("LOW", "HIGH"):
+                probabilities[kind][val_mask] = np.nan
 
-    # Select a pair of probability cutoffs using only validation execution results.
+    low_signal, low_threshold = rolling_probability_signal(probabilities["LOW"])
+    high_signal, high_threshold = rolling_probability_signal(probabilities["HIGH"])
     limit_lookup = {
         r.date.strftime("%Y-%m-%d"): (float(r.limit_up), float(r.limit_down))
         for r in limits.itertuples(index=False)
         if np.isfinite(r.limit_up) and np.isfinite(r.limit_down)
     }
-    candidates = []
-    for q_low in QUANTILES:
-        low_threshold = float(np.nanquantile(probabilities["LOW"][valid_mask], q_low))
-        low_signal = probability_signal(probabilities["LOW"], low_threshold)
-        for q_high in QUANTILES:
-            high_signal, high_threshold_series = rolling_probability_signal(
-                probabilities["HIGH"], q_high
-            )
+
+    # Annual folds are separately liquidated and the cash balance is compounded.
+    yearly_results = {}
+    compounded = {}
+    for slip in SLIPPAGE_BPS:
+        cash = float(initial_capital)
+        rows = []
+        for year in years:
+            year_mask = (dates.dt.year == year).to_numpy()
+            if not year_mask.any():
+                continue
+            year_start = dates.loc[year_mask].min().date().isoformat()
+            year_end = dates.loc[year_mask].max().date().isoformat()
+            eligible = year_mask & np.isfinite(probabilities["LOW"]) & np.isfinite(probabilities["HIGH"])
+            if not eligible.any():
+                rows.append({"validation_year": year, "status": "skipped_no_oof_probabilities"})
+                continue
             result = _simulate_period(
                 bars, low_signal, high_signal, limit_lookup, dividends,
-                VALID_START, VALID_END, 10, initial_capital, True,
+                year_start, year_end, slip, cash, True,
             )
-            candidates.append({
-                "low_quantile": q_low, "high_quantile": q_high,
-                "low_threshold": low_threshold,
-                "validation_dynamic_high_threshold_median": float(
-                    np.nanmedian(high_threshold_series[valid_mask])
-                ),
-                "validation": compact(result), "score": score(result),
-            })
-    eligible = [c for c in candidates if c["validation"]["trade_count"] >= 5]
-    if not eligible:
-        raise ValueError("No probability-threshold pair produced five validation trades")
-    chosen = max(eligible, key=lambda c: (c["score"], c["validation"]["cagr"]))
-    low_signal = probability_signal(probabilities["LOW"], chosen["low_threshold"])
-    high_signal, dynamic_high_threshold = rolling_probability_signal(
-        probabilities["HIGH"], chosen["high_quantile"]
-    )
-    frozen_high_threshold = float(
-        np.nanquantile(probabilities["HIGH"][valid_mask], chosen["high_quantile"])
-    )
-    frozen_high_signal = probability_signal(
-        probabilities["HIGH"], frozen_high_threshold
-    )
-
-    results = {}
-    frozen_results = {}
-    for slip in SLIPPAGE_BPS:
-        result = _simulate_period(
-            bars, low_signal, high_signal, limit_lookup, dividends,
-            TEST_START, dates.max().date().isoformat(), slip, initial_capital, True,
-        )
-        results[f"adaptive_strategy_{slip}bps"] = compact(result)
-        frozen_result = _simulate_period(
-            bars, low_signal, frozen_high_signal, limit_lookup, dividends,
-            TEST_START, dates.max().date().isoformat(), slip, initial_capital, True,
-        )
-        frozen_results[f"frozen_strategy_{slip}bps"] = compact(frozen_result)
-    buy_hold = _simulate_period(
-        bars, low_signal, high_signal, limit_lookup, dividends,
-        TEST_START, dates.max().date().isoformat(), 10, initial_capital, False,
-    )
+            item = compact(result)
+            item.update({"validation_year": year, "status": "evaluated"})
+            rows.append(item)
+            cash = float(result["final_equity"])
+        evaluated = [r for r in rows if r.get("status") == "evaluated"]
+        first = next((r["period_start"] for r in evaluated), None)
+        last = next((r["period_end"] for r in reversed(evaluated)), None)
+        elapsed = ((pd.Timestamp(last) - pd.Timestamp(first)).days / 365.25
+                   if first and last else 0)
+        final_equity = cash
+        total_return = final_equity / initial_capital - 1
+        cagr = ((final_equity / initial_capital) ** (1 / elapsed) - 1
+                if elapsed > 0 and final_equity > 0 else None)
+        yearly_results[f"{slip}bps"] = rows
+        compounded[f"{slip}bps"] = {
+            "initial_capital": initial_capital, "final_equity": final_equity,
+            "total_return": total_return, "cagr": cagr,
+            "max_annual_fold_drawdown": (
+                min((r["max_drawdown"] for r in evaluated
+                     if r.get("max_drawdown") is not None), default=None)
+            ),
+            "evaluated_years": [r["validation_year"] for r in evaluated],
+            "skipped_years": [r["validation_year"] for r in rows
+                              if r.get("status") != "evaluated"],
+            "annual_fold_results": rows,
+        }
 
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     pd.DataFrame({
         "date": dates.dt.strftime("%Y-%m-%d"),
-        "low_probability": probabilities["LOW"],
-        "high_probability": probabilities["HIGH"],
+        "low_probability_oof": probabilities["LOW"],
+        "high_probability_oof": probabilities["HIGH"],
         "low_signal": low_signal,
         "high_signal": high_signal,
-        "adaptive_high_threshold": dynamic_high_threshold,
-        "frozen_high_signal": frozen_high_signal,
+        "low_dynamic_threshold": low_threshold,
+        "high_dynamic_threshold": high_threshold,
     }).to_csv(out / "tsmc_2330_probability_strategy_signals.csv", index=False)
+
     summary = {
         "symbol": "2330", "horizon_sessions": HORIZON,
-        "target_definition": "pivot occurs on the next trading session; no overlapping five-session positive windows",
-        "pivot_threshold": {"min_reversal_pct": min_reversal, "atr_multiple": atr_multiple},
-        "feature_count": len(feature_cols), "feature_columns": feature_cols,
-        "train_period": [TRAIN_START, TRAIN_END],
-        "validation_period": [VALID_START, VALID_END],
-        "historical_check_period": [TEST_START, dates.max().date().isoformat()],
-        "models": model_metrics,
-        "selected_probability_cutoffs": {
-            "low_quantile": chosen["low_quantile"], "high_quantile": chosen["high_quantile"],
-            "low_threshold": chosen["low_threshold"],
-            "high_threshold_policy": "rolling prior 252 sessions, minimum 60 valid prior probabilities; threshold shifted one session to prevent lookahead",
-            "validation_dynamic_high_threshold_median": chosen["validation_dynamic_high_threshold_median"],
-            "validation_result": chosen["validation"], "validation_score": chosen["score"],
+        "pivot_threshold": {
+            "min_reversal_pct": min_reversal, "atr_multiple": atr_multiple,
+            "source": "oracle threshold selected using training period only",
         },
-        "validation_candidate_count": len(candidates),
-        "historical_check_results": results,
-        "historical_check_frozen_threshold_comparison": frozen_results,
-        "historical_check_buy_hold_10bps": compact(buy_hold),
+        "validation_method": "expanding annual walk-forward; each validation year trained only on confirmed events from prior years; last horizon sessions purged",
+        "validation_years": years, "feature_count": len(feature_cols),
+        "feature_columns": feature_cols,
+        "model": "fixed logistic regression; median imputation and scaling fitted inside each annual fold; balanced classes; C=0.2",
+        "model_selection": "none; model family fixed before annual validation",
+        "probability_policy": {
+            "quantile": SIGNAL_QUANTILE,
+            "window_sessions": ROLLING_WINDOW,
+            "minimum_prior_probabilities": ROLLING_MIN_PERIODS,
+            "threshold": "rolling quantile of prior out-of-fold probabilities only; shifted one session",
+            "selection_on_validation_year": False,
+        },
+        "fold_probabilities": fold_metadata,
+        "skipped_folds": skipped,
+        "annual_costed_backtests": yearly_results,
+        "compounded_oos_results": compounded,
         "execution": {
-            "signal_timing": "probability at close t; next available session open",
-            "adaptive_exit_threshold": "rolling quantile of prior 252 valid session probabilities, minimum 60 observations; current probability excluded",
+            "signal_timing": "probability at close t; order submitted for next session open",
+            "annual_boundary": "liquidate at each fold's final close; carry cash into next fold; no cross-year position",
             "commission_rate_per_side": 0.001425, "minimum_commission_ntd": 20,
-            "sell_transaction_tax_rate": 0.003, "slippage_bps_per_side": list(SLIPPAGE_BPS),
+            "sell_transaction_tax_rate": 0.003,
+            "slippage_bps_per_side": list(SLIPPAGE_BPS),
             "price_limits": "historical TWSE price limits and tick sizes; locked orders handled conservatively",
             "dividends": "cash dividends credited to shares held at prior session close",
-            "capital": initial_capital, "leverage": 1.0, "short_selling": False,
+            "initial_capital": initial_capital, "leverage": 1.0, "short_selling": False,
         },
-        "test_period_used_for_selection": False,
-        "historical_check_is_pristine": False,
-        "warning": "2022+ was inspected in earlier research and is descriptive only. Model families and probability thresholds are selected on 2017-2021; no 200% CAGR claim is implied. Broker-branch data unavailable remains null, not zero.",
+        "pristine_holdout": False,
+        "warning": "This annual OOF backtest supersedes the previously inspected fixed 2010-2016/2017-2021/2022+ selection procedure. The 2026 fold is partial. Results are research diagnostics, not a guarantee or a 200% CAGR claim.",
     }
     (out / "tsmc_2330_probability_strategy_backtest.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2, default=float), encoding="utf-8"
@@ -313,7 +288,8 @@ def main():
     parser.add_argument("--initial-capital", type=float, default=INITIAL_CAPITAL)
     args = parser.parse_args()
     print(json.dumps(run(args.features, args.oracle, args.limits, args.dividends,
-                         args.output, args.initial_capital), ensure_ascii=False, indent=2, default=float))
+                         args.output, args.initial_capital),
+                     ensure_ascii=False, indent=2, default=float))
 
 
 if __name__ == "__main__":
