@@ -111,7 +111,7 @@ def run(features_path: str, events_path: str, output_dir: str) -> dict:
             eligible = True
             for horizon in (1, 3, 5):
                 y = target_for(dates, events, horizon, kind)
-                m = metrics(signal & validation_mask, y[validation_mask])
+                m = metrics(signal[validation_mask], y[validation_mask])
                 validation_metrics[str(horizon)] = m
                 if m["signal_days"] < 8 or m["event_days"] < 5:
                     eligible = False
@@ -135,7 +135,7 @@ def run(features_path: str, events_path: str, output_dir: str) -> dict:
         test_metrics = {}
         for horizon in (1, 3, 5):
             y = target_for(dates, events, horizon, kind)
-            test_metrics[str(horizon)] = metrics(frozen_signal & test_mask, y[test_mask])
+            test_metrics[str(horizon)] = metrics(frozen_signal[test_mask], y[test_mask])
         selected_rules[kind] = {
             "selected": True,
             "features": frozen_combo,
