@@ -237,6 +237,7 @@ def build_lead_lag(events: pd.DataFrame, features: pd.DataFrame) -> pd.DataFrame
             "volatility_", "overnight_gap", "intraday_range", "close_location",
             "upper_wick", "lower_wick", "distance_prior", "bearish_", "bullish_",
             "rsi_divergence_", "macd_divergence_", "volume_divergence_", "price_breakout", "price_breakdown",
+            "foreign_", "trust_", "dealer_", "institutional_", "broker_",
         ))
     ]
     for event_id, event in events.reset_index(drop=True).iterrows():
