@@ -51,7 +51,7 @@ def run(features_path: str, events_path: str, output_dir: str) -> dict:
         raise ValueError("Pivot event file is missing required label columns")
     feature_cols = [
         col for col in features.columns
-        if col not in EXCLUDE and pd.api.types.is_numeric_dtype(features[col])
+        if col not in EXCLUDE and not col.startswith("raw_") and pd.api.types.is_numeric_dtype(features[col])
     ]
     if not feature_cols:
         raise ValueError("No numeric causal predictors available")
