@@ -125,6 +125,9 @@ def build_feature_panel(frames: dict[str, pd.DataFrame]) -> pd.DataFrame:
         # A forward label is unknown, not negative, until all 20 future bars exist.
         # Keep the final censored horizon as NaN so training/evaluation dropna excludes it.
         censored = d.future_max20.isna() | d.future_min20.isna()
+        d[["low_label20", "high_label20"]] = d[
+            ["low_label20", "high_label20"]
+        ].astype("float64")
         d.loc[censored, ["low_label20", "high_label20"]] = np.nan
         d["symbol"] = symbol
         d["name"] = NAMES[symbol]
