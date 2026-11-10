@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 from tsmc_2330_execution_backtest import (
     SLIPPAGE_BPS, INITIAL_CAPITAL, load_inputs, _simulate_period, build_signals,
