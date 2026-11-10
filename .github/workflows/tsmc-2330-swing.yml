@@ -13,6 +13,8 @@ on:
       - "tsmc_2330_hybrid_divergence_backtest.py"
       - "tsmc_2330_hybrid_risk_research.py"
       - "tsmc_2330_oracle_pivot_ceiling.py"
+      - "tsmc_2330_selected_threshold_signal_diagnostics.py"
+      - "tests/test_tsmc_selected_threshold_diagnostics.py"
       - "tests/test_tsmc_oracle_pivot_ceiling.py"
       - "tests/test_tsmc_divergence_research.py"
       - "tsmc_2330_frozen_rule_research.py"
@@ -190,6 +192,12 @@ jobs:
         run: |
           python tsmc_2330_oracle_pivot_ceiling.py \
             --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --output artifacts/tsmc_2330_swing
+      - name: Train causal signals for the training-selected pivot definition
+        run: |
+          python tsmc_2330_selected_threshold_signal_diagnostics.py \
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --oracle artifacts/tsmc_2330_swing/tsmc_2330_oracle_pivot_ceiling.json \
             --output artifacts/tsmc_2330_swing
       - name: Run purged chronological OOS signal diagnostics
         run: |
