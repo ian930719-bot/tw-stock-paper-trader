@@ -1,7 +1,7 @@
-# 200% CAGR Reverse-Research and Blind Validation Protocol
+# 100% CAGR Reverse-Research and Walk-Forward Validation Protocol
 
 Status: research specification; no strategy is approved for live capital.
-Target: investigate whether a robust, executable Taiwan-equity strategy can approach 200% net CAGR. This is a research hurdle, not an expected or guaranteed result.
+Target: investigate whether a robust, executable Taiwan-equity strategy can reach 100% net CAGR. This is a research hurdle, not an expected or guaranteed result.
 
 ## Non-negotiable rules
 
@@ -26,6 +26,20 @@ Do not begin large-scale factor mining until the historical dataset has passed a
 5. Quantify universe coverage by year and market. Publish explicit exclusions and unresolved gaps. A current constituent snapshot, a current security master, or a vendor's adjusted history must never silently stand in for historical point-in-time membership.
 6. Only after the audit, create a frozen research panel and data manifest with source version, retrieval timestamp, raw-file hashes, transformation code SHA, and per-symbol coverage. Strategy experiments must reference this manifest.
 7. If historical delisted coverage, point-in-time constituents, or action reconciliation is insufficient, limit conclusions to exploratory research and do not label results research-grade. Do not fill gaps with fabricated data.
+
+## 2016–2026 evaluation schedule and evidence status
+
+The research window is 2016-01-01 through the latest available trading date in 2026. The 2026 calendar year is partial and must never be represented as a complete year.
+
+Historical development is organized chronologically:
+- Discovery: 2016-01-01 through 2019-12-31.
+- Inner validation and model/parameter selection: 2020-01-01 through 2022-12-31.
+- Historical outer evaluation: 2023-01-01 through 2025-12-31.
+- Latest partial-year regime evaluation: 2026-01-01 through the latest verified trading date.
+
+Important evidence-status rule: portions of 2023–2026 have already been inspected in prior research. They are not an untouched blind holdout and must not be described as such. Use nested, purged chronological walk-forward evaluation across the full 2016–2026 window for development evidence. Freeze every candidate version, code commit, data manifest, universe rule, and execution assumption before each forward evaluation. Any tuning informed by a previously evaluated period invalidates that period as a blind test for the revised version. A genuinely untouched prospective test begins only after a candidate is frozen; report it separately from historical walk-forward results.
+
+For the headline 100% hurdle, report net CAGR from the continuous portfolio equity curve over the exact covered dates, alongside annual returns and drawdown. State the exact start/end dates and whether the period is partial. Do not annualize a short or partial sample without prominently disclosing the limitation. No single in-sample or retrospectively selected subperiod can satisfy the hurdle.
 
 ## Research design
 
@@ -121,7 +135,7 @@ These are initial research gates and may be tightened before blind testing; they
 - Stability: performance survives nearby parameter perturbations and alternative reasonable execution assumptions.
 - Risk: predeclared maximum drawdown, exposure, concentration, and liquidity constraints respected.
 - Blind evidence: at least 12 months of frozen forward paper trading before considering any live deployment; longer is preferable for low-frequency strategies.
-- Target reporting: show whether net CAGR reaches 200%, but do not waive any risk, data, or generalization gate to achieve that number.
+- Target reporting: show whether net CAGR reaches 100%, but do not waive any risk, data, or generalization gate to achieve that number.
 
 ## Required outputs
 
@@ -142,4 +156,4 @@ These are initial research gates and may be tightened before blind testing; they
 - BLIND_PAPER: all historical gates pass and the version is frozen for forward paper testing.
 - LIVE_CANDIDATE: only after the blind period and all pre-registered gates pass; this label is not a recommendation to deploy capital.
 
-No result may be described as a universal formula or 200% strategy until independently reproduced across symbols, sectors, regimes, and a frozen future period.
+No result may be described as a universal formula or 100% strategy until independently reproduced across symbols, sectors, regimes, and a frozen future period.
