@@ -185,6 +185,52 @@ def buy_hold(d, actions, start_date, end_date, cost_mult=1.0):
     return {"final":final,"cagr_pct":cagr,"mdd_pct":dd*100,"ann_vol_pct":vol,
         "sharpe_rf0":sharpe,"calmar":cagr/abs(dd*100) if dd<0 else np.nan}
 
+
+def simulate_fixed_hold(d, actions, signal, start_date, end_date, hold_sessions, cost_mult=1.0):
+    idx=np.flatnonzero((d.date>=start_date)&(d.date<=end_date)); start,end=int(idx[0]),int(idx[-1])
+    op=d.open.to_numpy(float); cl=d.close.to_numpy(float); dates=d.date.to_numpy()
+    divs={np.datetime64(x.date):float(x.stock_and_cache_dividend) for x in actions.itertuples()}
+    cash,qty,entry,entry_i,pending=CAPITAL,0,0.0,None,False
+    trades=[]; curve=[]
+    for i in range(start,end+1):
+        dt=dates[i]
+        if qty and dt in divs: cash+=qty*divs[dt]
+        if pending and qty==0:
+            fill=op[i]*(1+SLIPPAGE*cost_mult); q=math.floor(cash/(fill*(1+BUY_FEE*cost_mult)))
+            if q:
+                qty,entry,entry_i=q,fill,i
+                cash-=qty*fill*(1+BUY_FEE*cost_mult)
+                trades.append({"entry_date":str(pd.Timestamp(dt).date()),"entry_price":fill,"shares":qty})
+            pending=False
+        if qty and i-entry_i>=hold_sessions:
+            fill=op[i]*(1-SLIPPAGE*cost_mult); proceeds=qty*fill*(1-SELL_FEE_TAX*cost_mult)
+            cash+=proceeds
+            trades[-1].update({"exit_date":str(pd.Timestamp(dt).date()),"exit_price":fill,
+                "net_return":proceeds/(qty*entry*(1+BUY_FEE*cost_mult))-1,
+                "hold_sessions":i-entry_i,"exit":"fixed_horizon_open"})
+            qty,entry,entry_i=0,0.0,None
+        if qty==0 and signal[i]: pending=True
+        curve.append((dt,cash+qty*cl[i],qty))
+    if qty:
+        fill=cl[end]*(1-SLIPPAGE*cost_mult); proceeds=qty*fill*(1-SELL_FEE_TAX*cost_mult)
+        cash+=proceeds
+        trades[-1].update({"exit_date":str(pd.Timestamp(dates[end]).date()),"exit_price":fill,
+            "net_return":proceeds/(qty*entry*(1+BUY_FEE*cost_mult))-1,
+            "hold_sessions":end-entry_i,"exit":"period_end"})
+        curve[-1]=(dates[end],cash,0)
+    eq=pd.DataFrame(curve,columns=["date","equity","shares"])
+    years=(pd.Timestamp(dates[end])-pd.Timestamp(dates[start])).days/365.25
+    cagr=(cash/CAPITAL)**(1/years)-1; dd=(eq.equity/eq.equity.cummax()-1).min()
+    daily=eq.equity.pct_change().dropna()
+    vol=daily.std(ddof=1)*np.sqrt(252)*100
+    sharpe=daily.mean()/daily.std(ddof=1)*np.sqrt(252) if daily.std(ddof=1)>0 else np.nan
+    closed=[t for t in trades if "exit_date" in t]; rets=np.array([t["net_return"] for t in closed])
+    metrics={"final":cash,"cagr_pct":cagr*100,"mdd_pct":dd*100,"trades":len(closed),
+        "win_pct":(rets>0).mean()*100 if len(rets) else np.nan,
+        "avg_trade_pct":rets.mean()*100 if len(rets) else np.nan,
+        "exposure_pct":(eq.shares>0).mean()*100,"ann_vol_pct":vol,"sharpe_rf0":sharpe}
+    return metrics,eq,closed
+
 def main():
     p=argparse.ArgumentParser()
     p.add_argument("--input",default="data/taiwan_history/bars/2330.csv")
@@ -232,6 +278,34 @@ def main():
     pd.DataFrame(yearly).to_csv(out/"selected_yearly.csv",index=False)
     bench=[{"period":name,**buy_hold(d,a,*span)} for name,span in PERIODS.items()]
     pd.DataFrame(bench).to_csv(out/"buy_hold.csv",index=False)
+    fixed_rows=[]; fixed_trades=[]
+    for family in ("pullback_zone_1_5","pullback_zone_3_7"):
+        for hold_days in (10,20,40):
+            row={"family":family,"hold_sessions":hold_days}
+            for period,(lo,hi) in PERIODS.items():
+                m,_,tr=simulate_fixed_hold(d,a,signals[family],lo,hi,hold_days)
+                row.update({f"{period}_{k}":v for k,v in m.items()})
+                fixed_trades.extend({"family":family,"hold_sessions":hold_days,"period":period,**t} for t in tr)
+            fixed_rows.append(row)
+    fixed_grid=pd.DataFrame(fixed_rows)
+    fixed_grid["min_train_val_cagr_pct"]=fixed_grid[["research_cagr_pct","validation_cagr_pct"]].min(axis=1)
+    fixed_eligible=fixed_grid[(fixed_grid.research_cagr_pct>0)&(fixed_grid.validation_cagr_pct>0)]
+    fixed_selected=fixed_eligible.sort_values("min_train_val_cagr_pct",ascending=False).iloc[0]
+    fixed_family=str(fixed_selected.family); fixed_hold=int(fixed_selected.hold_sessions)
+    fixed_stress=[]
+    for mult in (1.0,1.5,2.0):
+        for period,(lo,hi) in PERIODS.items():
+            m,_,_=simulate_fixed_hold(d,a,signals[fixed_family],lo,hi,fixed_hold,cost_mult=mult)
+            fixed_stress.append({"cost_mult":mult,"period":period,**m})
+    fixed_grid.to_csv(out/"fixed_hold_grid.csv",index=False)
+    pd.DataFrame(fixed_trades).to_csv(out/"fixed_hold_trades.csv",index=False)
+    pd.DataFrame(fixed_stress).to_csv(out/"fixed_hold_cost_stress.csv",index=False)
+    fixed_summary={"family":fixed_family,"hold_sessions":fixed_hold,
+        "selection":"highest minimum research/validation CAGR among six predeclared fixed-horizon candidates",
+        "metrics":{period:{k:float(fixed_selected[f"{period}_{k}"]) for k in
+            ("cagr_pct","mdd_pct","trades","win_pct","exposure_pct")} for period in PERIODS},
+        "cost_stress":fixed_stress}
+    (out/"fixed_hold_selected.json").write_text(json.dumps(fixed_summary,ensure_ascii=False,indent=2,default=str),encoding="utf-8")
     stress=[]
     for mult in (1.0,1.5,2.0):
         for name,(lo,hi) in PERIODS.items():
@@ -243,7 +317,7 @@ def main():
         "rows":len(d),"start":str(d.date.min().date()),"end":str(d.date.max().date()),"corporate_action_rows":len(a),
         "candidate_count":len(grid),"selection":"maximize the minimum CAGR across research and validation, requiring both positive; test not used for selection",
         "selected_candidate":{k:(float(v) if isinstance(v,(np.floating,float)) else int(v) if isinstance(v,(np.integer,int)) else str(v)) for k,v in selected.to_dict().items()},
-        "selected_metrics":metrics_rows,"buy_hold":bench,"cost_stress":stress,
+        "selected_metrics":metrics_rows,"buy_hold":bench,"cost_stress":stress,"fixed_horizon_candidate":fixed_summary,
         "execution":"close signal, next open fills; raw OHLC intraday stop/target; gap fills at open; stop-first if both barriers touched; ATR uses prior-session value; whole-share cash-only",
         "costs":{"buy_fee":BUY_FEE,"sell_fee_tax":SELL_FEE_TAX,"slippage_each_side":SLIPPAGE},
         "limitations":["FinMind cached vendor data; direct TWSE reconciliation not completed.",
