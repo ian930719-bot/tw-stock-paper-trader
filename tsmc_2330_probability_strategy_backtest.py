@@ -1,6 +1,6 @@
 """Probability-ranked TSMC 2330 swing strategy with validation-only signal calibration.
 
-A single 5-session-ahead pivot classifier is trained on 2010-2016.
+A next-session pivot classifier is trained on 2010-2016.
 Model family and low/high probability cutoffs are selected on 2017-2021 only.
 The frozen models and cutoffs are then evaluated on 2022+ as descriptive data;
 that period has previously been inspected and is not a pristine blind holdout.
@@ -36,7 +36,7 @@ from tsmc_2330_execution_backtest import (
 TRAIN_START, TRAIN_END = "2010-01-01", "2016-12-31"
 VALID_START, VALID_END = "2017-01-01", "2021-12-31"
 TEST_START = "2022-01-01"
-HORIZON = 5
+HORIZON = 1
 MODEL_NAMES = ("logistic", "random_forest", "hist_gradient_boosting")
 QUANTILES = (0.70, 0.80, 0.85, 0.90, 0.95)
 EXCLUDE = {
@@ -129,7 +129,7 @@ def run(features_path: str, oracle_path: str, limits_path: str,
     train_start_idx = int(np.flatnonzero((dates >= pd.Timestamp(TRAIN_START)).to_numpy())[0])
     valid_start_idx = int(np.flatnonzero((dates >= pd.Timestamp(VALID_START)).to_numpy())[0])
     test_start_idx = int(np.flatnonzero((dates >= pd.Timestamp(TEST_START)).to_numpy())[0])
-    valid_rows = X.notna().any(axis=1).to_numpy()
+    valid_rows = X.notna().any(axis=1).to_numpy(copy=True)
     action = bars["corporate_action_window"].fillna(True).astype(bool).to_numpy()
     valid_rows &= ~action
 
@@ -219,7 +219,7 @@ def run(features_path: str, oracle_path: str, limits_path: str,
         "high_signal": high_signal,
     }).to_csv(out / "tsmc_2330_probability_strategy_signals.csv", index=False)
     summary = {
-        "symbol": "2330", "horizon_sessions": HORIZON,
+        "symbol": "2330", "horizon_sessions": HORIZON,\n        "target_definition": "pivot occurs on the next trading session; no overlapping five-session positive windows",
         "pivot_threshold": {"min_reversal_pct": min_reversal, "atr_multiple": atr_multiple},
         "feature_count": len(feature_cols), "feature_columns": feature_cols,
         "train_period": [TRAIN_START, TRAIN_END],
