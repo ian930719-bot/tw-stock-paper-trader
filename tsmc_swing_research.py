@@ -131,9 +131,14 @@ def detect_confirmed_pivots(features: pd.DataFrame, min_reversal_pct: float,
                                      "pivot_date", "confirmation_date", "pivot_price",
                                      "confirmation_close", "reversal_pct", "confirmation_lag"])
     mode = "seek"
-    candidate_high = {"idx": 0, "price": float(z.loc[0, "high"]), "atr_pct": float(z.loc[0, "atr_pct14"])}
-    candidate_low = {"idx": 0, "price": float(z.loc[0, "low"]), "atr_pct": float(z.loc[0, "atr_pct14"])}
-    for i in range(1, len(z)):
+    first_valid = z["atr_pct14"].first_valid_index()
+    if first_valid is None:
+        return pd.DataFrame(columns=["type", "pivot_index", "confirmation_index",
+                                     "pivot_date", "confirmation_date", "pivot_price",
+                                     "confirmation_close", "reversal_pct", "confirmation_lag"])
+    candidate_high = {"idx": int(first_valid), "price": float(z.loc[first_valid, "high"]), "atr_pct": float(z.loc[first_valid, "atr_pct14"])}
+    candidate_low = {"idx": int(first_valid), "price": float(z.loc[first_valid, "low"]), "atr_pct": float(z.loc[first_valid, "atr_pct14"])}
+    for i in range(int(first_valid) + 1, len(z)):
         row = z.iloc[i]
         atrp = row["atr_pct14"]
         if not np.isfinite(atrp):
@@ -147,14 +152,18 @@ def detect_confirmed_pivots(features: pd.DataFrame, min_reversal_pct: float,
             down_move = 1 - row["close"] / candidate_high["price"]
             up_threshold = max(min_reversal_pct, atr_multiple * candidate_low["atr_pct"])
             down_threshold = max(min_reversal_pct, atr_multiple * candidate_high["atr_pct"])
-            if up_move >= up_threshold and candidate_low["idx"] < i:
+            if up_move >= up_threshold and candidate_low["idx"] < i and up_move >= down_move:
                 mode = "up"
                 events.append(("LOW", candidate_low["idx"], i, candidate_low["price"], up_move))
-                candidate_high = {"idx": i, "price": float(row["high"]), "atr_pct": float(atrp)}
+                window = z.loc[candidate_low["idx"] + 1:i, "high"]
+                peak_idx = int(window.idxmax())
+                candidate_high = {"idx": peak_idx, "price": float(z.loc[peak_idx, "high"]), "atr_pct": float(z.loc[peak_idx, "atr_pct14"])}
             elif down_move >= down_threshold and candidate_high["idx"] < i:
                 mode = "down"
                 events.append(("HIGH", candidate_high["idx"], i, candidate_high["price"], down_move))
-                candidate_low = {"idx": i, "price": float(row["low"]), "atr_pct": float(atrp)}
+                window = z.loc[candidate_high["idx"] + 1:i, "low"]
+                trough_idx = int(window.idxmin())
+                candidate_low = {"idx": trough_idx, "price": float(z.loc[trough_idx, "low"]), "atr_pct": float(z.loc[trough_idx, "atr_pct14"])}
         elif mode == "up":
             if row["high"] > candidate_high["price"]:
                 candidate_high = {"idx": i, "price": float(row["high"]), "atr_pct": float(atrp)}
