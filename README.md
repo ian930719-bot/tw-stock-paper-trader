@@ -209,3 +209,6 @@ The divergence stage's validation-selected high rule is `base_high_and_bearish_m
 
 
 The frozen hybrid strategy improved the previously selected prior-range strategy's 2022+ historical CAGR from about 4.8% to 6.5% at 10 bps slippage, but still substantially underperformed TSMC buy-and-hold (about 31% CAGR) and had a larger drawdown. The next risk-filter study applies the same predeclared trend filters and ATR stops to this hybrid, with all selection restricted to 2017–2021.
+
+
+The next hybrid-specific risk stage, `tsmc_2330_hybrid_risk_research.py`, applies the same 4 entry filters and 3 ATR stop choices to the frozen prior-range-entry/MACD-divergence-exit pair. Selection remains restricted to 2017–2021; the 2022+ holdout is used only after the choice is frozen.
