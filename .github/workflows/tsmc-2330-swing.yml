@@ -16,6 +16,8 @@ on:
       - "tsmc_2330_selected_threshold_signal_diagnostics.py"
       - "tsmc_2330_selected_threshold_model_comparison.py"
       - "tsmc_2330_interpretable_pivot_rules.py"
+      - "tsmc_2330_tree_rule_execution_backtest.py"
+      - "tests/test_tsmc_tree_rule_execution_backtest.py"
       - "tests/test_tsmc_interpretable_pivot_rules.py"
       - "tests/test_tsmc_selected_threshold_models.py"
       - "tests/test_tsmc_selected_threshold_diagnostics.py"
@@ -251,6 +253,14 @@ jobs:
       - name: Run execution-aware strategy backtest with dividends, price limits and costs
         run: |
           python tsmc_2330_execution_backtest.py \
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --rules artifacts/tsmc_2330_swing/tsmc_2330_frozen_rule_holdout.json \
+            --limits data/tsmc_2330/corporate_actions/price_limits_2330.csv \
+            --dividends data/tsmc_2330/corporate_actions/TaiwanStockDividendResult_2330.csv \
+            --output artifacts/tsmc_2330_swing
+      - name: Backtest frozen tree-derived low setup and MACD-divergence exit
+        run: |
+          python tsmc_2330_tree_rule_execution_backtest.py \
             --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
             --rules artifacts/tsmc_2330_swing/tsmc_2330_frozen_rule_holdout.json \
             --limits data/tsmc_2330/corporate_actions/price_limits_2330.csv \
