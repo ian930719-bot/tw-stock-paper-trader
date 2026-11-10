@@ -9,6 +9,8 @@ on:
       - "tsmc_swing_research.py"
       - "tsmc_2330_oos_signal_diagnostics.py"
       - "tsmc_2330_pattern_combinations.py"
+      - "tsmc_2330_divergence_research.py"
+      - "tests/test_tsmc_divergence_research.py"
       - "tsmc_2330_frozen_rule_research.py"
       - "tsmc_2330_execution_backtest.py"
       - "tsmc_2330_reversal_confirmation_backtest.py"
@@ -197,6 +199,13 @@ jobs:
           python tsmc_2330_frozen_rule_research.py \
             --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
             --events artifacts/tsmc_2330_swing/tsmc_2330_pivot_events.csv \
+            --output artifacts/tsmc_2330_swing
+      - name: Research causal RSI, MACD and volume divergence patterns
+        run: |
+          python tsmc_2330_divergence_research.py \
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --events artifacts/tsmc_2330_swing/tsmc_2330_pivot_events.csv \
+            --rules artifacts/tsmc_2330_swing/tsmc_2330_frozen_rule_holdout.json \
             --output artifacts/tsmc_2330_swing
       - name: Run execution-aware strategy backtest with dividends, price limits and costs
         run: |
