@@ -219,6 +219,9 @@ def collect(symbol: str, start_date: str, end_date: str, output_dir: str,
             except Exception as exc:
                 broker_status = "partial" if branch_frames else "unavailable"
                 broker_errors.append({"date": day, "error": str(exc)[:300]})
+                # Stop on the first endpoint error: avoid hammering the paid API
+                # when credentials, plan entitlement, or availability is invalid.
+                break
     branches = pd.concat(branch_frames, ignore_index=True) if branch_frames else pd.DataFrame(
         columns=["date", "stock_id", "securities_trader_id", "securities_trader",
                  "buy_shares", "sell_shares", "net_shares", "buy_lots", "sell_lots", "net_lots", "price"]
