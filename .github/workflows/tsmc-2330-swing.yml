@@ -62,6 +62,13 @@ jobs:
           python-version: "3.12"
       - name: Install research dependencies
         run: python -m pip install --upgrade pip pandas numpy requests scikit-learn
+      - name: Restore persistent broker-branch history cache
+        uses: actions/cache/restore@v4
+        with:
+          path: data/tsmc_2330/chip
+          key: tsmc-2330-chip-${{ github.run_id }}
+          restore-keys: |
+            tsmc-2330-chip-
       - name: Run TSMC swing unit tests
         run: python -m unittest discover -s tests -p "test_tsmc_*.py" -v
       - name: Download raw TSMC 2330 history
@@ -200,6 +207,12 @@ jobs:
             --end-date "$(date +%F)" \
             --output data/tsmc_2330/chip \
             --broker-days 20
+      - name: Save updated broker-branch history cache
+        if: always() && hashFiles('data/tsmc_2330/chip/2330_broker_coverage.csv') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: data/tsmc_2330/chip
+          key: tsmc-2330-chip-${{ github.run_id }}
       - name: Build historical price limits from TWSE official rules and references
         run: |
           python tsmc_2330_price_limits.py \
