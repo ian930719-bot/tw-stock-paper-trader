@@ -104,21 +104,36 @@ jobs:
           }
           status = {}
           globals_by_name = {}
-          for dataset in specs:
-              rows = _api_get({"dataset": dataset, "start_date": start_date, "end_date": end_date},
-                              token=__import__("os").getenv("FINMIND_TOKEN", ""), timeout=45, retries=4)
+          for dataset, columns in specs.items():
+              params = {"dataset": dataset, "start_date": start_date, "end_date": end_date}
+              # Free-tier API requires a single-symbol filter for capital-reduction reference prices.
+              if dataset == "TaiwanStockCapitalReductionReferencePrice":
+                  params["data_id"] = "2330"
+              rows = _api_get(params, token=__import__("os").getenv("FINMIND_TOKEN", ""), timeout=45, retries=4)
               frame = pd.DataFrame(rows)
+              expected = {"date", "stock_id", *columns}
+              if not frame.empty and not expected.issubset(frame.columns):
+                  raise RuntimeError(f"{dataset} schema mismatch; missing {sorted(expected - set(frame.columns))}")
+              if not frame.empty:
+                  frame["stock_id"] = frame["stock_id"].astype(str).str.strip()
+                  frame = frame.loc[frame["stock_id"] == "2330"].copy()
               frame.to_csv(out / f"{dataset}.csv", index=False)
               globals_by_name[dataset] = frame
-              status[dataset] = {"status": "downloaded" if len(frame) else "empty", "rows": len(frame)}
+              status[dataset] = {"status": "downloaded" if len(frame) else "empty", "rows": len(frame), "symbol": "2330"}
 
           dividend_rows = _api_get({
               "dataset": "TaiwanStockDividendResult", "data_id": "2330",
               "start_date": start_date, "end_date": end_date,
           }, token=__import__("os").getenv("FINMIND_TOKEN", ""), timeout=45, retries=4)
           dividends = pd.DataFrame(dividend_rows)
-          if not dividends.empty and "stock_id" not in dividends:
-              dividends["stock_id"] = "2330"
+          if not dividends.empty:
+              expected_dividend = {"date", "before_price", "reference_price"}
+              if not expected_dividend.issubset(dividends.columns):
+                  raise RuntimeError(f"TaiwanStockDividendResult schema mismatch; missing {sorted(expected_dividend - set(dividends.columns))}")
+              if "stock_id" not in dividends:
+                  dividends["stock_id"] = "2330"
+              dividends["stock_id"] = dividends["stock_id"].astype(str).str.strip()
+              dividends = dividends.loc[dividends["stock_id"] == "2330"].copy()
           dividends.to_csv(out / "TaiwanStockDividendResult_2330.csv", index=False)
           status["TaiwanStockDividendResult_2330"] = {
               "status": "downloaded" if len(dividends) else "empty", "rows": len(dividends)
@@ -138,7 +153,7 @@ jobs:
               "start_date": start_date, "end_date": end_date,
               "datasets": status, "all_datasets_retrieved": True,
               "event_rows": int(len(events)), "conflicts": conflicts,
-              "complete_for_requested_symbol": conflicts == 0,
+              "complete_for_requested_symbol": conflicts == 0 and all(item["status"] in {"downloaded", "empty"} for item in status.values()),
               "note": "Empty endpoint response is recorded as empty, not treated as a failed request. Conflicting same-day ratios fail the research gate."
           }
           (out / "manifest_2330.json").write_text(
