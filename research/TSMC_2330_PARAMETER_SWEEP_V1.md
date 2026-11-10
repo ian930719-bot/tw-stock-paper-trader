@@ -47,3 +47,14 @@ The strongest in-sample training configuration reached 7.68% CAGR, -15.33% max d
 This first TSMC-only experiment does **not** approach the 200% net CAGR target. The validation CAGR is only 1.67%, with nine trades, and the post-selection historical test CAGR is 14.44%. The sample is too small to infer stable predictive power.
 
 Do not increase leverage or loosen risk controls to manufacture a 200% result. Next iterations should expand the feature/strategy families (trend continuation, pullback/reclaim, volatility squeeze, relative strength and market-regime filters), use nested walk-forward splits and nearby-parameter stability checks, and independently reconcile raw exchange prices/corporate actions before any execution-grade claim. TSMC-specific results must remain separate from multi-stock portfolio results.
+
+## Buy-and-hold benchmark (same adjusted close series)
+
+| Period | Buy-and-hold CAGR | Cumulative return |
+|---|---:|---:|
+| 2010–2020 | 25.46% | +1,109.02% |
+| 2021–2023 | 5.55% | +17.48% |
+| 2024–2026/11/10 | 62.37% | +299.17% |
+| 2010–2026/11/10 | 27.16% | +5,633.82% |
+
+The selected active strategy underperformed buy-and-hold in all three evaluation windows. That is an important negative finding: the first parameter grid does not yet justify active trading in TSMC. Buy-and-hold figures are also adjusted-price proxies and exclude the separate costs of a one-time initial purchase and final liquidation.
