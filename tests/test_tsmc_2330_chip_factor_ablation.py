@@ -12,6 +12,9 @@ class TSMCChipFactorAblationTests(unittest.TestCase):
             "close": [1, 2, 3],
             "return_1": [0.1, 0.2, 0.3],
             "foreign_net_lots": [1, -1, 2],
+            "foreign_dealer_net_lots": [0, 1, -1],
+            "trust_net_lots": [1, 0, -1],
+            "dealer_net_lots": [0, -1, 1],
             "institutional_net_lots": [1, -1, 2],
             "broker_net_lots": [0, 2, -1],
         })
