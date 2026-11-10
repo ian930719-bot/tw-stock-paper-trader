@@ -14,6 +14,8 @@ on:
       - "tsmc_2330_hybrid_risk_research.py"
       - "tsmc_2330_oracle_pivot_ceiling.py"
       - "tsmc_2330_selected_threshold_signal_diagnostics.py"
+      - "tsmc_2330_selected_threshold_model_comparison.py"
+      - "tests/test_tsmc_selected_threshold_models.py"
       - "tests/test_tsmc_selected_threshold_diagnostics.py"
       - "tests/test_tsmc_oracle_pivot_ceiling.py"
       - "tests/test_tsmc_divergence_research.py"
@@ -196,6 +198,12 @@ jobs:
       - name: Train causal signals for the training-selected pivot definition
         run: |
           python tsmc_2330_selected_threshold_signal_diagnostics.py \
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --oracle artifacts/tsmc_2330_swing/tsmc_2330_oracle_pivot_ceiling.json \
+            --output artifacts/tsmc_2330_swing
+      - name: Compare predeclared nonlinear models for selected pivot threshold
+        run: |
+          python tsmc_2330_selected_threshold_model_comparison.py \
             --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
             --oracle artifacts/tsmc_2330_swing/tsmc_2330_oracle_pivot_ceiling.json \
             --output artifacts/tsmc_2330_swing
