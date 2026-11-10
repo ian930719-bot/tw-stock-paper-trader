@@ -22,12 +22,12 @@ class TSMCChipPivotRuleTests(unittest.TestCase):
 
     def test_rule_feature_indices_match_filtered_training_columns(self):
         frame = pd.DataFrame({
-            "x": [0, 0, 1, 1, 2, 2, 3, 3],
-            "empty": [None] * 8,
+            "x": [0] * 40 + [1] * 40,
+            "empty": [None] * 80,
         })
         cols = [c for c in frame if frame[c].notna().any()]
         model = make_tree(2)
-        model.fit(frame[cols], [0, 0, 0, 0, 1, 1, 1, 1])
+        model.fit(frame[cols], [0] * 40 + [1] * 40)
         rules = rules_for(model, cols)
         self.assertTrue(any(rule.startswith("x <=") for rule in rules.values()))
         self.assertFalse(any("empty" in rule for rule in rules.values()))
