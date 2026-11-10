@@ -28,7 +28,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install research dependencies
-        run: python -m pip install --upgrade pip pandas numpy requests
+        run: python -m pip install --upgrade pip pandas numpy requests scikit-learn
       - name: Run TSMC swing unit tests
         run: python -m unittest discover -s tests -p "test_tsmc_swing_research.py" -v
       - name: Download raw TSMC 2330 history
@@ -82,6 +82,12 @@ jobs:
           PY
       - name: Run causal swing pivot and lead-lag research
         run: python tsmc_swing_research.py --input data/tsmc_2330 --output artifacts/tsmc_2330_swing
+      - name: Run purged chronological OOS signal diagnostics
+        run: |
+          python tsmc_2330_oos_signal_diagnostics.py \
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --events artifacts/tsmc_2330_swing/tsmc_2330_pivot_events.csv \
+            --output artifacts/tsmc_2330_swing
       - name: Upload reproducible research outputs
         uses: actions/upload-artifact@v4
         with:
