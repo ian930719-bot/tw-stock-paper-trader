@@ -12,6 +12,8 @@ on:
       - "tsmc_2330_frozen_rule_research.py"
       - "tsmc_2330_execution_backtest.py"
       - "tsmc_2330_reversal_confirmation_backtest.py"
+      - "tsmc_2330_trend_atr_risk_research.py"
+      - "tests/test_tsmc_trend_atr_risk.py"
       - "tests/test_tsmc_reversal_confirmation.py"
       - "tsmc_2330_price_limits.py"
       - "tests/test_tsmc_price_limits.py"
@@ -207,6 +209,14 @@ jobs:
       - name: Research stateful reversal-confirmation variants on validation period
         run: |
           python tsmc_2330_reversal_confirmation_backtest.py \
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --rules artifacts/tsmc_2330_swing/tsmc_2330_frozen_rule_holdout.json \
+            --limits data/tsmc_2330/corporate_actions/price_limits_2330.csv \
+            --dividends data/tsmc_2330/corporate_actions/TaiwanStockDividendResult_2330.csv \
+            --output artifacts/tsmc_2330_swing
+      - name: Research trend filters and ATR trailing stops on validation period
+        run: |
+          python tsmc_2330_trend_atr_risk_research.py \
             --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
             --rules artifacts/tsmc_2330_swing/tsmc_2330_frozen_rule_holdout.json \
             --limits data/tsmc_2330/corporate_actions/price_limits_2330.csv \
