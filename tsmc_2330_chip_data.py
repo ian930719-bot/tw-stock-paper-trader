@@ -121,11 +121,11 @@ def add_institutional_features(frame: pd.DataFrame, bars: pd.DataFrame) -> pd.Da
         z[f"{group}_net_5d_lots"] = z[net].rolling(5, min_periods=1).sum() / 1000.0
         z[f"{group}_net_20d_lots"] = z[net].rolling(20, min_periods=1).sum() / 1000.0
         z[f"{group}_net_positive_streak"] = (
-            z[net].gt(0).groupby(z[net].le(0).cumsum()).cumcount()
+            (z[net].gt(0).groupby(z[net].le(0).cumsum()).cumcount() + 1)
             .where(z[net].gt(0), 0)
         )
         z[f"{group}_net_negative_streak"] = (
-            z[net].lt(0).groupby(z[net].ge(0).cumsum()).cumcount()
+            (z[net].lt(0).groupby(z[net].ge(0).cumsum()).cumcount() + 1)
             .where(z[net].lt(0), 0)
         )
     z["institutional_data_available"] = 1
