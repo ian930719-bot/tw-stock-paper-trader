@@ -98,9 +98,9 @@ def run(features_path: str, oracle_path: str, output_dir: str,
     train_events = period_events(events, dates, TRAIN_START, TRAIN_END, max(HORIZONS))
     validation_events = period_events(events, dates, VALIDATION_START, VALIDATION_END, max(HORIZONS))
     test_events = period_events(events, dates, TEST_START, dates.max().date().isoformat(), max(HORIZONS))
-    train_mask_base = ((dates >= TRAIN_START) & (dates <= TRAIN_END)).to_numpy()
-    validation_mask = ((dates >= VALIDATION_START) & (dates <= VALIDATION_END)).to_numpy()
-    test_mask = (dates >= TEST_START).to_numpy()
+    train_mask_base = ((dates >= TRAIN_START) & (dates <= TRAIN_END)).to_numpy(copy=True)
+    validation_mask = ((dates >= VALIDATION_START) & (dates <= VALIDATION_END)).to_numpy(copy=True)
+    test_mask = (dates >= TEST_START).to_numpy(copy=True)
     if "corporate_action_window" in features:
         safe = ~features["corporate_action_window"].fillna(True).astype(bool).to_numpy()
         train_mask_base &= safe
