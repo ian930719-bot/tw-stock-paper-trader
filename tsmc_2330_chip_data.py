@@ -43,6 +43,7 @@ def normalize_institutional(rows: list[dict]) -> pd.DataFrame:
     """Normalize FinMind wide data to shares; foreign includes foreign dealers."""
     cols = [
         "date", "foreign_buy_shares", "foreign_sell_shares", "foreign_net_shares",
+        "foreign_dealer_buy_shares", "foreign_dealer_sell_shares", "foreign_dealer_net_shares",
         "trust_buy_shares", "trust_sell_shares", "trust_net_shares",
         "dealer_buy_shares", "dealer_sell_shares", "dealer_net_shares",
         "institutional_buy_shares", "institutional_sell_shares", "institutional_net_shares",
@@ -53,9 +54,12 @@ def normalize_institutional(rows: list[dict]) -> pd.DataFrame:
     if "date" not in z:
         raise ValueError("Institutional dataset missing date")
     z["date"] = pd.to_datetime(z["date"], errors="coerce").dt.strftime("%Y-%m-%d")
-    # Current schema separates foreign investors and foreign dealers.
-    foreign_buy = _to_number(z, "Foreign_Investor_buy") + _to_number(z, "Foreign_Dealer_Self_buy")
-    foreign_sell = _to_number(z, "Foreign_Investor_sell") + _to_number(z, "Foreign_Dealer_Self_sell")
+    # Official three-institution total excludes foreign dealers from the foreign category.
+    # Keep foreign-dealer proprietary trades as a separate series, not in the three-major total.
+    foreign_buy = _to_number(z, "Foreign_Investor_buy")
+    foreign_sell = _to_number(z, "Foreign_Investor_sell")
+    foreign_dealer_buy = _to_number(z, "Foreign_Dealer_Self_buy")
+    foreign_dealer_sell = _to_number(z, "Foreign_Dealer_Self_sell")
     trust_buy = _to_number(z, "Investment_Trust_buy")
     trust_sell = _to_number(z, "Investment_Trust_sell")
     # Legacy Dealer_buy/sell may be populated in older records. Prefer the
@@ -80,6 +84,9 @@ def normalize_institutional(rows: list[dict]) -> pd.DataFrame:
         "foreign_buy_shares": foreign_buy,
         "foreign_sell_shares": foreign_sell,
         "foreign_net_shares": foreign_buy - foreign_sell,
+        "foreign_dealer_buy_shares": foreign_dealer_buy,
+        "foreign_dealer_sell_shares": foreign_dealer_sell,
+        "foreign_dealer_net_shares": foreign_dealer_buy - foreign_dealer_sell,
         "trust_buy_shares": trust_buy,
         "trust_sell_shares": trust_sell,
         "trust_net_shares": trust_buy - trust_sell,
@@ -106,7 +113,7 @@ def add_institutional_features(frame: pd.DataFrame, bars: pd.DataFrame) -> pd.Da
     volume = pd.to_numeric(bars.set_index(pd.to_datetime(bars["date"]))["volume"], errors="coerce")
     z_dates = pd.to_datetime(z["date"])
     z["volume_shares"] = z_dates.map(volume).astype(float)
-    for group in ("foreign", "trust", "dealer", "institutional"):
+    for group in ("foreign", "foreign_dealer", "trust", "dealer", "institutional"):
         net = f"{group}_net_shares"
         z[f"{group}_net_lots"] = z[net] / 1000.0
         z[f"{group}_net_to_volume"] = z[net] / z["volume_shares"].replace(0, np.nan)
