@@ -197,3 +197,6 @@ Execution testing is implemented in `tsmc_2330_execution_backtest.py`. It uses t
 
 
 The baseline execution backtest showed that the first frozen setup-only rules materially underperformed TSMC buy-and-hold. The next development stage, `tsmc_2330_reversal_confirmation_backtest.py`, keeps the training-derived low/high setup thresholds fixed, arms each setup for at most five sessions, and tests five predeclared reversal confirmations (close reversal, prior-range break, RSI turn, SMA5 reclaim, SMA20 reclaim). It selects a confirmation pair using 2017–2021 only, then reports the frozen pair on 2022+ with the same dividend, cost, slippage and official-rule price-limit model. No 2022+ tuning is permitted.
+
+
+A further validation-only risk study, `tsmc_2330_trend_atr_risk_research.py`, takes the selected prior-range reversal confirmation as its fixed base and compares four predeclared entry regimes (none, above SMA200, positive SMA50 slope, full trend stack) against three ATR trailing-stop settings (none, 2.5 ATR, 4 ATR). The best combination is selected on 2017–2021 only; 2022+ is reported with 5/10/20/30 bps slippage but is not used for selection.
