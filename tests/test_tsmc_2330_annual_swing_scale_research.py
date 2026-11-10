@@ -64,7 +64,13 @@ class AnnualSwingScaleResearchTests(unittest.TestCase):
             self.events.to_csv(event_path, index=False)
             summary = run(str(feature_path), str(event_path), str(out))
             self.assertEqual(summary["wave_legs"], 2)
-            self.assertTrue((out / "tsmc_2330_annual_scale_summary.csv").exists())
+            annual = pd.read_csv(out / "tsmc_2330_annual_scale_summary.csv")
+            medium_up = annual.loc[annual["pivot_type"] == "WAVE_MEDIUM_UP"]
+            large_down = annual.loc[annual["pivot_type"] == "WAVE_LARGE_DOWN"]
+            high_pivots = annual.loc[annual["pivot_type"] == "HIGH"]
+            self.assertEqual(int(medium_up.iloc[0]["pivot_count"]), 1)
+            self.assertEqual(int(large_down.iloc[0]["pivot_count"]), 1)
+            self.assertEqual(int(high_pivots.iloc[0]["pivot_count"]), 1)
             self.assertTrue((out / "tsmc_2330_annual_indicator_patterns.csv").exists())
 
 
