@@ -73,6 +73,7 @@ def validate_latest_official_snapshot() -> dict:
         "attempted": True, "source": TWSE_SNAPSHOT_URL,
         "available": False, "symbol": "2330",
     }
+    row = None
     try:
         response = requests.get(TWSE_SNAPSHOT_URL, timeout=(8, 20))
         response.raise_for_status()
@@ -91,7 +92,7 @@ def validate_latest_official_snapshot() -> dict:
         calculated_up = limit_price(reference, band, "UP")
         calculated_down = limit_price(reference, band, "DOWN")
         result.update({
-            "available": True, "reference_price": reference,
+            "available": True, "raw_row": row, "reference_price": reference,
             "official_limit_up": actual_up, "official_limit_down": actual_down,
             "calculated_limit_up": calculated_up, "calculated_limit_down": calculated_down,
             "matches": math.isclose(actual_up, calculated_up, abs_tol=1e-8)
@@ -100,6 +101,9 @@ def validate_latest_official_snapshot() -> dict:
         })
     except Exception as exc:
         result["error"] = f"{type(exc).__name__}: {exc}"
+        if row is not None:
+            result["raw_row"] = row
+            result["row_keys"] = sorted(row.keys())
     return result
 
 
@@ -201,7 +205,7 @@ def build(bars_path: str, dividends_path: str, output_path: str) -> dict:
         ],
         "ohlc_limit_conflicts": 0,
         "latest_twse_snapshot_validation": snapshot,
-        "source": "TWSE official trading rules and TWT84U current official limit snapshot; FinMind daily bars and ex-dividend reference prices",
+        "source": "TWSE official trading rules; TWT84U current snapshot cross-check attempted; FinMind daily bars and ex-dividend reference prices",
         "note": "Historical limit prices are rule-derived from official reference-price conventions, historical 7%/10% regimes and tick sizes. Prior traded close is used only on ordinary sessions with a prior traded close; actual ex-dividend reference prices are used on all 2330 cash ex-dividend dates. No simple prior-close x 1.1 shortcut is used.",
     }
     Path(output_path).with_name("price_limits_manifest.json").write_text(
