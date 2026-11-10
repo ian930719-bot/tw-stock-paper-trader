@@ -105,10 +105,9 @@ def run(features_path: str, events_path: str, rules_path: str, output_dir: str) 
     candidates = candidate_signals(x, base_low, base_high)
 
     dates = x["date"]
-    valid = x[list(required)].notna().any(axis=1).to_numpy(copy=True)
+    valid = x[list(required)].notna().all(axis=1).to_numpy(copy=True)
     if "corporate_action_window" in x:
         valid &= ~x["corporate_action_window"].fillna(True).astype(bool).to_numpy()
-    train = (dates < VALID_START).to_numpy() & valid
     validation = ((dates >= VALID_START) & (dates < TEST_START)).to_numpy() & valid
     test = (dates >= TEST_START).to_numpy() & valid
     valid_idx = np.flatnonzero(validation)
@@ -116,7 +115,6 @@ def run(features_path: str, events_path: str, rules_path: str, output_dir: str) 
     if not len(valid_idx) or not len(test_idx):
         raise ValueError("Chronological validation/test split incomplete")
     valid_start_idx, test_start_idx = int(valid_idx[0]), int(test_idx[0])
-    train_mask = train & (np.arange(len(x)) <= max(0, valid_start_idx - 6))
     validation_mask = validation & (np.arange(len(x)) <= max(0, test_start_idx - 6))
     test_mask = test
 
