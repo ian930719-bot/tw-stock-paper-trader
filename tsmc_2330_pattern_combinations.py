@@ -52,7 +52,7 @@ def run(features_path: str, events_path: str, output_dir: str) -> dict:
     if len(split_indices) == 0:
         raise ValueError(f"No test rows at or after {SPLIT_DATE}")
     split_index = int(split_indices[0])
-    valid = x[list(FEATURES)].replace([np.inf, -np.inf], np.nan).notna().all(axis=1).to_numpy()
+    valid = x[list(FEATURES)].replace([np.inf, -np.inf], np.nan).notna().all(axis=1).to_numpy(copy=True)
     if "corporate_action_window" in x:
         valid &= ~x["corporate_action_window"].fillna(True).astype(bool).to_numpy()
     rows = []
