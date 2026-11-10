@@ -60,5 +60,21 @@ class AnnualTop20ResearchTests(unittest.TestCase):
         self.assertEqual(pd.Timestamp(trades.iloc[0]["entry_date"]), dates[1])
         self.assertGreater(float(trades.iloc[0]["entry_price"]), 10.0)
 
+
+    def test_higher_cost_stress_reduces_ending_equity(self):
+        dates = pd.to_datetime(["2016-01-04", "2016-01-05", "2016-01-06", "2016-01-07"])
+        frame = pd.DataFrame({
+            "date": dates, "open": [10.0, 10.0, 11.0, 12.0],
+            "high": [10.5, 11.0, 12.0, 12.5], "low": [9.8, 9.9, 10.8, 11.8],
+            "close": [10.2, 10.8, 11.8, 12.2],
+            "signal_atr_raw": [0.5] * 4, "adv20": [1_000_000.0] * 4,
+            "mom126": [0.2] * 4, "entry_trend_breakout": [True, False, False, False],
+            "exit_trend_breakout": [False] * 4,
+        })
+        universe = pd.DataFrame({"year": [2016], "symbol": ["2330"], "rank": [1]})
+        base, _, _ = simulate({"2330": frame}, universe, "trend_breakout", cost_multiplier=1.0)
+        stressed, _, _ = simulate({"2330": frame}, universe, "trend_breakout", cost_multiplier=2.0)
+        self.assertLess(stressed["ending_equity"], base["ending_equity"])
+
 if __name__ == "__main__":
     unittest.main()
