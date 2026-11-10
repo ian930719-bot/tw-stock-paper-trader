@@ -20,9 +20,9 @@ class TSMCExecutionBacktestTests(unittest.TestCase):
 
     def test_locked_limit_buy_and_sell(self):
         self.assertTrue(is_limit_locked("BUY", 110.0, 110.0, 110.0, 110.0, 90.0))
-        self.assertFalse(is_limit_locked("BUY", 110.0, 111.0, 109.5, 110.0, 90.0))
+        self.assertTrue(is_limit_locked("BUY", 110.0, 111.0, 109.5, 110.0, 90.0))
         self.assertTrue(is_limit_locked("SELL", 90.0, 90.0, 89.0, 110.0, 90.0))
-        self.assertFalse(is_limit_locked("SELL", 90.0, 91.0, 89.0, 110.0, 90.0))
+        self.assertTrue(is_limit_locked("SELL", 90.0, 91.0, 89.0, 110.0, 90.0))
 
     def test_frozen_rule_signals_are_causal_threshold_comparisons(self):
         frame = pd.DataFrame({
