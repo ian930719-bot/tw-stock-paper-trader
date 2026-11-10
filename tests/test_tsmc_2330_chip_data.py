@@ -17,10 +17,11 @@ class TSMCChipDataTests(unittest.TestCase):
             "Dealer_Hedging_buy": 600, "Dealer_Hedging_sell": 900,
         }])
         row = frame.iloc[0]
-        self.assertEqual(row["foreign_net_shares"], 2500)
+        self.assertEqual(row["foreign_net_shares"], 3000)
+        self.assertEqual(row["foreign_dealer_net_shares"], -500)
         self.assertEqual(row["trust_net_shares"], -1000)
         self.assertEqual(row["dealer_net_shares"], 0)
-        self.assertEqual(row["institutional_net_shares"], 1500)
+        self.assertEqual(row["institutional_net_shares"], 2000)
 
     def test_broker_rows_keep_branch_ids_and_convert_shares_to_lots(self):
         frame = normalize_broker_rows([{
