@@ -117,10 +117,13 @@ def run(features_path: str, oracle_path: str, output_dir: str) -> dict:
 
     for group, candidates in groups.items():
         X_all = frame[candidates].replace([np.inf, -np.inf], np.nan)
+        valid_rows = X_all.notna().any(axis=1).to_numpy(copy=True)
+        if "corporate_action_window" in frame:
+            valid_rows &= ~frame["corporate_action_window"].fillna(True).astype(bool).to_numpy()
         for kind in ("HIGH", "LOW"):
             pooled = {"truth": [], "probability": []}
             for year in years:
-                fold = fold_masks(dates, np.ones(len(frame), dtype=bool), year, HORIZON)
+                fold = fold_masks(dates, valid_rows, year, HORIZON)
                 if fold is None or not fold["validation_mask"].any():
                     continue
                 train_events, val_events = fold_events(events, dates, fold, HORIZON)
