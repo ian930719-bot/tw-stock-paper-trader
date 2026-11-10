@@ -344,7 +344,7 @@ def run(features_path: str, rules_path: str, limits_path: str, dividends_path: s
         "rule_source": "frozen rules selected using 2010-2016 training and 2017-2021 validation",
         "signal_timing": "signal at close t; execute at next available 2330 session open",
         "execution_price": "raw OHLC; configured adverse slippage applied per side",
-        "price_limit_source": "FinMind TaiwanStockPriceLimit daily reference/limit_up/limit_down fields",
+        "price_limit_source": "TWSE official Rule 63 and tick-size schedule; ex-dividend reference prices from FinMind; latest TWSE TWT84U snapshot cross-check when available",
         "price_limit_coverage": min_limit_coverage,
         "dividend_source": "FinMind TaiwanStockDividendResult; cash-only (息) events credited to shares held at prior session close",
         "commission_rate_per_side": COMMISSION_RATE,
@@ -357,6 +357,7 @@ def run(features_path: str, rules_path: str, limits_path: str, dividends_path: s
         "end_of_period": "remaining shares liquidated at final close with adverse slippage and costs",
         "periods": periods,
         "limit_lock_policy": "blocked buy at locked limit-up is cancelled; sell at locked limit-down remains pending",
+        "historical_limit_regime": "7% through 2015-05-29; 10% from 2015-06-01; tick-size rounding follows TWSE schedule",
         "cash_interest": 0,
         "rule_parameters": rules.get("rules", {}),
         "results": {
