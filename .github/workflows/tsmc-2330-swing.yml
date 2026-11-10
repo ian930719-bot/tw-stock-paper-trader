@@ -278,7 +278,7 @@ jobs:
             --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
             --oracle artifacts/tsmc_2330_swing/tsmc_2330_oracle_pivot_ceiling.json \
             --output artifacts/tsmc_2330_swing
-      - name: Backtest probability-ranked high-low pivot strategy
+      - name: Run annual OOF probability strategy backtest with Taiwan costs
         run: |
           python tsmc_2330_probability_strategy_backtest.py \
             --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
