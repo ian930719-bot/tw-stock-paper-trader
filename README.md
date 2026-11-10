@@ -171,3 +171,15 @@ The full-universe research workflow uses `streaming_factor_research.py` after co
 - The GitHub Actions pipeline now waits for the resumable corporate-action collection stage before running the factor screen. With the unauthenticated FinMind request allowance, collecting event data for the full candidate list can take multiple batches; set the repository Actions secret `FINMIND_TOKEN` if an appropriately entitled token is available. Never paste the token into source code or chat.
 - The collector also stores the first current-security-master snapshot observed each Taiwan calendar day as an immutable CSV with a SHA-256 digest. This improves prospective point-in-time coverage from the first captured date onward; it cannot reconstruct historical membership before capture began.
 - This stage does not create a complete historical point-in-time universe, prove complete delisted/suspended-price coverage, or independently reconcile vendor data against official TWSE / TPEx records. The research eligibility gate remains closed until those requirements and a costed continuous-capital blind OOS portfolio backtest are completed.
+
+## TSMC 2330 causal swing turning-point research
+
+The first single-stock research stage is isolated in `tsmc_swing_research.py`. It accepts only symbol 2330, reads raw OHLCV, computes close-known technical/volume/volatility features, and labels multi-scale swing highs/lows with a causal reversal-confirmation date. The pivot date is retrospective ground truth; the later confirmation date records when the reversal threshold became observable. Feature snapshots are exported 1/3/5/10/20 sessions before each pivot to inspect lead/lag behavior.
+
+Run after the 2330 raw daily-bar history has been collected:
+
+```bash
+python tsmc_swing_research.py --input data/taiwan_history --output artifacts/tsmc_2330_swing
+```
+
+Outputs: `tsmc_2330_pivot_events.csv`, `tsmc_2330_pivot_leadlag.csv`, `tsmc_2330_causal_features.csv`, and `tsmc_2330_research_summary.json`. Five predeclared reversal/ATR thresholds are reported side by side; the script does not select a winning threshold, run a return backtest, or deploy a strategy. Corporate-action windows are excluded only when the input explicitly supplies `corporate_action_window`; otherwise they must be separately audited before interpreting pivots around ex-rights dates. This stage is a pivot-sample and signal-timing study, not evidence of 200% CAGR.
