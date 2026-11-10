@@ -107,9 +107,9 @@ def run(features_path: str, oracle_path: str, output_dir: str) -> dict:
     validation_end = "2021-12-31"
     validation_mask_base = ((dates >= VALIDATION_START) & (dates <= validation_end)).to_numpy()
     test_mask = (dates >= TEST_START).to_numpy() & valid_rows
+    train_start_idx = int(np.flatnonzero((dates >= pd.Timestamp("2010-01-01")).to_numpy())[0])
     validation_start_idx = int(np.flatnonzero((dates >= pd.Timestamp(VALIDATION_START)).to_numpy())[0])
     test_start_idx = int(np.flatnonzero((dates >= pd.Timestamp(TEST_START)).to_numpy())[0])
-    train_end_idx = int(np.flatnonzero((dates <= pd.Timestamp(train_end)).to_numpy())[-1])
     rows = []
     for horizon in HORIZONS:
         train_events = period_events(events, dates, "2010-01-01", train_end, horizon)
@@ -118,8 +118,10 @@ def run(features_path: str, oracle_path: str, output_dir: str) -> dict:
         train_y_by_kind = {}
         validation_y_by_kind = {}
         test_y_by_kind = {}
-        train_mask = (np.arange(len(features)) <= train_end_idx - horizon).astype(bool) & valid_rows
-        validation_mask = validation_mask_base & (np.arange(len(features)) <= test_start_idx - horizon - 1) & valid_rows
+        idxs = np.arange(len(features))
+        train_mask = (idxs >= train_start_idx + horizon) & (idxs <= validation_start_idx - horizon - 1) & valid_rows
+        validation_mask = validation_mask_base & (idxs >= validation_start_idx + horizon) & (idxs <= test_start_idx - horizon - 1) & valid_rows
+        test_mask_horizon = (idxs >= test_start_idx + horizon) & valid_rows
         for kind in ("HIGH", "LOW"):
             y_train = build_target(dates, train_events, horizon, kind)
             y_val = build_target(dates, validation_events, horizon, kind)
@@ -144,7 +146,7 @@ def run(features_path: str, oracle_path: str, output_dir: str) -> dict:
             # Refit using all labels confirmed by 2021, then evaluate the 2022+ period.
             train_val_events = pd.concat([train_events, validation_events], ignore_index=True)
             y_train_val = build_target(dates, train_val_events, horizon, kind)
-            train_val_mask = (np.arange(len(features)) <= test_start_idx - horizon - 1).astype(bool) & valid_rows
+            train_val_mask = (idxs >= train_start_idx + horizon) & (idxs <= test_start_idx - horizon - 1) & valid_rows
             if len(np.unique(y_train_val[train_val_mask])) < 2 or len(np.unique(y_test[test_mask_kind])) < 2:
                 test_metrics = {"error": "train/test target has one class"}
             else:
@@ -156,7 +158,7 @@ def run(features_path: str, oracle_path: str, output_dir: str) -> dict:
                     ),
                 )
                 final_model.fit(X.loc[train_val_mask], y_train_val[train_val_mask])
-                test_metrics = evaluate(final_model, X, test_mask_kind, y_test)
+                test_metrics = evaluate(final_model, X, test_mask_horizon, y_test)
             rows.append({
                 "threshold_id": threshold_id, "min_reversal_pct": min_reversal,
                 "atr_multiple": atr_multiple, "horizon_sessions": horizon,
@@ -165,8 +167,8 @@ def run(features_path: str, oracle_path: str, output_dir: str) -> dict:
                 "train_event_days": int(y_train[train_mask].sum()),
                 "validation_rows": int(validation_mask.sum()),
                 "validation_event_days": int(y_val[validation_mask].sum()),
-                "test_rows": int(test_mask.sum()),
-                "test_event_days": int(y_test[test_mask].sum()),
+                "test_rows": int(test_mask_horizon.sum()),
+                "test_event_days": int(y_test[test_mask_horizon].sum()),
                 "feature_count": len(feature_cols),
                 "validation_metrics": val_metrics,
                 "test_metrics": test_metrics,
