@@ -175,6 +175,15 @@ def run(features_path: str, oracle_path: str, output_dir: str) -> dict:
                 validation_model, X, val_mask, y_val, cols,
                 "validation", kind, horizon, chosen_depth
             )
+            # Apply the exact validation-trained rule tree to 2022+ unchanged.
+            # This is the direct transfer test; no refit or threshold changes.
+            validation_tree_test_metrics = evaluate(
+                validation_model, X, test_mask, y_test
+            )
+            validation_tree_test_rules = _leaf_rows(
+                validation_model, X, test_mask, y_test, cols,
+                "validation_tree_test_2022_plus", kind, horizon, chosen_depth
+            )
             final_model = make_tree(chosen_depth)
             final_model.fit(X.loc[train_val_mask], y_train_val[train_val_mask])
             test_metrics = evaluate(final_model, X, test_mask, y_test)
@@ -182,7 +191,7 @@ def run(features_path: str, oracle_path: str, output_dir: str) -> dict:
                 final_model, X, test_mask, y_test, cols,
                 "test_2022_plus", kind, horizon, chosen_depth
             )
-            rule_rows.extend(validation_rules + test_rules)
+            rule_rows.extend(validation_rules + validation_tree_test_rules + test_rules)
             results[key] = {
                 "selected_depth": chosen_depth,
                 "validation_candidates": {
@@ -191,6 +200,8 @@ def run(features_path: str, oracle_path: str, output_dir: str) -> dict:
                 "validation_metrics": candidates[str(chosen_depth)]["validation"],
                 "test_metrics": test_metrics,
                 "validation_leaf_rules": validation_rules,
+                "validation_tree_test_metrics": validation_tree_test_metrics,
+                "validation_tree_test_leaf_rules": validation_tree_test_rules,
                 "refit_test_leaf_rules": test_rules,
             }
     out = Path(output_dir)
