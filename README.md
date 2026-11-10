@@ -215,3 +215,6 @@ The next hybrid-specific risk stage, `tsmc_2330_hybrid_risk_research.py`, applie
 
 
 To quantify whether the 200% CAGR target is even feasible under different swing definitions, `tsmc_2330_oracle_pivot_ceiling.py` sweeps 56 predeclared reversal/ATR thresholds and computes the perfect-foresight return from buying each retrospective low and selling the next retrospective high. It includes proportional cost sensitivity but deliberately assumes exact pivot fills and ignores causal confirmation delay; it is an optimistic theoretical ceiling, not a tradable result.
+
+
+The full-period exploratory oracle grid found a 1% / 0.75 ATR definition with 445 perfect low-to-next-high swings and a 234.7% net theoretical CAGR at 10 bps per-side slippage. This is not a tradable return: it assumes exact retrospective pivot fills. The oracle script now separately selects a threshold on 2010–2016 and reports 2017–2021 / 2022+ to prevent full-period threshold leakage.
