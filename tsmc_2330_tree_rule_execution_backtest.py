@@ -30,7 +30,7 @@ MAX_WAIT = 5
 def tree_low_setup(features: pd.DataFrame) -> np.ndarray:
     ret = pd.to_numeric(features["return_1"], errors="coerce")
     loc = pd.to_numeric(features["close_location"], errors="coerce")
-    signal = (ret.le(LOW_RETURN_MAX) & loc.le(LOW_CLOSE_LOCATION_MAX)).fillna(False).to_numpy()
+    signal = (ret.le(LOW_RETURN_MAX) & loc.le(LOW_CLOSE_LOCATION_MAX)).fillna(False).to_numpy(copy=True)
     if "corporate_action_window" in features:
         signal &= ~features["corporate_action_window"].fillna(True).astype(bool).to_numpy()
     return signal
