@@ -160,13 +160,11 @@ def _annual_summaries(features: pd.DataFrame, pivots: pd.DataFrame, legs: pd.Dat
         years = []
     for year in years:
         sessions = int((pd.to_datetime(features["date"]).dt.year == year).sum())
-        for threshold_id in sorted(features.get("threshold_id", pd.Series(dtype=str)).dropna().unique()):
-            pass
         for threshold_id in sorted(pivots["threshold_id"].unique()) if not pivots.empty else []:
             p = pivots.loc[(pivots["year"] == year) & (pivots["threshold_id"] == threshold_id)]
             l = legs.loc[(legs["start_year"] == year) & (legs["threshold_id"] == threshold_id)] if not legs.empty else pd.DataFrame()
             for kind in ("LOW", "HIGH"):
-                q = p.loc[p["type"] == kind]
+                q = p.loc[p["type"] == kind].drop_duplicates(subset=["pivot_index"])
                 annual.append({
                     "year": int(year), "threshold_id": threshold_id, "pivot_type": kind,
                     "trading_sessions": sessions, "pivot_count": int(len(q)),
@@ -250,7 +248,8 @@ def run(features_path: str, events_path: str, output_dir: str) -> dict:
     patterns = _indicator_patterns(pivots)
     monthly = (
         pivots.groupby(["month", "type", "adjacent_wave_scale"], dropna=False)
-        .size().rename("pivot_count").reset_index()
+        .agg(pivot_wave_associations=("pivot_index", "size"),
+             unique_pivots=("pivot_index", "nunique")).reset_index()
         if not pivots.empty else pd.DataFrame()
     )
     out = Path(output_dir)
