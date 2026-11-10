@@ -103,6 +103,21 @@ class TSMCSwingResearchTests(unittest.TestCase):
         self.assertTrue(features.loc[250:270, "relative_volume20"].isna().all())
         self.assertTrue(features.loc[250:270, "turnover_ratio20"].isna().all())
 
+    def test_all_share_volume_features_mask_corporate_action_window(self):
+        close = 100 + np.cumsum(np.sin(np.arange(340) / 8) * 0.8)
+        bars = self.make_bars(close)
+        bars["volume"] = 60000 + (np.arange(len(bars)) % 19) * 2500
+        bars["corporate_action_window"] = False
+        bars.loc[250:270, "corporate_action_window"] = True
+        features = build_causal_features(bars)
+        cols = [
+            "obv_change_5", "obv_flow_ratio_5", "obv_flow_ratio_20", "mfi14",
+            "chaikin_ad_line", "chaikin_money_flow20", "volume_sma5_ratio",
+            "volume_sma20_ratio", "volume_zscore20", "rolling_vwap_proxy_5",
+            "rolling_vwap_proxy_10", "rolling_vwap_proxy_20",
+        ]
+        self.assertTrue(features.loc[250:270, cols].isna().all().all())
+
     def test_loader_filters_to_2330_and_rejects_other_symbols(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
