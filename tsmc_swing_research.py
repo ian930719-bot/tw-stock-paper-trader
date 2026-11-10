@@ -13,6 +13,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from corporate_action_adjustments import apply_back_adjustments
+
 REQUIRED = {"date", "open", "high", "low", "close", "volume"}
 LEADS = (1, 3, 5, 10, 20)
 THRESHOLDS = ((0.03, 2.0), (0.05, 2.0), (0.08, 2.0), (0.03, 3.0), (0.05, 3.0))
@@ -96,6 +98,8 @@ def build_causal_features(bars: pd.DataFrame) -> pd.DataFrame:
     z["relative_volume20"] = v / volbase.replace(0, np.nan)
     money = z["turnover"] if "turnover" in z else c * v
     z["turnover_ratio20"] = money / money.shift(1).rolling(20, min_periods=20).mean().replace(0, np.nan)
+    action_mask = z.get("corporate_action_window", pd.Series(False, index=z.index)).fillna(True).astype(bool)
+    z.loc[action_mask, ["relative_volume20", "turnover_ratio20"]] = np.nan
     z["realized_vol20"] = c.pct_change().rolling(20, min_periods=20).std(ddof=0) * np.sqrt(252)
     z["realized_vol60"] = c.pct_change().rolling(60, min_periods=60).std(ddof=0) * np.sqrt(252)
     z["volatility_compression"] = z["realized_vol20"] / z["realized_vol60"].replace(0, np.nan)
@@ -226,8 +230,27 @@ def build_lead_lag(events: pd.DataFrame, features: pd.DataFrame) -> pd.DataFrame
     return pd.DataFrame(rows)
 
 
-def run(input_path: str, output_dir: str) -> dict:
-    bars = load_tsmc(input_path)
+def run(input_path: str, output_dir: str, corporate_actions_path: str | None = None) -> dict:
+    raw_bars = load_tsmc(input_path)
+    bars = raw_bars.copy()
+    action_events = pd.DataFrame()
+    if corporate_actions_path:
+        action_path = Path(corporate_actions_path)
+        if not action_path.exists():
+            raise FileNotFoundError(f"Corporate-action event file not found: {action_path}")
+        action_events = pd.read_csv(action_path, dtype={"symbol": str})
+        required_action_cols = {"symbol", "date", "adjustment_ratio", "conflict"}
+        if not required_action_cols.issubset(action_events.columns):
+            raise ValueError(f"Corporate-action file missing columns: {sorted(required_action_cols - set(action_events.columns))}")
+        action_events = action_events.loc[action_events["symbol"].astype(str) == "2330"].copy()
+        if action_events.get("conflict", pd.Series(dtype=bool)).fillna(True).astype(bool).any():
+            raise ValueError("Conflicting 2330 corporate-action ratios; refusing to label pivots")
+        action_events = action_events.loc[pd.to_numeric(action_events["adjustment_ratio"], errors="coerce").gt(0)].copy()
+        adjusted = apply_back_adjustments(bars, action_events)
+        for col in ("open", "high", "low", "close"):
+            bars[f"raw_{col}"] = bars[col]
+            bars[col] = adjusted[f"adj_{col}"]
+        bars["corporate_action_window"] = adjusted["corporate_action_window"].astype(bool)
     features = build_causal_features(bars)
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -255,7 +278,10 @@ def run(input_path: str, output_dir: str) -> dict:
         "first_date": bars["date"].min().date().isoformat(),
         "last_date": bars["date"].max().date().isoformat(),
         "source": "input CSV; provenance must be supplied by the caller",
-        "price_basis": "raw OHLCV; no retrospectively adjusted prices used",
+        "price_basis": "point-in-time-safe back-adjusted OHLC for signal labels/features; raw OHLC retained in feature output for execution reference",
+        "corporate_action_events": int(len(action_events)),
+        "corporate_action_window_rows_excluded": int(features["corporate_action_window"].sum()),
+        "corporate_action_adjustment_source": "FinMind normalized event ratios" if corporate_actions_path else "not supplied; unadjusted research is not final-grade",
         "thresholds": [{"min_reversal_pct": p, "atr_multiple": a} for p, a in THRESHOLDS],
         "events": int(len(events_all)),
         "high_events": int((events_all["type"] == "HIGH").sum()) if not events_all.empty else 0,
@@ -276,8 +302,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="TSMC 2330 causal swing pivot research")
     parser.add_argument("--input", required=True, help="CSV file or directory containing TSMC 2330 bars")
     parser.add_argument("--output", default="artifacts/tsmc_2330_swing")
+    parser.add_argument("--corporate-actions", default=None, help="Normalized 2330 corporate-action event CSV")
     args = parser.parse_args()
-    print(json.dumps(run(args.input, args.output), ensure_ascii=False, indent=2))
+    print(json.dumps(run(args.input, args.output, args.corporate_actions), ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
