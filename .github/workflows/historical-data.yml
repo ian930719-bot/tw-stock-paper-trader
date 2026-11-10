@@ -8,6 +8,8 @@ on:
       - historical_data_collector.py
       - corporate_action_adjustments.py
       - streaming_factor_research.py
+      - annual_top20_shared_capital_research.py
+      - .github/workflows/historical-data.yml
   workflow_dispatch:
     inputs:
       start_date:
@@ -104,6 +106,24 @@ jobs:
             --input data/taiwan_history \
             --output artifacts/streaming_factor_research \
             --split-date 2024-01-01
+      - name: Run annual top-20 shared-capital strategy research after complete collection
+        if: steps.collect.outcome == 'success' && steps.collect.outputs.collection_complete == 'true' && steps.collect.outputs.corporate_actions_complete == 'true'
+        run: |
+          python annual_top20_shared_capital_research.py \
+            --input data/taiwan_history \
+            --output artifacts/annual_top20_2016_2026
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path("artifacts/annual_top20_2016_2026/research_report.json").read_text(encoding="utf-8"))
+          print(json.dumps({
+              "data_start":r["data_start"],"data_end":r["data_end"],
+              "symbols_with_valid_bars":r["symbols_with_valid_bars"],
+              "annual_top20_coverage":r["annual_top20_coverage"],
+              "strategy_results":r["strategy_results"],
+              "limitations":r["limitations"],
+          },ensure_ascii=False,indent=2))
+          PY
       - name: Upload raw data, provenance, and research outputs
         if: always()
         uses: actions/upload-artifact@v4
@@ -112,6 +132,7 @@ jobs:
           path: |
             data/taiwan_history/
             artifacts/streaming_factor_research/
+            artifacts/annual_top20_2016_2026/
           if-no-files-found: warn
           retention-days: 30
       - name: Dispatch next resumable batch
