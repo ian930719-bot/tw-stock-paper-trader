@@ -219,7 +219,8 @@ def run(features_path: str, oracle_path: str, limits_path: str,
         "high_signal": high_signal,
     }).to_csv(out / "tsmc_2330_probability_strategy_signals.csv", index=False)
     summary = {
-        "symbol": "2330", "horizon_sessions": HORIZON,\n        "target_definition": "pivot occurs on the next trading session; no overlapping five-session positive windows",
+        "symbol": "2330", "horizon_sessions": HORIZON,
+        "target_definition": "pivot occurs on the next trading session; no overlapping five-session positive windows",
         "pivot_threshold": {"min_reversal_pct": min_reversal, "atr_multiple": atr_multiple},
         "feature_count": len(feature_cols), "feature_columns": feature_cols,
         "train_period": [TRAIN_START, TRAIN_END],
