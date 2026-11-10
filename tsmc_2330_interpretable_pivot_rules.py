@@ -142,7 +142,7 @@ def run(features_path: str, oracle_path: str, output_dir: str) -> dict:
         val_events = period_events(events, dates, VALIDATION_START, VALIDATION_END, horizon)
         test_events = period_events(events, dates, TEST_START, dates.max().date().isoformat(), horizon)
         train_mask = (idx >= train_start + horizon) & (idx <= val_start - horizon - 1) & valid
-        val_mask = ((dates >= VALIDATION_START) & (dates <= VALIDATION_END)).to_numpy()
+        val_mask = ((dates >= VALIDATION_START) & (dates <= VALIDATION_END)).to_numpy(copy=True)
         val_mask &= (idx >= val_start + horizon) & (idx <= test_start - horizon - 1) & valid
         test_mask = (idx >= test_start + horizon) & valid
         train_val_mask = (idx >= train_start + horizon) & (idx <= test_start - horizon - 1) & valid
