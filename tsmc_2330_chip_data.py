@@ -22,8 +22,9 @@ DATA_URL = "https://api.finmindtrade.com/api/v4/data"
 BROKER_URL = "https://api.finmindtrade.com/api/v4/taiwan_stock_trading_daily_report"
 
 
-def _get_json(url: str, params: dict[str, Any], *, timeout: int = 30) -> dict:
-    response = requests.get(url, params=params, timeout=(8, timeout))
+def _get_json(url: str, params: dict[str, Any], *, token: str = "", timeout: int = 30) -> dict:
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    response = requests.get(url, params=params, headers=headers, timeout=(8, timeout))
     response.raise_for_status()
     payload = response.json()
     if not isinstance(payload, dict):
@@ -193,48 +194,80 @@ def collect(symbol: str, start_date: str, end_date: str, output_dir: str,
         "dataset": "TaiwanStockInstitutionalInvestorsBuySellWide",
         "data_id": symbol, "start_date": start_date, "end_date": end_date,
     }
-    inst_payload = _get_json(DATA_URL, {**params, **({"token": token} if token else {})}, timeout=60)
+    inst_payload = _get_json(DATA_URL, params, token=token, timeout=60)
     inst = normalize_institutional(inst_payload.get("data", []))
     inst_path = out / f"{symbol}_institutional.csv"
     inst.to_csv(inst_path, index=False)
 
-    # Branch-level detail is a distinct paid-tier endpoint, queried per date.
-    # Only the most recent N available trading dates are requested per run.
+    # Branch-level detail is Sponsor-tier and queried once per trading day.
+    # The coverage ledger supports a bounded historical backfill in CI cache.
     bars_path = out.parent / "bars" / f"{symbol}.csv"
     if not bars_path.exists():
         raise FileNotFoundError(f"Missing price history: {bars_path}")
     bars = pd.read_csv(bars_path, parse_dates=["date"])
-    trade_dates = bars.loc[
-        bars["date"].dt.strftime("%Y-%m-%d").between("2021-06-30", end_date),
-        "date",
-    ].drop_duplicates().sort_values().tail(max(0, int(broker_days)))
-    branch_frames = []
-    broker_status = "skipped_no_token"
-    broker_errors = []
-    if token and len(trade_dates):
-        broker_status = "downloaded"
-        for dt in trade_dates:
-            day = dt.date().isoformat()
+    all_dates = (
+        bars.loc[bars["date"].dt.strftime("%Y-%m-%d").between("2021-06-30", end_date), "date"]
+        .drop_duplicates().sort_values().dt.strftime("%Y-%m-%d").tolist()
+    )
+    branches_path = out / f"{symbol}_broker_branches.csv"
+    coverage_path = out / f"{symbol}_broker_coverage.csv"
+    branch_columns = [
+        "date", "stock_id", "securities_trader_id", "securities_trader",
+        "buy_shares", "sell_shares", "net_shares", "buy_lots", "sell_lots", "net_lots", "price"
+    ]
+    existing_branches = (
+        pd.read_csv(branches_path, dtype={"securities_trader_id": str})
+        if branches_path.exists() else pd.DataFrame(columns=branch_columns)
+    )
+    coverage = (
+        pd.read_csv(coverage_path, dtype={"date": str})
+        if coverage_path.exists() else pd.DataFrame(columns=["date", "status", "row_count", "retrieved_at"])
+    )
+    covered_dates = set(coverage.get("date", pd.Series(dtype=str)).astype(str))
+    missing_dates = [d for d in all_dates if d not in covered_dates]
+    backfill_complete = not missing_dates
+    selected_dates = missing_dates[:max(0, int(broker_days))]
+    if backfill_complete and broker_days:
+        selected_dates = all_dates[-int(broker_days):]
+    branch_frames, new_coverage = [], []
+    broker_status, broker_errors = "skipped_no_token", []
+    if token and selected_dates:
+        broker_status = "backfilling" if missing_dates else "refreshing_latest"
+        for day in selected_dates:
             try:
                 payload = _get_json(
-                    BROKER_URL, {"data_id": symbol, "date": day, "token": token}, timeout=40
+                    BROKER_URL, {"data_id": symbol, "date": day}, token=token, timeout=40
                 )
                 rows = payload.get("data", [])
                 if not isinstance(rows, list):
                     raise RuntimeError("Broker data field is not a list")
-                branch_frames.append(normalize_broker_rows(rows, day))
+                day_frame = normalize_broker_rows(rows, day)
+                branch_frames.append(day_frame)
+                new_coverage.append({
+                    "date": day, "status": "downloaded" if len(day_frame) else "empty",
+                    "row_count": int(len(day_frame)),
+                    "retrieved_at": datetime.now().astimezone().isoformat(),
+                })
             except Exception as exc:
                 broker_status = "partial" if branch_frames else "unavailable"
                 broker_errors.append({"date": day, "error": str(exc)[:300]})
-                # Stop on the first endpoint error: avoid hammering the paid API
-                # when credentials, plan entitlement, or availability is invalid.
                 break
-    branches = pd.concat(branch_frames, ignore_index=True) if branch_frames else pd.DataFrame(
-        columns=["date", "stock_id", "securities_trader_id", "securities_trader",
-                 "buy_shares", "sell_shares", "net_shares", "buy_lots", "sell_lots", "net_lots", "price"]
-    )
-    branches_path = out / f"{symbol}_broker_branches.csv"
+    if new_coverage:
+        refreshed = set(row["date"] for row in new_coverage)
+        coverage = pd.concat([coverage, pd.DataFrame(new_coverage)], ignore_index=True)
+        coverage = coverage.drop_duplicates("date", keep="last").sort_values("date")
+        existing_branches = existing_branches.loc[
+            ~existing_branches["date"].astype(str).isin(refreshed)
+        ]
+    branches = pd.concat([existing_branches, *branch_frames], ignore_index=True) if branch_frames else existing_branches
+    if not branches.empty:
+        branches["date"] = branches["date"].astype(str)
+        branches["securities_trader_id"] = branches["securities_trader_id"].astype(str)
+        branches = branches.drop_duplicates(
+            ["date", "stock_id", "securities_trader_id"], keep="last"
+        ).sort_values(["date", "securities_trader_id"])
     branches.to_csv(branches_path, index=False)
+    coverage.to_csv(coverage_path, index=False)
     broker_features = broker_daily_features(branches)
     broker_features.to_csv(out / f"{symbol}_broker_daily_features.csv", index=False)
 
@@ -256,14 +289,18 @@ def collect(symbol: str, start_date: str, end_date: str, output_dir: str,
         "broker_dataset": "TaiwanStockTradingDailyReport",
         "broker_tier": "FinMind Sponsor",
         "broker_status": broker_status,
-        "broker_days_requested": int(len(trade_dates)),
+        "broker_days_requested": int(len(selected_dates)),
+        "broker_days_covered_total": int(coverage["date"].nunique()) if not coverage.empty else 0,
+        "broker_backfill_complete": bool(set(all_dates).issubset(set(coverage.get("date", pd.Series(dtype=str)).astype(str)))),
+        "broker_first_covered_date": str(coverage["date"].min()) if not coverage.empty else None,
+        "broker_last_covered_date": str(coverage["date"].max()) if not coverage.empty else None,
         "broker_days_returned": int(branches["date"].nunique()) if not branches.empty else 0,
         "broker_rows": int(len(branches)),
         "broker_units": "source buy/sell are shares; converted to lots by /1000",
         "broker_errors": broker_errors,
         "token_configured": bool(token),
         "retrieved_at_taipei": datetime.now().astimezone().isoformat(),
-        "note": "Institutional and broker-branch data are separate datasets. Missing broker coverage is null, never zero. Broker detail currently covers only the most recent configured trading dates per run.",
+        "note": "Institutional and broker-branch data are separate datasets. Missing broker coverage is null, never zero. Broker branch history is backfilled in bounded batches using a coverage ledger; persist the chip directory between workflow runs using GitHub Actions cache."
     }
     (out / f"{symbol}_chip_manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
