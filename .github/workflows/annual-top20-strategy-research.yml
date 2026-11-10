@@ -62,7 +62,7 @@ jobs:
               json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
           )
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
-              out.write(f"ready={str(ready).lower()}\\n")
+              out.write(f"ready={str(ready).lower()}\n")
           PY
       - name: Run annual top-20 universe and shared-capital strategy comparison
         if: steps.data.outputs.ready == 'true'
