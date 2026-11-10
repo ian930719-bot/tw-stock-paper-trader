@@ -44,9 +44,12 @@ def is_limit_locked(side: str, open_price: float, high: float, low: float,
     if not all(np.isfinite(v) for v in values):
         return True
     if side == "BUY":
-        return limit_up > 0 and open_price >= limit_up - 1e-8 and low >= limit_up - 1e-8
+        # Conservative: an opening auction at limit-up is treated as unfillable,
+        # regardless of the later intraday low (which is not known at order time).
+        return limit_up > 0 and open_price >= limit_up - 1e-8
     if side == "SELL":
-        return limit_down > 0 and open_price <= limit_down + 1e-8 and high <= limit_down + 1e-8
+        # Conservative: an opening auction at limit-down is treated as unfillable.
+        return limit_down > 0 and open_price <= limit_down + 1e-8
     raise ValueError(f"Unknown side: {side}")
 
 
