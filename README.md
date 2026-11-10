@@ -188,3 +188,6 @@ The follow-on TSMC-only ranking diagnostic is in `tsmc_2330_oos_signal_diagnosti
 
 
 The TSMC-only workflow also runs `tsmc_2330_pattern_combinations.py`: it evaluates a small, predeclared set of two- and three-feature conjunctions. Feature cutoffs are estimated from the 2010–2021 training segment only; 2022+ metrics are descriptive diagnostics, not a parameter-selection target. Because the 2022+ segment has already been inspected in earlier diagnostics, it is not considered a fresh blind final holdout. Outputs are `tsmc_2330_pattern_combinations.csv/json`; no trades or CAGR are simulated.
+
+
+A nested chronological rule-development stage is available in `tsmc_2330_frozen_rule_research.py`. It estimates feature cutoffs on 2010–2016, selects one predeclared conjunction per direction using 2017–2021 mean F1 across 1/3/5-session pivot targets, purges five sessions at split boundaries, and reports the frozen rules on 2022+ data without using that period for selection. Since 2022+ has already been examined in earlier diagnostics, this remains exploratory rather than a pristine blind test. No trade simulation or CAGR is included.
