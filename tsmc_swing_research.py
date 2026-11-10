@@ -259,6 +259,12 @@ def run(input_path: str, output_dir: str, corporate_actions_path: str | None = N
         events = detect_confirmed_pivots(features, pct, atr_mult)
         if events.empty:
             continue
+        action_mask = features["corporate_action_window"].fillna(True).astype(bool)
+        pivot_action = action_mask.iloc[events["pivot_index"].astype(int).to_numpy()].to_numpy()
+        confirm_action = action_mask.iloc[events["confirmation_index"].astype(int).to_numpy()].to_numpy()
+        events = events.loc[~(pivot_action | confirm_action)].reset_index(drop=True)
+        if events.empty:
+            continue
         events.insert(0, "threshold_id", f"p{pct:.3f}_atr{atr_mult:.1f}")
         event_frames.append(events)
         lead = build_lead_lag(events, features)
