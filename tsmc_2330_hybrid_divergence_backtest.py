@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 
 from tsmc_2330_execution_backtest import (
-    SLIPPAGE_BPS, INITIAL_CAPITAL, load_inputs, _simulate_period,
+    SLIPPAGE_BPS, INITIAL_CAPITAL, load_inputs, _simulate_period, build_signals,
 )
 from tsmc_2330_reversal_confirmation_backtest import build_confirmed_signals
 from tsmc_2330_divergence_research import candidate_signals
@@ -41,9 +41,7 @@ def run(features_path: str, rules_path: str, limits_path: str, dividends_path: s
         features_path, rules_path, limits_path, dividends_path
     )
     low_signal, _ = build_confirmed_signals(bars, rules, "break_prior_range")
-    base_low, base_high = __import__(
-        "tsmc_2330_execution_backtest", fromlist=["build_signals"]
-    ).build_signals(bars, rules)
+    base_low, base_high = build_signals(bars, rules)
     candidates = candidate_signals(bars, base_low, base_high)
     high_signal = candidates["HIGH"]["base_high_and_bearish_macd"]
     limit_lookup = {
