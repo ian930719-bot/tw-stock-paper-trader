@@ -89,6 +89,7 @@ jobs:
           python -m py_compile tsmc_2330_frozen_rule_research.py
           python -m py_compile tsmc_2330_walk_forward.py
           python -m py_compile tsmc_2330_oos_signal_diagnostics.py
+          python -m py_compile tsmc_2330_chip_pivot_rules.py
           python -m py_compile tests/test_tsmc_2330_walk_forward.py
           python -m py_compile tests/test_tsmc_2330_probability_policy.py
       - name: Run TSMC swing unit tests
