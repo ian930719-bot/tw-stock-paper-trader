@@ -278,12 +278,7 @@ jobs:
             --limits data/tsmc_2330/corporate_actions/price_limits_2330.csv \
             --dividends data/tsmc_2330/corporate_actions/TaiwanStockDividendResult_2330.csv \
             --output artifacts/tsmc_2330_swing
-      - name: Extract interpretable TSMC swing rules
-        run: |
-          python tsmc_2330_interpretable_pivot_rules.py \
-            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
-            --oracle artifacts/tsmc_2330_swing/tsmc_2330_oracle_pivot_ceiling.json \
-            --output artifacts/tsmc_2330_swing
+      # Legacy fixed-split interpretable tree is withheld; migrate before re-enabling.
       - name: Run purged chronological OOS signal diagnostics
         run: |
           python tsmc_2330_oos_signal_diagnostics.py \
