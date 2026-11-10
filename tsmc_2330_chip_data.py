@@ -164,7 +164,10 @@ def broker_daily_features(branches: pd.DataFrame) -> pd.DataFrame:
     cols = [
         "date", "broker_data_available", "broker_branch_count", "broker_buy_lots",
         "broker_sell_lots", "broker_net_lots", "broker_abs_net_lots",
-        "broker_top5_net_lots", "broker_top10_net_lots", "broker_top5_abs_net_share",
+        "broker_top5_net_lots", "broker_top10_net_lots",
+        "broker_top5_buy_net_lots", "broker_top10_buy_net_lots",
+        "broker_top5_sell_net_lots", "broker_top10_sell_net_lots",
+        "broker_top5_abs_net_share", "broker_buy_sell_balance_diff_lots",
     ]
     if branches.empty:
         return pd.DataFrame(columns=cols)
@@ -181,7 +184,12 @@ def broker_daily_features(branches: pd.DataFrame) -> pd.DataFrame:
             "broker_abs_net_lots": abs_total,
             "broker_top5_net_lots": float(g.head(5)["net_lots"].sum()),
             "broker_top10_net_lots": float(g.head(10)["net_lots"].sum()),
+            "broker_top5_buy_net_lots": float(g.loc[g["net_lots"] > 0].nlargest(5, "net_lots")["net_lots"].sum()),
+            "broker_top10_buy_net_lots": float(g.loc[g["net_lots"] > 0].nlargest(10, "net_lots")["net_lots"].sum()),
+            "broker_top5_sell_net_lots": float(g.loc[g["net_lots"] < 0].nsmallest(5, "net_lots")["net_lots"].sum()),
+            "broker_top10_sell_net_lots": float(g.loc[g["net_lots"] < 0].nsmallest(10, "net_lots")["net_lots"].sum()),
             "broker_top5_abs_net_share": float(g.head(5)["net_lots"].abs().sum() / abs_total) if abs_total else 0.0,
+            "broker_buy_sell_balance_diff_lots": float(g["buy_lots"].sum() - g["sell_lots"].sum()),
         })
     return pd.DataFrame(rows, columns=cols)
 
