@@ -183,3 +183,5 @@ python tsmc_swing_research.py --input data/taiwan_history --output artifacts/tsm
 ```
 
 Outputs: `tsmc_2330_pivot_events.csv`, `tsmc_2330_pivot_leadlag.csv`, `tsmc_2330_causal_features.csv`, and `tsmc_2330_research_summary.json`. Five predeclared reversal/ATR thresholds are reported side by side; the script does not select a winning threshold, run a return backtest, or deploy a strategy. Corporate-action windows are excluded only when the input explicitly supplies `corporate_action_window`; otherwise they must be separately audited before interpreting pivots around ex-rights dates. This stage is a pivot-sample and signal-timing study, not evidence of 200% CAGR.
+
+The follow-on TSMC-only ranking diagnostic is in `tsmc_2330_oos_signal_diagnostics.py`. It uses a chronological 2010–2021 / 2022+ split, purges the training boundary by the forecast horizon, and reports ranking metrics for 1/3/5-session high- and low-pivot labels. It is explicitly not a trading backtest. First-round interpretation and limitations are recorded in `research/TSMC_2330_SWING_PRELIMINARY_FINDINGS.md`.
