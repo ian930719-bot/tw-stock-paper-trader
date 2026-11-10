@@ -19,6 +19,11 @@ class TSMCChipFactorAblationTests(unittest.TestCase):
         self.assertEqual(groups["technical_only"], ["return_1"])
         self.assertIn("foreign_net_lots", groups["technical_plus_institutional"])
         self.assertNotIn("broker_net_lots", groups["technical_plus_institutional"])
+        self.assertIn("foreign_net_lots", groups["technical_plus_foreign_only"])
+        self.assertNotIn("trust_net_lots", groups["technical_plus_foreign_only"])
+        self.assertIn("trust_net_lots", groups["technical_plus_trust_only"])
+        self.assertIn("dealer_net_lots", groups["technical_plus_dealer_only"])
+        self.assertIn("institutional_net_lots", groups["technical_plus_institutional_total_only"])
         self.assertIn("broker_net_lots", groups["technical_plus_all_chip"])
 
     def test_evaluate_reports_lift_against_prevalence(self):
