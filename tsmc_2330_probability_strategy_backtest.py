@@ -87,6 +87,32 @@ def probability_signal(probability: np.ndarray, threshold: float) -> np.ndarray:
     return np.isfinite(p) & (p >= float(threshold))
 
 
+def rolling_probability_threshold(
+    probability: np.ndarray, quantile: float, window: int = 252,
+    min_periods: int = 60,
+) -> np.ndarray:
+    """Causal rolling cutoff; today's score is never used to set today's threshold."""
+    if not 0 < float(quantile) < 1:
+        raise ValueError("quantile must be between 0 and 1")
+    if window < 1 or min_periods < 1 or min_periods > window:
+        raise ValueError("Require 1 <= min_periods <= window")
+    values = pd.Series(np.asarray(probability, dtype=float))
+    thresholds = values.shift(1).rolling(
+        window=window, min_periods=min_periods
+    ).quantile(float(quantile))
+    return thresholds.to_numpy(dtype=float)
+
+
+def rolling_probability_signal(
+    probability: np.ndarray, quantile: float, window: int = 252,
+    min_periods: int = 60,
+) -> tuple[np.ndarray, np.ndarray]:
+    p = np.asarray(probability, dtype=float)
+    threshold = rolling_probability_threshold(p, quantile, window, min_periods)
+    signal = np.isfinite(p) & np.isfinite(threshold) & (p >= threshold)
+    return signal.astype(bool), threshold
+
+
 def score(result: dict) -> float:
     return float(result["cagr"]) - 0.5 * abs(float(result["max_drawdown"]))
 
@@ -179,15 +205,19 @@ def run(features_path: str, oracle_path: str, limits_path: str,
         low_threshold = float(np.nanquantile(probabilities["LOW"][valid_mask], q_low))
         low_signal = probability_signal(probabilities["LOW"], low_threshold)
         for q_high in QUANTILES:
-            high_threshold = float(np.nanquantile(probabilities["HIGH"][valid_mask], q_high))
-            high_signal = probability_signal(probabilities["HIGH"], high_threshold)
+            high_signal, high_threshold_series = rolling_probability_signal(
+                probabilities["HIGH"], q_high
+            )
             result = _simulate_period(
                 bars, low_signal, high_signal, limit_lookup, dividends,
                 VALID_START, VALID_END, 10, initial_capital, True,
             )
             candidates.append({
                 "low_quantile": q_low, "high_quantile": q_high,
-                "low_threshold": low_threshold, "high_threshold": high_threshold,
+                "low_threshold": low_threshold,
+                "validation_dynamic_high_threshold_median": float(
+                    np.nanmedian(high_threshold_series[valid_mask])
+                ),
                 "validation": compact(result), "score": score(result),
             })
     eligible = [c for c in candidates if c["validation"]["trade_count"] >= 5]
@@ -195,15 +225,29 @@ def run(features_path: str, oracle_path: str, limits_path: str,
         raise ValueError("No probability-threshold pair produced five validation trades")
     chosen = max(eligible, key=lambda c: (c["score"], c["validation"]["cagr"]))
     low_signal = probability_signal(probabilities["LOW"], chosen["low_threshold"])
-    high_signal = probability_signal(probabilities["HIGH"], chosen["high_threshold"])
+    high_signal, dynamic_high_threshold = rolling_probability_signal(
+        probabilities["HIGH"], chosen["high_quantile"]
+    )
+    frozen_high_threshold = float(
+        np.nanquantile(probabilities["HIGH"][valid_mask], chosen["high_quantile"])
+    )
+    frozen_high_signal = probability_signal(
+        probabilities["HIGH"], frozen_high_threshold
+    )
 
     results = {}
+    frozen_results = {}
     for slip in SLIPPAGE_BPS:
         result = _simulate_period(
             bars, low_signal, high_signal, limit_lookup, dividends,
             TEST_START, dates.max().date().isoformat(), slip, initial_capital, True,
         )
-        results[f"strategy_{slip}bps"] = compact(result)
+        results[f"adaptive_strategy_{slip}bps"] = compact(result)
+        frozen_result = _simulate_period(
+            bars, low_signal, frozen_high_signal, limit_lookup, dividends,
+            TEST_START, dates.max().date().isoformat(), slip, initial_capital, True,
+        )
+        frozen_results[f"frozen_strategy_{slip}bps"] = compact(frozen_result)
     buy_hold = _simulate_period(
         bars, low_signal, high_signal, limit_lookup, dividends,
         TEST_START, dates.max().date().isoformat(), 10, initial_capital, False,
@@ -217,6 +261,8 @@ def run(features_path: str, oracle_path: str, limits_path: str,
         "high_probability": probabilities["HIGH"],
         "low_signal": low_signal,
         "high_signal": high_signal,
+        "adaptive_high_threshold": dynamic_high_threshold,
+        "frozen_high_signal": frozen_high_signal,
     }).to_csv(out / "tsmc_2330_probability_strategy_signals.csv", index=False)
     summary = {
         "symbol": "2330", "horizon_sessions": HORIZON,
@@ -229,14 +275,18 @@ def run(features_path: str, oracle_path: str, limits_path: str,
         "models": model_metrics,
         "selected_probability_cutoffs": {
             "low_quantile": chosen["low_quantile"], "high_quantile": chosen["high_quantile"],
-            "low_threshold": chosen["low_threshold"], "high_threshold": chosen["high_threshold"],
+            "low_threshold": chosen["low_threshold"],
+            "high_threshold_policy": "rolling prior 252 sessions, minimum 60 valid prior probabilities; threshold shifted one session to prevent lookahead",
+            "validation_dynamic_high_threshold_median": chosen["validation_dynamic_high_threshold_median"],
             "validation_result": chosen["validation"], "validation_score": chosen["score"],
         },
         "validation_candidate_count": len(candidates),
         "historical_check_results": results,
+        "historical_check_frozen_threshold_comparison": frozen_results,
         "historical_check_buy_hold_10bps": compact(buy_hold),
         "execution": {
             "signal_timing": "probability at close t; next available session open",
+            "adaptive_exit_threshold": "rolling quantile of prior 252 valid session probabilities, minimum 60 observations; current probability excluded",
             "commission_rate_per_side": 0.001425, "minimum_commission_ntd": 20,
             "sell_transaction_tax_rate": 0.003, "slippage_bps_per_side": list(SLIPPAGE_BPS),
             "price_limits": "historical TWSE price limits and tick sizes; locked orders handled conservatively",
