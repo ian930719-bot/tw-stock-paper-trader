@@ -209,6 +209,8 @@ def run(features_path: str, oracle_path: str, limits_path: str,
     # Annual folds are separately liquidated and the cash balance is compounded.
     yearly_results = {}
     compounded = {}
+    trade_ledger_rows = []
+    equity_curve_rows = []
     for slip in SLIPPAGE_BPS:
         cash = float(initial_capital)
         rows = []
@@ -229,6 +231,14 @@ def run(features_path: str, oracle_path: str, limits_path: str,
             item = compact(result)
             item.update({"validation_year": year, "status": "evaluated"})
             rows.append(item)
+            for trade in result.get("trades", []):
+                trade_ledger_rows.append({
+                    **trade, "validation_year": year, "slippage_bps_per_side": slip,
+                })
+            for point in result.get("equity_curve", []):
+                equity_curve_rows.append({
+                    **point, "validation_year": year, "slippage_bps_per_side": slip,
+                })
             cash = float(result["final_equity"])
         evaluated = [r for r in rows if r.get("status") == "evaluated"]
         first = next((r["period_start"] for r in evaluated), None)
@@ -255,6 +265,12 @@ def run(features_path: str, oracle_path: str, limits_path: str,
 
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(trade_ledger_rows).to_csv(
+        out / "tsmc_2330_probability_strategy_trades.csv", index=False
+    )
+    pd.DataFrame(equity_curve_rows).to_csv(
+        out / "tsmc_2330_probability_strategy_equity.csv", index=False
+    )
     pd.DataFrame({
         "date": dates.dt.strftime("%Y-%m-%d"),
         "low_probability_oof": probabilities["LOW"],
@@ -287,6 +303,13 @@ def run(features_path: str, oracle_path: str, limits_path: str,
         "skipped_folds": skipped,
         "annual_costed_backtests": yearly_results,
         "compounded_oos_results": compounded,
+        "trade_ledger_rows": len(trade_ledger_rows),
+        "equity_curve_rows": len(equity_curve_rows),
+        "audit_files": [
+            "tsmc_2330_probability_strategy_signals.csv",
+            "tsmc_2330_probability_strategy_trades.csv",
+            "tsmc_2330_probability_strategy_equity.csv",
+        ],
         "execution": {
             "signal_timing": "probability at close t; order submitted for next session open",
             "annual_boundary": "liquidate at each fold's final close; carry cash into next fold; no cross-year position",
