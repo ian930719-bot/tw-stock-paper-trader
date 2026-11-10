@@ -1,0 +1,94 @@
+name: TSMC 2330 Swing Research
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - research/200cagr-blind-validation
+    paths:
+      - "tsmc_swing_research.py"
+      - "tests/test_tsmc_swing_research.py"
+      - ".github/workflows/tsmc-2330-swing.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  tsmc-swing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+      TZ: Asia/Taipei
+    steps:
+      - name: Checkout research branch
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install research dependencies
+        run: python -m pip install --upgrade pip pandas numpy requests
+      - name: Run TSMC swing unit tests
+        run: python -m unittest discover -s tests -p "test_tsmc_swing_research.py" -v
+      - name: Download raw TSMC 2330 history
+        run: |
+          mkdir -p data/tsmc_2330/bars
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from datetime import datetime
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+          import pandas as pd
+          from historical_data_collector import _api_get, _normalize_bars
+
+          start_date = "2010-01-04"
+          end_date = datetime.now(ZoneInfo("Asia/Taipei")).date().isoformat()
+          token = os.getenv("FINMIND_TOKEN", "").strip()
+          rows = _api_get({
+              "dataset": "TaiwanStockPrice",
+              "data_id": "2330",
+              "start_date": start_date,
+              "end_date": end_date,
+          }, token=token, timeout=45, retries=4)
+          bars = _normalize_bars(rows, "2330")
+          if len(bars) < 260:
+              raise RuntimeError(f"Insufficient TSMC 2330 history: {len(bars)} rows")
+          path = Path("data/tsmc_2330/bars/2330.csv")
+          bars.to_csv(path, index=False)
+          digest = hashlib.sha256(path.read_bytes()).hexdigest()
+          manifest = {
+              "symbol": "2330",
+              "source": "FinMind API v4 TaiwanStockPrice",
+              "price_basis": "raw, unadjusted OHLCV",
+              "start_date_requested": start_date,
+              "end_date_requested": end_date,
+              "first_date_returned": str(bars["date"].min()),
+              "last_date_returned": str(bars["date"].max()),
+              "rows": int(len(bars)),
+              "sha256": digest,
+              "token_configured": bool(token),
+              "retrieved_at_taipei": datetime.now(ZoneInfo("Asia/Taipei")).isoformat(),
+              "point_in_time_universe_complete": False,
+              "official_exchange_reconciled": False,
+              "note": "Single-symbol raw price history only. Corporate-action windows and official-source reconciliation remain separate research gates."
+          }
+          Path("data/tsmc_2330/download_manifest.json").write_text(
+              json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+          )
+          print(json.dumps(manifest, ensure_ascii=False, indent=2))
+          PY
+      - name: Run causal swing pivot and lead-lag research
+        run: python tsmc_swing_research.py --input data/tsmc_2330 --output artifacts/tsmc_2330_swing
+      - name: Upload reproducible research outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: tsmc-2330-swing-research
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            data/tsmc_2330/bars/2330.csv
+            data/tsmc_2330/download_manifest.json
+            artifacts/tsmc_2330_swing/
