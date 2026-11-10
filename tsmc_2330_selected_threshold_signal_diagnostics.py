@@ -106,7 +106,6 @@ def run(features_path: str, oracle_path: str, output_dir: str) -> dict:
     train_end = "2016-12-31"
     validation_end = "2021-12-31"
     validation_mask_base = ((dates >= VALIDATION_START) & (dates <= validation_end)).to_numpy()
-    test_mask = (dates >= TEST_START).to_numpy() & valid_rows
     train_start_idx = int(np.flatnonzero((dates >= pd.Timestamp("2010-01-01")).to_numpy())[0])
     validation_start_idx = int(np.flatnonzero((dates >= pd.Timestamp(VALIDATION_START)).to_numpy())[0])
     test_start_idx = int(np.flatnonzero((dates >= pd.Timestamp(TEST_START)).to_numpy())[0])
@@ -128,7 +127,7 @@ def run(features_path: str, oracle_path: str, output_dir: str) -> dict:
             y_test = build_target(dates, test_events, horizon, kind)
             train_mask_kind = train_mask
             val_mask_kind = validation_mask
-            test_mask_kind = test_mask
+            test_mask_kind = test_mask_horizon
             if len(np.unique(y_train[train_mask_kind])) < 2:
                 continue
             model = make_pipeline(
