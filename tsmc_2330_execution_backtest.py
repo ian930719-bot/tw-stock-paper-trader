@@ -132,7 +132,8 @@ def load_inputs(features_path: str, rules_path: str, limits_path: str,
 def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np.ndarray,
                      limit_lookup: dict, dividend_lookup: dict[str, float],
                      start_date: str, end_date: str, slippage_bps: int,
-                     initial_capital: float, strategy: bool) -> dict:
+                     initial_capital: float, strategy: bool,
+                     atr_stop_multiple: float | None = None) -> dict:
     dates = bars["date"].dt.normalize()
     period_idx = np.flatnonzero(
         (dates >= pd.Timestamp(start_date)).to_numpy()
@@ -147,6 +148,7 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
     slip = slippage_bps / 10_000.0
     cash = float(initial_capital)
     shares = 0
+    peak_close = None
     pending_buy = not strategy
     pending_sell = False
     entry_date = None
@@ -163,7 +165,7 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
     exposure_days = 0
 
     def attempt_buy(i: int) -> bool:
-        nonlocal cash, shares, entry_date, entry_cash_cost, trade_dividends
+        nonlocal cash, shares, entry_date, entry_cash_cost, trade_dividends, peak_close
         nonlocal total_commission, total_slippage, blocked_limit_orders, missing_limit_orders
         row = period_bars.iloc[i]
         day = row["date"].strftime("%Y-%m-%d")
@@ -184,6 +186,7 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
         fee = commission(notional)
         cash -= notional + fee
         shares = qty
+        peak_close = raw_open
         entry_date = row["date"].date().isoformat()
         entry_cash_cost = notional + fee
         trade_dividends = 0.0
@@ -192,7 +195,7 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
         return True
 
     def attempt_sell(i: int, forced: bool = False) -> bool:
-        nonlocal cash, shares, entry_date, entry_cash_cost, trade_dividends
+        nonlocal cash, shares, entry_date, entry_cash_cost, trade_dividends, peak_close
         nonlocal total_commission, total_tax, total_slippage, blocked_limit_orders, missing_limit_orders
         row = period_bars.iloc[i]
         day = row["date"].strftime("%Y-%m-%d")
@@ -230,6 +233,7 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
         total_tax += tax
         total_slippage += shares * (raw_price - fill)
         shares = 0
+        peak_close = None
         entry_date = None
         entry_cash_cost = 0.0
         trade_dividends = 0.0
@@ -264,6 +268,13 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
         })
         if shares > 0:
             exposure_days += 1
+            peak_close = close if peak_close is None else max(peak_close, close)
+            if atr_stop_multiple is not None:
+                atr_pct = pd.to_numeric(pd.Series([row.get("atr_pct14", np.nan)]), errors="coerce").iloc[0]
+                if np.isfinite(atr_pct) and atr_pct > 0:
+                    stop_level = peak_close - float(atr_stop_multiple) * float(atr_pct) * close
+                    if close <= stop_level:
+                        pending_sell = True
 
         if strategy and i < len(period_bars) - 1:
             if shares == 0 and period_low[i]:
