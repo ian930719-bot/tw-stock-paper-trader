@@ -108,8 +108,37 @@ def build_causal_features(bars: pd.DataFrame) -> pd.DataFrame:
     z["close_location"] = (c-l) / (h-l).replace(0, np.nan)
     z["upper_wick_pct"] = (h - z[["open", "close"]].max(axis=1)) / c
     z["lower_wick_pct"] = (z[["open", "close"]].min(axis=1) - l) / c
-    z["distance_prior_high20"] = c / h.shift(1).rolling(20, min_periods=20).max() - 1
-    z["distance_prior_low20"] = c / l.shift(1).rolling(20, min_periods=20).min() - 1
+    prior_high20 = h.shift(1).rolling(20, min_periods=20).max()
+    prior_low20 = l.shift(1).rolling(20, min_periods=20).min()
+    z["distance_prior_high20"] = c / prior_high20 - 1
+    z["distance_prior_low20"] = c / prior_low20 - 1
+
+    # Causal momentum/volume divergence: compare current price extremes to
+    # prior 20-session oscillator/volume extremes, never including today's bar.
+    rsi_prior_high20 = z["rsi14"].shift(1).rolling(20, min_periods=20).max()
+    rsi_prior_low20 = z["rsi14"].shift(1).rolling(20, min_periods=20).min()
+    z["rsi_change_3"] = z["rsi14"].diff(3)
+    z["macd_hist_pct"] = z["macd_pct"] - z["macd_signal_pct"]
+    z["macd_hist_change_3"] = z["macd_hist_pct"].diff(3)
+    macd_prior_high20 = z["macd_hist_pct"].shift(1).rolling(20, min_periods=20).max()
+    macd_prior_low20 = z["macd_hist_pct"].shift(1).rolling(20, min_periods=20).min()
+    rv_prior_high20 = z["relative_volume20"].shift(1).rolling(20, min_periods=20).max()
+    rv_prior_low20 = z["relative_volume20"].shift(1).rolling(20, min_periods=20).min()
+
+    high_break = z["distance_prior_high20"].ge(0)
+    low_break = z["distance_prior_low20"].le(0)
+    z["bearish_rsi_divergence20"] = (high_break & z["rsi14"].lt(rsi_prior_high20)).astype(float)
+    z["bullish_rsi_divergence20"] = (low_break & z["rsi14"].gt(rsi_prior_low20)).astype(float)
+    z["bearish_macd_divergence20"] = (high_break & z["macd_hist_pct"].lt(macd_prior_high20)).astype(float)
+    z["bullish_macd_divergence20"] = (low_break & z["macd_hist_pct"].gt(macd_prior_low20)).astype(float)
+    z["bearish_volume_divergence20"] = (high_break & z["relative_volume20"].lt(rv_prior_high20)).astype(float)
+    z["bullish_volume_divergence20"] = (low_break & z["relative_volume20"].gt(rv_prior_low20)).astype(float)
+    z["rsi_divergence_strength_high20"] = (z["rsi14"] - rsi_prior_high20).where(high_break)
+    z["rsi_divergence_strength_low20"] = (z["rsi14"] - rsi_prior_low20).where(low_break)
+    z["macd_divergence_strength_high20"] = (z["macd_hist_pct"] - macd_prior_high20).where(high_break)
+    z["macd_divergence_strength_low20"] = (z["macd_hist_pct"] - macd_prior_low20).where(low_break)
+    z["volume_divergence_strength_high20"] = (z["relative_volume20"] - rv_prior_high20).where(high_break)
+    z["volume_divergence_strength_low20"] = (z["relative_volume20"] - rv_prior_low20).where(low_break)
     # Event windows supplied by the collector are excluded from event diagnostics.
     if "corporate_action_window" in z:
         z["corporate_action_window"] = z["corporate_action_window"].fillna(True).astype(bool)
@@ -206,7 +235,8 @@ def build_lead_lag(events: pd.DataFrame, features: pd.DataFrame) -> pd.DataFrame
             "return_", "distance_sma_", "sma", "trend_", "atr_pct", "rsi", "macd",
             "bb_", "relative_volume", "turnover_ratio", "realized_vol",
             "volatility_", "overnight_gap", "intraday_range", "close_location",
-            "upper_wick", "lower_wick", "distance_prior",
+            "upper_wick", "lower_wick", "distance_prior", "bearish_", "bullish_",
+            "rsi_divergence_", "macd_divergence_", "volume_divergence_", "price_breakout", "price_breakdown",
         ))
     ]
     for event_id, event in events.reset_index(drop=True).iterrows():
