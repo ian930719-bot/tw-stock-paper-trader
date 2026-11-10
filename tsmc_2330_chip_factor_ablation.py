@@ -96,30 +96,72 @@ def evaluate(model, X: pd.DataFrame, mask: np.ndarray, y: np.ndarray) -> dict:
     }
 
 
+def annual_fold_years(dates: pd.Series) -> list[int]:
+    """Expanding-window folds: train through Y-1, validate on calendar year Y."""
+    years = sorted(pd.to_datetime(dates).dt.year.dropna().unique().tolist())
+    return [int(year) for year in years[1:]]
+
+
+def _events_for_fold(events: pd.DataFrame, dates: pd.Series, start_idx: int,
+                     end_idx: int, horizon: int, *, training: bool,
+                     available_end_idx: int) -> pd.DataFrame:
+    if events.empty:
+        return events.copy()
+    lookup = {pd.Timestamp(value): i for i, value in enumerate(dates)}
+    pivot_idx = pd.to_datetime(events["pivot_date"]).map(
+        lambda value: lookup.get(pd.Timestamp(value), -1)
+    ).to_numpy()
+    confirm_idx = pd.to_datetime(events["confirmation_date"]).map(
+        lambda value: lookup.get(pd.Timestamp(value), -1)
+    ).to_numpy()
+    # A signal at t predicts a pivot in t+1 ... t+horizon.
+    mask = (pivot_idx >= start_idx + horizon) & (pivot_idx <= end_idx + horizon)
+    if training:
+        # Only labels fully confirmed by the training cutoff may enter the fit.
+        mask &= (pivot_idx <= end_idx) & (confirm_idx >= 0) & (confirm_idx <= end_idx)
+    else:
+        # Validation outcomes may mature after the calendar-year boundary, but
+        # must be confirmed by the end of the available dataset.
+        mask &= (confirm_idx >= 0) & (confirm_idx <= available_end_idx)
+    return events.loc[mask].copy()
+
+
+def _score_predictions(truth: np.ndarray, probability: np.ndarray) -> dict:
+    if not len(truth) or len(np.unique(truth)) < 2:
+        return {"error": "evaluation segment lacks rows or both target classes",
+                "rows": int(len(truth)), "event_days": int(np.sum(truth))}
+    prevalence = float(truth.mean())
+    n = max(1, int(np.ceil(len(probability) * 0.10)))
+    top = np.argsort(probability)[-n:]
+    precision = float(truth[top].mean())
+    return {
+        "rows": int(len(truth)), "event_days": int(truth.sum()),
+        "prevalence": prevalence, "roc_auc": float(roc_auc_score(truth, probability)),
+        "pr_auc": float(average_precision_score(truth, probability)),
+        "top_decile_precision": precision,
+        "top_decile_lift": precision / prevalence if prevalence else None,
+        "top_decile_recall": float(truth[top].sum() / truth.sum()) if truth.sum() else None,
+    }
+
+
 def run(features_path: str, oracle_path: str, output_dir: str,
         chip_manifest_path: str | None = None) -> dict:
     features = pd.read_csv(features_path, parse_dates=["date"]).sort_values("date").reset_index(drop=True)
-    oracle = json.loads(Path(oracle_path).read_text(encoding="utf-8"))
-    selected = oracle.get("threshold_selected_using_training_period_only", {})
-    min_reversal, atr_multiple = selected.get("min_reversal_pct"), selected.get("atr_multiple")
-    if min_reversal is None or atr_multiple is None:
-        raise ValueError("Missing frozen training-selected pivot threshold")
-    events = detect_confirmed_pivots(features, float(min_reversal), float(atr_multiple))
-    if events.empty:
-        raise ValueError("No pivot events for frozen threshold")
     dates = features["date"]
+    # Pivot labels are predeclared and fixed across all folds; no future-year
+    # optimization of the target definition is allowed.
+    min_reversal, atr_multiple = 0.05, 2.0
+    events = detect_confirmed_pivots(features, min_reversal, atr_multiple)
+    if events.empty:
+        raise ValueError("No pivot events for the predeclared p0.050_atr2.0 target")
     idx = np.arange(len(features))
-    train_events = period_events(events, dates, TRAIN_START, TRAIN_END, max(HORIZONS))
-    validation_events = period_events(events, dates, VALIDATION_START, VALIDATION_END, max(HORIZONS))
-    test_events = period_events(events, dates, TEST_START, dates.max().date().isoformat(), max(HORIZONS))
-    train_mask_base = ((dates >= TRAIN_START) & (dates <= TRAIN_END)).to_numpy(copy=True)
-    validation_mask = ((dates >= VALIDATION_START) & (dates <= VALIDATION_END)).to_numpy(copy=True)
-    test_mask = (dates >= TEST_START).to_numpy(copy=True)
+    available_end_idx = len(features) - 1
+    safe = np.ones(len(features), dtype=bool)
     if "corporate_action_window" in features:
-        safe = ~features["corporate_action_window"].fillna(True).astype(bool).to_numpy()
-        train_mask_base &= safe
-        validation_mask &= safe
-        test_mask &= safe
+        safe &= ~features["corporate_action_window"].fillna(True).astype(bool).to_numpy()
+    years = annual_fold_years(dates)
+    if not years:
+        raise ValueError("At least two calendar years are required for annual walk-forward validation")
     groups = feature_groups(features)
     manifest = {}
     if chip_manifest_path:
@@ -127,6 +169,7 @@ def run(features_path: str, oracle_path: str, output_dir: str,
     broker_rows = int(manifest.get("broker_rows", manifest.get("broker_available_rows", manifest.get("broker_days_returned", 0))) or 0)
     broker_complete = bool(manifest.get("broker_backfill_complete", False))
     results = {}
+
     for group_name, cols in groups.items():
         is_broker = any(col.startswith("broker_") for col in cols)
         if is_broker and (not broker_complete or broker_rows < 500):
@@ -135,60 +178,106 @@ def run(features_path: str, oracle_path: str, output_dir: str,
                 "broker_rows": broker_rows, "broker_backfill_complete": broker_complete,
             }
             continue
-        X = features[cols].replace([np.inf, -np.inf], np.nan)
-        # A feature must have observations in training, otherwise it cannot be learned.
-        train_cols = [col for col in cols if X.loc[train_mask_base, col].notna().any()]
-        if not train_cols:
-            results[group_name] = {"status": "skipped_no_trainable_features"}
-            continue
-        X = X[train_cols]
-        rows = []
+        X_all = features[cols].replace([np.inf, -np.inf], np.nan)
+        group_rows = []
         for kind in ("LOW", "HIGH"):
             for horizon in HORIZONS:
-                tr_events = period_events(events, dates, TRAIN_START, TRAIN_END, horizon)
-                va_events = period_events(events, dates, VALIDATION_START, VALIDATION_END, horizon)
-                te_events = period_events(events, dates, TEST_START, dates.max().date().isoformat(), horizon)
-                y_train = build_target(dates, tr_events, horizon, kind)
-                y_val = build_target(dates, va_events, horizon, kind)
-                y_test = build_target(dates, te_events, horizon, kind)
-                train_mask = train_mask_base & (idx >= np.flatnonzero((dates >= pd.Timestamp(TRAIN_START)).to_numpy())[0] + horizon)
-                val_mask = validation_mask & (idx >= np.flatnonzero((dates >= pd.Timestamp(VALIDATION_START)).to_numpy())[0] + horizon)
-                test_mask_h = test_mask & (idx >= np.flatnonzero((dates >= pd.Timestamp(TEST_START)).to_numpy())[0] + horizon)
-                if len(np.unique(y_train[train_mask])) < 2 or len(np.unique(y_val[val_mask])) < 2:
-                    rows.append({"pivot_type": kind, "horizon_sessions": horizon, "status": "skipped_one_class_segment"})
-                    continue
-                model = make_model()
-                model.fit(X.loc[train_mask], y_train[train_mask])
-                validation = evaluate(model, X, val_mask, y_val)
-                # Refit through validation; the 2022+ result remains descriptive.
-                train_val_mask = (train_mask_base | validation_mask) & (idx <= np.flatnonzero((dates >= pd.Timestamp(TEST_START)).to_numpy())[0] - horizon)
-                y_train_val = np.maximum(y_train, y_val)
-                final_model = make_model()
-                if len(np.unique(y_train_val[train_val_mask])) == 2:
-                    final_model.fit(X.loc[train_val_mask], y_train_val[train_val_mask])
-                    test = evaluate(final_model, X, test_mask_h, y_test)
-                else:
-                    test = {"error": "train-plus-validation target has one class"}
-                rows.append({
+                fold_rows = []
+                pooled_truth, pooled_probability = [], []
+                for year in years:
+                    val_start_idx = int(np.flatnonzero((dates.dt.year == year).to_numpy())[0])
+                    year_indices = np.flatnonzero((dates.dt.year == year).to_numpy())
+                    val_end_calendar_idx = int(year_indices[-1])
+                    # A partial latest year is evaluated only where the complete
+                    # forward horizon is observable in the downloaded history.
+                    val_end_idx = min(val_end_calendar_idx, available_end_idx - horizon)
+                    train_end_idx = val_start_idx - 1
+                    if val_end_idx < val_start_idx:
+                        continue
+                    train_events = _events_for_fold(
+                        events, dates, 0, train_end_idx, horizon,
+                        training=True, available_end_idx=available_end_idx,
+                    )
+                    val_events = _events_for_fold(
+                        events, dates, val_start_idx, val_end_idx, horizon,
+                        training=False, available_end_idx=available_end_idx,
+                    )
+                    y_train = build_target(dates, train_events, horizon, kind)
+                    y_val = build_target(dates, val_events, horizon, kind)
+                    train_mask = (idx <= train_end_idx - horizon) & safe
+                    train_mask &= (dates.dt.year >= int(dates.dt.year.min())).to_numpy()
+                    val_mask = (idx >= val_start_idx) & (idx <= val_end_idx) & safe
+                    train_cols = [
+                        col for col in cols
+                        if X_all.loc[train_mask, col].notna().any()
+                    ]
+                    if not train_cols:
+                        fold_rows.append({
+                            "validation_year": year, "status": "skipped_no_trainable_features",
+                            "training_end": dates.iloc[train_end_idx].date().isoformat(),
+                        })
+                        continue
+                    if not train_mask.any() or not val_mask.any() or len(np.unique(y_train[train_mask])) < 2:
+                        fold_rows.append({
+                            "validation_year": year, "status": "skipped_insufficient_training_classes",
+                            "training_rows": int(train_mask.sum()),
+                            "training_events": int(y_train[train_mask].sum()),
+                            "validation_rows": int(val_mask.sum()),
+                            "validation_events": int(y_val[val_mask].sum()),
+                        })
+                        continue
+                    model = make_model()
+                    model.fit(X_all.loc[train_mask, train_cols], y_train[train_mask])
+                    probability = model.predict_proba(X_all.loc[val_mask, train_cols])[:, 1]
+                    truth = y_val[val_mask]
+                    metrics = _score_predictions(truth, probability)
+                    fold_rows.append({
+                        "validation_year": year,
+                        "training_start": dates.loc[train_mask].min().date().isoformat(),
+                        "training_end": dates.loc[train_mask].max().date().isoformat(),
+                        "validation_start": dates.loc[val_mask].min().date().isoformat(),
+                        "validation_end": dates.loc[val_mask].max().date().isoformat(),
+                        "partial_validation_year": year == int(dates.max().year),
+                        "training_rows": int(train_mask.sum()),
+                        "training_events": int(y_train[train_mask].sum()),
+                        "validation": metrics,
+                        "feature_count": len(train_cols),
+                        "features": train_cols,
+                    })
+                    if "error" not in metrics:
+                        pooled_truth.append(truth)
+                        pooled_probability.append(probability)
+                pooled = (
+                    _score_predictions(np.concatenate(pooled_truth), np.concatenate(pooled_probability))
+                    if pooled_truth else {"error": "no valid annual folds"}
+                )
+                group_rows.append({
                     "pivot_type": kind,
                     "horizon_sessions": horizon,
-                    "feature_count": len(train_cols),
-                    "validation": validation,
-                    "test_2022_plus_descriptive": test,
+                    "annual_folds": fold_rows,
+                    "pooled_walk_forward": pooled,
                 })
-        results[group_name] = {"status": "evaluated", "feature_count": len(train_cols), "features": train_cols, "horizons": rows}
+        results[group_name] = {
+            "status": "evaluated",
+            "walk_forward_years": years,
+            "horizons": group_rows,
+        }
+
     summary = {
         "symbol": "2330",
-        "pivot_threshold": {"min_reversal_pct": float(min_reversal), "atr_multiple": float(atr_multiple)},
-        "train_period": [TRAIN_START, TRAIN_END],
-        "validation_period": [VALIDATION_START, VALIDATION_END],
-        "test_period": [TEST_START, dates.max().date().isoformat()],
-        "model": "fixed logistic regression; median imputation; standard scaling; balanced class weights; C=0.2",
-        "target": "HIGH and LOW pivots within next 1/3/5 sessions; features available at signal-day close; assumed execution no earlier than next session",
+        "pivot_threshold": {
+            "min_reversal_pct": min_reversal, "atr_multiple": atr_multiple,
+            "selection": "predeclared fixed target definition; not tuned on any validation year",
+        },
+        "validation_method": "expanding-window annual walk-forward: train on 2010..Y-1, validate on year Y, then expand training window by one year",
+        "first_training_year": int(dates.dt.year.min()),
+        "validation_years": years,
+        "model": "fixed logistic regression; median imputation; standard scaling; balanced class weights; C=0.2; preprocessing fit separately inside each fold",
+        "target": "HIGH and LOW pivots within next 1/3/5 sessions; signal features known at close; hypothetical execution no earlier than next session",
+        "purging": "last horizon sessions removed from each training fold; validation labels may mature after year-end but must be confirmed by latest available data; latest partial year excludes rows without a complete forward horizon",
         "results": results,
         "test_period_is_pristine": False,
-        "test_period_used_for_selection": False,
-        "note": "This is a feature-ablation diagnostic, not a trading-return backtest. Broker model is skipped unless historical broker coverage is complete and sufficiently large.",
+        "note": "Annual walk-forward feature-ablation diagnostic, not a trading-return backtest. Each year's model is trained only on prior years. Broker model is skipped unless broker history is complete and sufficiently large. 2026 is partial year-to-date.",
     }
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -198,17 +287,26 @@ def run(features_path: str, oracle_path: str, output_dir: str,
     flat = []
     for group, result in results.items():
         for row in result.get("horizons", []):
-            val, test = row.get("validation", {}), row.get("test_2022_plus_descriptive", {})
-            flat.append({
-                "feature_group": group, "pivot_type": row.get("pivot_type"), "horizon_sessions": row.get("horizon_sessions"),
-                "feature_count": row.get("feature_count"),
-                "validation_pr_auc": val.get("pr_auc"), "validation_top_decile_lift": val.get("top_decile_lift"),
-                "test_pr_auc": test.get("pr_auc"), "test_top_decile_lift": test.get("top_decile_lift"),
-                "test_status": test.get("error"),
-            })
+            pooled = row.get("pooled_walk_forward", {})
+            for fold in row.get("annual_folds", []):
+                val = fold.get("validation", {})
+                flat.append({
+                    "feature_group": group,
+                    "pivot_type": row.get("pivot_type"),
+                    "horizon_sessions": row.get("horizon_sessions"),
+                    "validation_year": fold.get("validation_year"),
+                    "training_end": fold.get("training_end"),
+                    "validation_start": fold.get("validation_start"),
+                    "validation_end": fold.get("validation_end"),
+                    "partial_validation_year": fold.get("partial_validation_year"),
+                    "validation_pr_auc": val.get("pr_auc"),
+                    "validation_top_decile_lift": val.get("top_decile_lift"),
+                    "validation_top_decile_precision": val.get("top_decile_precision"),
+                    "fold_status": fold.get("status"),
+                    "pooled_walk_forward_pr_auc": pooled.get("pr_auc"),
+                })
     pd.DataFrame(flat).to_csv(out / "tsmc_2330_chip_factor_ablation.csv", index=False)
     return summary
-
 
 def main():
     parser = argparse.ArgumentParser()
