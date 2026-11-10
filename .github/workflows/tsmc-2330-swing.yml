@@ -11,6 +11,8 @@ on:
       - "tsmc_2330_pattern_combinations.py"
       - "tsmc_2330_frozen_rule_research.py"
       - "tsmc_2330_execution_backtest.py"
+      - "tsmc_2330_price_limits.py"
+      - "tests/test_tsmc_price_limits.py"
       - "tests/test_tsmc_execution_backtest.py"
       - "corporate_action_adjustments.py"
       - "historical_data_collector.py"
@@ -166,39 +168,12 @@ jobs:
           if conflicts:
               raise RuntimeError(f"Conflicting corporate-action ratios for 2330: {conflicts}")
           PY
-      - name: Collect official daily price limits for TSMC 2330
+      - name: Build historical price limits from TWSE official rules and references
         run: |
-          python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-          import pandas as pd
-          from historical_data_collector import _api_get
-
-          start_date = "2010-01-04"
-          rows = _api_get({
-              "dataset": "TaiwanStockPriceLimit",
-              "data_id": "2330",
-              "start_date": start_date,
-          }, token=os.getenv("FINMIND_TOKEN", ""), timeout=45, retries=4)
-          frame = pd.DataFrame(rows)
-          required = {"date", "stock_id", "reference_price", "limit_up", "limit_down"}
-          if frame.empty or not required.issubset(frame.columns):
-              raise RuntimeError(f"TaiwanStockPriceLimit returned no usable 2330 rows; columns={list(frame.columns)}")
-          frame["stock_id"] = frame["stock_id"].astype(str).str.strip()
-          frame = frame.loc[frame["stock_id"] == "2330"].copy()
-          frame.to_csv("data/tsmc_2330/corporate_actions/price_limits_2330.csv", index=False)
-          summary = {
-              "symbol": "2330", "source": "FinMind TaiwanStockPriceLimit",
-              "rows": int(len(frame)), "first_date": str(frame["date"].min()),
-              "last_date": str(frame["date"].max()),
-              "required_columns": sorted(required),
-          }
-          Path("data/tsmc_2330/corporate_actions/price_limits_manifest.json").write_text(
-              json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
-          )
-          print(json.dumps(summary, ensure_ascii=False, indent=2))
-          PY
+          python tsmc_2330_price_limits.py \
+            --bars data/tsmc_2330/bars/2330.csv \
+            --dividends data/tsmc_2330/corporate_actions/TaiwanStockDividendResult_2330.csv \
+            --output data/tsmc_2330/corporate_actions/price_limits_2330.csv
       - name: Run causal swing pivot and lead-lag research
         run: python tsmc_swing_research.py --input data/tsmc_2330 --output artifacts/tsmc_2330_swing --corporate-actions data/tsmc_2330/corporate_actions/events_2330.csv
       - name: Run purged chronological OOS signal diagnostics
