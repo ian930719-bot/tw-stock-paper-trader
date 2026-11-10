@@ -19,6 +19,10 @@ from tsmc_swing_research import detect_confirmed_pivots
 MIN_REVERSALS = (0.01, 0.015, 0.02, 0.025, 0.03, 0.04, 0.05, 0.08)
 ATR_MULTIPLES = (0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0)
 SLIPPAGE_BPS = (0, 5, 10, 20, 30)
+TRAIN_PERIOD = ("2010-01-01", "2016-12-31")
+VALIDATION_PERIOD = ("2017-01-01", "2021-12-31")
+HOLDOUT_PERIOD = ("2022-01-01", "2026-12-31")
+MIN_TRAIN_SWINGS = 10
 COMMISSION_RATE = 0.001425
 SELL_TAX_RATE = 0.003
 
@@ -120,6 +124,26 @@ def run(features_path: str, output_dir: str) -> dict:
                 "high_events": int((events["type"] == "HIGH").sum()) if not events.empty else 0,
                 "low_events": int((events["type"] == "LOW").sum()) if not events.empty else 0,
             })
+            for period_name, period in (
+                ("train", TRAIN_PERIOD),
+                ("validation", VALIDATION_PERIOD),
+                ("holdout", HOLDOUT_PERIOD),
+            ):
+                period_events = events.copy()
+                if not period_events.empty:
+                    pdate = pd.to_datetime(period_events["pivot_date"])
+                    cdate = pd.to_datetime(period_events["confirmation_date"])
+                    period_events = period_events.loc[
+                        (pdate >= pd.Timestamp(period[0]))
+                        & (pdate <= pd.Timestamp(period[1]))
+                        & (cdate >= pd.Timestamp(period[0]))
+                        & (cdate <= pd.Timestamp(period[1]))
+                    ].copy()
+                period_pairs = pair_pivots(period_events, features)
+                period_summary = summarize(period_pairs, features)
+                for key in ("swings", "gross_oracle_cagr", "net_oracle_cagr_10bps",
+                            "net_oracle_cagr_30bps", "gross_compounded_multiple"):
+                    summary[f"{period_name}_{key}"] = period_summary.get(key)
             summaries.append(summary)
             if not pairs.empty:
                 pairs = pairs.copy()
@@ -128,6 +152,11 @@ def run(features_path: str, output_dir: str) -> dict:
                 pair_frames.append(pairs)
     table = pd.DataFrame(summaries)
     table = table.sort_values("net_oracle_cagr_10bps", ascending=False, na_position="last")
+    train_candidates = table.loc[
+        (pd.to_numeric(table["train_swings"], errors="coerce") >= MIN_TRAIN_SWINGS)
+        & pd.to_numeric(table["train_net_oracle_cagr_10bps"], errors="coerce").notna()
+    ].sort_values("train_net_oracle_cagr_10bps", ascending=False)
+    best_train = train_candidates.iloc[0].to_dict() if not train_candidates.empty else {}
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     table.to_csv(out / "tsmc_2330_oracle_pivot_ceiling.csv", index=False)
@@ -141,8 +170,22 @@ def run(features_path: str, output_dir: str) -> dict:
         "min_reversal_grid": list(MIN_REVERSALS),
         "atr_multiple_grid": list(ATR_MULTIPLES),
         "combinations": int(len(table)),
-        "best_by_net_oracle_cagr_10bps": best,
-        "warning": "Perfect-foresight oracle only. Uses retrospective pivot dates/prices, assumes exact fills at every low and next high, ignores causal confirmation delay, queue/limit fills, capital/odd-lot constraints and many real execution frictions. This is an optimistic ceiling diagnostic, never a strategy result.",
+        "best_by_full_period_net_oracle_cagr_10bps": best,
+        "training_period": list(TRAIN_PERIOD),
+        "validation_period": list(VALIDATION_PERIOD),
+        "holdout_period": list(HOLDOUT_PERIOD),
+        "minimum_training_swings_for_selection": MIN_TRAIN_SWINGS,
+        "threshold_selected_using_training_period_only": {
+            "min_reversal_pct": best_train.get("min_reversal_pct"),
+            "atr_multiple": best_train.get("atr_multiple"),
+            "train_swings": best_train.get("train_swings"),
+            "train_net_oracle_cagr_10bps": best_train.get("train_net_oracle_cagr_10bps"),
+            "validation_swings": best_train.get("validation_swings"),
+            "validation_net_oracle_cagr_10bps": best_train.get("validation_net_oracle_cagr_10bps"),
+            "holdout_swings": best_train.get("holdout_swings"),
+            "holdout_net_oracle_cagr_10bps": best_train.get("holdout_net_oracle_cagr_10bps"),
+        },
+        "warning": "Perfect-foresight oracle only. Uses retrospective pivot dates/prices, assumes exact fills at every low and next high, ignores causal confirmation delay, queue/limit fills, capital/odd-lot constraints and many real execution frictions. The full-period best is exploratory only; the train-selected threshold is reported separately and its validation/holdout results are not a tradable strategy.",
     }
     (out / "tsmc_2330_oracle_pivot_ceiling.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2, default=float), encoding="utf-8"
