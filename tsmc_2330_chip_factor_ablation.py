@@ -23,6 +23,7 @@ from tsmc_swing_research import detect_confirmed_pivots
 from tsmc_2330_selected_threshold_signal_diagnostics import period_events, build_target
 
 EXCLUDE = {
+    "obv",  # cumulative level is non-stationary; use normalized OBV flow ratios instead
     "symbol", "date", "open", "high", "low", "close", "volume",
     "turnover", "corporate_action_window", "atr14",
 }
