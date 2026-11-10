@@ -85,9 +85,9 @@ def validate_latest_official_snapshot() -> dict:
         ).strip() == "2330"), None)
         if row is None:
             raise ValueError("2330 row not found in official TWT84U snapshot")
-        reference = float(_field(row, ("本日開盤競價基準", "開盤競價基準", "開盤參考價", "reference_price")))
-        actual_up = float(_field(row, ("本日漲停價", "漲停價", "limit_up")))
-        actual_down = float(_field(row, ("本日跌停價", "跌停價", "limit_down")))
+        reference = float(_field(row, ("本日開盤競價基準", "開盤競價基準", "開盤參考價", "reference_price", "TodayOpeningRefPrice")))
+        actual_up = float(_field(row, ("本日漲停價", "漲停價", "limit_up", "TodayLimitUp")))
+        actual_down = float(_field(row, ("本日跌停價", "跌停價", "limit_down", "TodayLimitDown")))
         band = 0.07 if pd.Timestamp.now().normalize() < BAND_CHANGE_DATE else 0.10
         calculated_up = limit_price(reference, band, "UP")
         calculated_down = limit_price(reference, band, "DOWN")
