@@ -77,7 +77,7 @@ def load_history(root: Path) -> tuple[dict[str, pd.DataFrame], dict]:
             continue
         action = events.loc[events["symbol"].astype(str) == str(symbol)] if not events.empty else pd.DataFrame()
         adjusted = apply_back_adjustments(raw, action)
-        frames[str(symbol)] = build_features(adjusted)
+        frames[str(symbol)] = adjusted
     if not frames:
         raise ValueError("No valid OHLCV symbols loaded")
     return frames, manifest
@@ -191,15 +191,19 @@ def add_momentum_ranks(frames: dict[str, pd.DataFrame], universe: pd.DataFrame) 
     return out
 
 
-def _close_trade(position: dict, day: pd.Timestamp, fill: float, reason: str) -> dict:
-    proceeds = position["shares"] * fill * (1 - SELL_FEE_TAX)
+def _close_trade(position: dict, day: pd.Timestamp, fill: float, reason: str,
+                 cost_multiplier: float = 1.0) -> dict:
+    sell_cost = SELL_FEE_TAX * cost_multiplier
+    buy_cost = BUY_FEE * cost_multiplier
+    proceeds = position["shares"] * fill * (1 - sell_cost)
     return {**position, "exit_date": day, "exit_price": fill,
             "exit_reason": reason, "pnl": proceeds - position["entry_cost"],
-            "net_return": (fill / position["entry_price"]) * (1 - BUY_FEE) * (1 - SELL_FEE_TAX) - 1}
+            "net_return": (fill / position["entry_price"]) * (1 - buy_cost) * (1 - sell_cost) - 1}
 
 
 def simulate(frames: dict[str, pd.DataFrame], universe: pd.DataFrame, strategy: str,
-             initial_capital: float = INITIAL_CAPITAL) -> tuple[dict, pd.DataFrame, pd.DataFrame]:
+             initial_capital: float = INITIAL_CAPITAL,
+             cost_multiplier: float = 1.0) -> tuple[dict, pd.DataFrame, pd.DataFrame]:
     entry_col, exit_col = f"entry_{strategy}", f"exit_{strategy}"
     if strategy == "momentum_rotation":
         frames = add_momentum_ranks(frames, universe)
@@ -239,12 +243,12 @@ def simulate(frames: dict[str, pd.DataFrame], universe: pd.DataFrame, strategy: 
             p, row = positions[symbol], today[symbol]
             op = float(row.open)
             if p["pending_exit"]:
-                fill, reason = op * (1 - SLIPPAGE), p["pending_reason"]
+                fill, reason = op * (1 - SLIPPAGE * cost_multiplier), p["pending_reason"]
             elif op <= p["stop"]:
-                fill, reason = op * (1 - SLIPPAGE), "gap_stop"
+                fill, reason = op * (1 - SLIPPAGE * cost_multiplier), "gap_stop"
             else:
                 continue
-            trades.append(_close_trade(p, day, fill, reason))
+            trades.append(_close_trade(p, day, fill, reason, cost_multiplier))
             cash += p["shares"] * fill * (1 - SELL_FEE_TAX)
             del positions[symbol]
             closed_today.add(symbol)
@@ -256,20 +260,20 @@ def simulate(frames: dict[str, pd.DataFrame], universe: pd.DataFrame, strategy: 
             if symbol not in memberships.get(day.year, set()) or len(positions) >= MAX_POSITIONS:
                 continue
             row = today[symbol]
-            entry = float(row.open) * (1 + SLIPPAGE)
+            entry = float(row.open) * (1 + SLIPPAGE * cost_multiplier)
             atr = max(candidate["atr"], entry * 0.005)
             stop = entry - 3.0 * atr
             if stop <= 0 or candidate["adv20"] <= 0:
                 continue
             equity_now = cash + sum(p["shares"] * last_close.get(s, p["entry_price"]) for s, p in positions.items())
             by_risk = math.floor(equity_now * RISK_FRACTION / max(entry - stop, 0.01))
-            by_weight = math.floor(equity_now * MAX_WEIGHT / (entry * (1 + BUY_FEE)))
-            by_cash = math.floor(cash / (entry * (1 + BUY_FEE)))
+            by_weight = math.floor(equity_now * MAX_WEIGHT / (entry * (1 + BUY_FEE * cost_multiplier)))
+            by_cash = math.floor(cash / (entry * (1 + BUY_FEE * cost_multiplier)))
             by_adv = math.floor(candidate["adv20"] * MAX_ADV_PARTICIPATION / entry)
             shares = max(0, min(by_risk, by_weight, by_cash, by_adv))
             if shares <= 0:
                 continue
-            cost = shares * entry * (1 + BUY_FEE)
+            cost = shares * entry * (1 + BUY_FEE * cost_multiplier)
             cash -= cost
             positions[symbol] = {
                 **candidate, "entry_date": day, "entry_price": entry,
@@ -284,8 +288,8 @@ def simulate(frames: dict[str, pd.DataFrame], universe: pd.DataFrame, strategy: 
             p, row = positions[symbol], today[symbol]
             op, low = float(row.open), float(row.low)
             if low <= p["stop"]:
-                fill = min(op, p["stop"]) * (1 - SLIPPAGE)
-                trades.append(_close_trade(p, day, fill, "atr_stop"))
+                fill = min(op, p["stop"]) * (1 - SLIPPAGE * cost_multiplier)
+                trades.append(_close_trade(p, day, fill, "atr_stop", cost_multiplier))
                 cash += p["shares"] * fill * (1 - SELL_FEE_TAX)
                 del positions[symbol]
                 closed_today.add(symbol)
@@ -305,8 +309,8 @@ def simulate(frames: dict[str, pd.DataFrame], universe: pd.DataFrame, strategy: 
             # If a security stops publishing bars (e.g. delisting/data end), do not
             # carry a stale mark to the end of the portfolio sample.
             if last_dates.get(symbol) == day:
-                fill = float(row.close) * (1 - SLIPPAGE)
-                trades.append(_close_trade(p, day, fill, "symbol_data_end_close"))
+                fill = float(row.close) * (1 - SLIPPAGE * cost_multiplier)
+                trades.append(_close_trade(p, day, fill, "symbol_data_end_close", cost_multiplier))
                 cash += p["shares"] * fill * (1 - SELL_FEE_TAX)
                 del positions[symbol]
         for symbol, row in today.items():
@@ -330,7 +334,7 @@ def simulate(frames: dict[str, pd.DataFrame], universe: pd.DataFrame, strategy: 
             else:
                 exit_day = final_day
             fill = float(row.close) * (1 - SLIPPAGE)
-            trades.append(_close_trade(p, exit_day, fill, "period_end_close"))
+            trades.append(_close_trade(p, exit_day, fill, "period_end_close", cost_multiplier))
             cash += p["shares"] * fill * (1 - SELL_FEE_TAX)
         positions.clear()
         if curve:
@@ -339,6 +343,7 @@ def simulate(frames: dict[str, pd.DataFrame], universe: pd.DataFrame, strategy: 
     tr = pd.DataFrame(trades)
     metrics = summarize(eq, tr, initial_capital)
     metrics["strategy"] = strategy
+    metrics["cost_multiplier"] = cost_multiplier
     return metrics, tr, eq
 
 
@@ -369,16 +374,23 @@ def summarize(equity: pd.DataFrame, trades: pd.DataFrame, initial: float) -> dic
 def run(input_dir: str, output_dir: str) -> dict:
     root, out = Path(input_dir), Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
-    frames, source_manifest = load_history(root)
-    universe = build_annual_universe(frames)
+    raw_frames, source_manifest = load_history(root)
+    universe = build_annual_universe(raw_frames)
+    selected_symbols = set(universe["symbol"].astype(str))
+    # Compute indicators only for symbols that enter at least one annual top-20
+    # universe; all pre-year bars are retained for indicator warm-up.
+    frames = {s: build_features(raw_frames[s]) for s in selected_symbols if s in raw_frames}
     metrics, trades, curves = [], [], []
-    for strategy in STRATEGIES:
-        m, t, e = simulate(frames, universe, strategy)
-        metrics.append(m)
-        if not t.empty:
-            trades.append(t.assign(strategy=strategy))
-        if not e.empty:
-            curves.append(e.assign(strategy=strategy))
+    for cost_multiplier in (1.0, 1.5, 2.0):
+        for strategy in STRATEGIES:
+            m, t, e = simulate(frames, universe, strategy, cost_multiplier=cost_multiplier)
+            label = f"{strategy}_cost_{cost_multiplier:g}x"
+            m["strategy_label"] = label
+            metrics.append(m)
+            if not t.empty:
+                trades.append(t.assign(strategy=label, cost_multiplier=cost_multiplier))
+            if not e.empty:
+                curves.append(e.assign(strategy=label, cost_multiplier=cost_multiplier))
     metrics_frame = pd.DataFrame(metrics)
     universe.to_csv(out / "annual_top20_turnover.csv", index=False)
     metrics_frame.to_csv(out / "strategy_metrics.csv", index=False)
@@ -414,7 +426,10 @@ def run(input_dir: str, output_dir: str) -> dict:
         "annual_top20_years": sorted(universe.year.unique().astype(int).tolist()),
         "annual_top20_coverage": universe.groupby("year").symbol.nunique().to_dict(),
         "execution": "signal at adjusted close; next available raw open; integer shares; shared cash; max 5 positions; 0.5% risk budget; 20% max position; 1% ADV participation; ATR stop; 60-bar max hold",
-        "costs": {"buy_fee": BUY_FEE, "sell_fee_plus_tax": SELL_FEE_TAX, "slippage_each_side": SLIPPAGE},
+        "costs": {"base_buy_fee": BUY_FEE, "base_sell_fee_plus_tax": SELL_FEE_TAX,
+                   "base_slippage_each_side": SLIPPAGE,
+                   "stress_multipliers": [1.0, 1.5, 2.0],
+                   "stress_applies_to": "buy fee, sell fee plus tax, and slippage"},
         "limitations": [
             "Annual top-20 membership is ranked from prior calendar-year turnover, but candidate coverage is only as complete as the collected symbol list.",
             "Historical point-in-time exchange membership and delisted price coverage are not verified.",
