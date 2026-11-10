@@ -206,3 +206,6 @@ The next turning-point research stage adds causal 20-session RSI, MACD-histogram
 
 
 The divergence stage's validation-selected high rule is `base_high_and_bearish_macd`; its low-volume divergence rule did not generalize. A fixed hybrid backtest, `tsmc_2330_hybrid_divergence_backtest.py`, therefore combines the already validation-selected prior-range-break low entry with the validation-selected MACD-divergence high exit. Both are frozen before the 2022+ historical check; no test-period tuning is performed.
+
+
+The frozen hybrid strategy improved the previously selected prior-range strategy's 2022+ historical CAGR from about 4.8% to 6.5% at 10 bps slippage, but still substantially underperformed TSMC buy-and-hold (about 31% CAGR) and had a larger drawdown. The next risk-filter study applies the same predeclared trend filters and ATR stops to this hybrid, with all selection restricted to 2017–2021.
