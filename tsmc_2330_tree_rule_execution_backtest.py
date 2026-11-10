@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 
 from tsmc_2330_execution_backtest import (
-    SLIPPAGE_BPS, INITIAL_CAPITAL, load_inputs, _simulate_period,
+    SLIPPAGE_BPS, INITIAL_CAPITAL, load_inputs, _simulate_period, build_signals,
 )
 from tsmc_2330_divergence_research import candidate_signals
 from tsmc_2330_reversal_confirmation_backtest import build_confirmed_signals
@@ -76,11 +76,9 @@ def run(features_path: str, rules_path: str, limits_path: str,
     )
     setup = tree_low_setup(bars)
     confirmed = confirm_low_setup(bars, setup)
-    base_low, base_high = build_confirmed_signals(bars, rules, "break_prior_range")
-    _, raw_high = base_high, None
-    candidates = candidate_signals(bars, *(__import__(
-        "tsmc_2330_execution_backtest", fromlist=["build_signals"]
-    ).build_signals(bars, rules)))
+    baseline_low, _ = build_confirmed_signals(bars, rules, "break_prior_range")
+    base_low_setup, base_high_setup = build_signals(bars, rules)
+    candidates = candidate_signals(bars, base_low_setup, base_high_setup)
     high_signal = candidates["HIGH"]["base_high_and_bearish_macd"]
     limit_lookup = {
         row.date.strftime("%Y-%m-%d"): (float(row.limit_up), float(row.limit_down))
@@ -90,7 +88,7 @@ def run(features_path: str, rules_path: str, limits_path: str,
     strategies = {
         "tree_low_direct": setup,
         "tree_low_confirmed": confirmed,
-        "prior_range_baseline": base_low,
+        "prior_range_baseline": baseline_low,
     }
     periods = {
         "validation_2017_2021": VALIDATION,
