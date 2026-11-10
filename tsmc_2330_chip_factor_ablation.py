@@ -38,6 +38,7 @@ TEST_START = "2022-01-01"
 
 
 def feature_groups(features: pd.DataFrame) -> dict[str, list[str]]:
+    """Build disjoint institutional-family ablations without double-counting aggregates."""
     numeric = [
         c for c in features.columns
         if c not in EXCLUDE and not c.startswith("raw_")
@@ -46,14 +47,26 @@ def feature_groups(features: pd.DataFrame) -> dict[str, list[str]]:
     technical = [c for c in numeric if not c.startswith(CHIP_PREFIXES)]
     institutional = [c for c in numeric if c.startswith(CHIP_PREFIXES) and not c.startswith("broker_")]
     broker = [c for c in numeric if c.startswith("broker_")]
+
+    foreign = [c for c in numeric if c.startswith("foreign_") and not c.startswith("foreign_dealer_")]
+    foreign_dealer = [c for c in numeric if c.startswith("foreign_dealer_")]
+    trust = [c for c in numeric if c.startswith("trust_")]
+    dealer = [c for c in numeric if c.startswith("dealer_")]
+    institutional_total = [c for c in numeric if c.startswith("institutional_")]
+
     groups = {
         "technical_only": technical,
         "technical_plus_institutional": technical + institutional,
+        "technical_plus_foreign_only": technical + foreign,
+        "technical_plus_foreign_dealer_only": technical + foreign_dealer,
+        "technical_plus_trust_only": technical + trust,
+        "technical_plus_dealer_only": technical + dealer,
+        "technical_plus_institutional_total_only": technical + institutional_total,
+        "technical_plus_three_institution_families": technical + foreign + trust + dealer,
     }
     if broker:
         groups["technical_plus_all_chip"] = technical + institutional + broker
     return groups
-
 
 def make_model():
     return make_pipeline(
