@@ -137,7 +137,7 @@ def run(features_path: str, oracle_path: str, limits_path: str,
     valid_events = period_events(events, dates, VALID_START, VALID_END, HORIZON)
     test_events = period_events(events, dates, TEST_START, dates.max().date().isoformat(), HORIZON)
     train_mask = (idx >= train_start_idx + HORIZON) & (idx <= valid_start_idx - HORIZON - 1) & valid_rows
-    valid_mask = ((dates >= VALID_START) & (dates <= VALID_END)).to_numpy()
+    valid_mask = ((dates >= VALID_START) & (dates <= VALID_END)).to_numpy(copy=True)
     valid_mask &= (idx >= valid_start_idx + HORIZON) & (idx <= test_start_idx - HORIZON - 1) & valid_rows
     test_mask = (idx >= test_start_idx + HORIZON) & valid_rows
 
