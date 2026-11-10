@@ -28,6 +28,7 @@ VALIDATION_END = "2021-12-31"
 TEST_START = "2022-01-01"
 MODEL_NAMES = ("logistic", "random_forest", "hist_gradient_boosting")
 EXCLUDE = {
+    "obv",  # cumulative level is non-stationary; use normalized OBV flow ratios instead
     "symbol", "date", "open", "high", "low", "close", "volume",
     "turnover", "corporate_action_window", "atr14",
 }
