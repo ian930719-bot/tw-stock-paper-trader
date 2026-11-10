@@ -11,6 +11,7 @@ on:
       - "tsmc_2330_pattern_combinations.py"
       - "tsmc_2330_divergence_research.py"
       - "tsmc_2330_hybrid_divergence_backtest.py"
+      - "tsmc_2330_hybrid_risk_research.py"
       - "tests/test_tsmc_divergence_research.py"
       - "tsmc_2330_frozen_rule_research.py"
       - "tsmc_2330_execution_backtest.py"
@@ -235,6 +236,14 @@ jobs:
       - name: Research trend filters and ATR trailing stops on validation period
         run: |
           python tsmc_2330_trend_atr_risk_research.py \
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --rules artifacts/tsmc_2330_swing/tsmc_2330_frozen_rule_holdout.json \
+            --limits data/tsmc_2330/corporate_actions/price_limits_2330.csv \
+            --dividends data/tsmc_2330/corporate_actions/TaiwanStockDividendResult_2330.csv \
+            --output artifacts/tsmc_2330_swing
+      - name: Research trend and ATR risk variants for frozen hybrid
+        run: |
+          python tsmc_2330_hybrid_risk_research.py \
             --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
             --rules artifacts/tsmc_2330_swing/tsmc_2330_frozen_rule_holdout.json \
             --limits data/tsmc_2330/corporate_actions/price_limits_2330.csv \
