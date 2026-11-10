@@ -1,8 +1,10 @@
 import unittest
+import tempfile
+from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from tsmc_swing_research import build_causal_features, detect_confirmed_pivots, build_lead_lag
+from tsmc_swing_research import build_causal_features, detect_confirmed_pivots, build_lead_lag, load_tsmc
 
 
 class TSMCSwingResearchTests(unittest.TestCase):
@@ -41,9 +43,25 @@ class TSMCSwingResearchTests(unittest.TestCase):
         lead = build_lead_lag(events, features)
         self.assertTrue((pd.to_datetime(lead["feature_date"]) < pd.to_datetime(lead["pivot_date"])).all())
 
-    def test_raw_2330_only_loader_is_not_silently_substituted(self):
-        # Loader behavior is covered by integration tests with temp CSVs in CI.
-        self.assertEqual("2330", "2330")
+    def test_loader_filters_to_2330_and_rejects_other_symbols(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dates = pd.bdate_range("2020-01-01", periods=260)
+            frames = []
+            for symbol, base in (("2330", 100.0), ("2317", 50.0)):
+                close = np.linspace(base, base * 1.2, len(dates))
+                frames.append(pd.DataFrame({
+                    "symbol": symbol, "date": dates, "open": close,
+                    "high": close * 1.01, "low": close * 0.99,
+                    "close": close, "volume": 100000,
+                }))
+            pd.concat(frames).to_csv(root / "panel.csv", index=False)
+            result = load_tsmc(str(root / "panel.csv"))
+            self.assertEqual(set(result["symbol"]), {"2330"})
+            self.assertEqual(len(result), 260)
+            pd.concat(frames[1:]).to_csv(root / "other.csv", index=False)
+            with self.assertRaisesRegex(ValueError, "No TSMC 2330"):
+                load_tsmc(str(root / "other.csv"))
 
 
 if __name__ == "__main__":
