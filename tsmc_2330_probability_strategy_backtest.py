@@ -112,7 +112,7 @@ def run(features_path: str, oracle_path: str, limits_path: str,
     feature_cols = [
         c for c in bars.columns
         if c not in EXCLUDE and not c.startswith("raw_")
-        and pd.api.types.is_numeric_dtype(bars[c]) and bars[c].notna().any()
+        and pd.api.types.is_numeric_dtype(bars[c])
     ]
     if not feature_cols:
         raise ValueError("No numeric model features")
@@ -153,10 +153,24 @@ def run(features_path: str, oracle_path: str, limits_path: str,
                 })
                 year_ok = False
                 continue
+            # Feature availability is determined from this fold's training
+            # history only; a field first populated in a future year cannot
+            # silently enter an earlier model.
+            train_cols = [
+                col for col in feature_cols
+                if X.loc[train_mask, col].notna().any()
+            ]
+            if not train_cols:
+                skipped.append({
+                    "year": year, "pivot_type": kind,
+                    "reason": "no features populated in training history",
+                })
+                year_ok = False
+                continue
             model = make_model()
-            model.fit(X.loc[train_mask, feature_cols], y_train[train_mask])
+            model.fit(X.loc[train_mask, train_cols], y_train[train_mask])
             probabilities[kind][val_mask] = model.predict_proba(
-                X.loc[val_mask, feature_cols]
+                X.loc[val_mask, train_cols]
             )[:, 1]
             p = probabilities[kind][val_mask]
             truth = y_val[val_mask]
@@ -171,6 +185,8 @@ def run(features_path: str, oracle_path: str, limits_path: str,
                 "training_events": int(y_train[train_mask].sum()),
                 "validation_rows": int(val_mask.sum()),
                 "validation_events": int(truth.sum()),
+                "feature_count": len(train_cols),
+                "features": train_cols,
                 "validation_prevalence": float(truth.mean()),
                 "validation_pr_auc": (
                     float(average_precision_score(truth, p))
