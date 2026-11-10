@@ -228,7 +228,7 @@ def run(input_csv: str, output_dir: str) -> dict:
         "execution": "Feature date close i; signal schedules buy at close i+1 and sell at open i+2; both sides include fees/tax and 0.10% slippage.",
         "periods": {k: {"start": lo, "end": hi} for k, (lo, hi) in PERIODS.items()},
         "buy_and_hold_close_to_open_benchmark": {k: benchmark_close_to_open(d, v) for k, v in masks.items()},
-        "logistic_threshold_040_test": selected_metrics,
+        "logistic_threshold_040_test_diagnostic": selected_metrics,
         "logistic_calibration": calibration_rows,
         "model_families": list(factories),
         "limitations": [
