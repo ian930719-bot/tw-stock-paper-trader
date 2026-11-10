@@ -62,7 +62,7 @@ def run(features_path: str, events_path: str, output_dir: str) -> dict:
     if len(split_indices) == 0:
         raise ValueError(f"No test rows at or after {SPLIT_DATE}")
     split_index = int(split_indices[0])
-    valid_rows = X.notna().any(axis=1).to_numpy()
+    valid_rows = X.notna().any(axis=1).to_numpy(copy=True)
     if "corporate_action_window" in features:
         valid_rows &= ~features["corporate_action_window"].fillna(True).astype(bool).to_numpy()
     test_mask = (dates >= split).to_numpy() & valid_rows
