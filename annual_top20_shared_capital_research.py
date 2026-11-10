@@ -249,7 +249,7 @@ def simulate(frames: dict[str, pd.DataFrame], universe: pd.DataFrame, strategy: 
             else:
                 continue
             trades.append(_close_trade(p, day, fill, reason, cost_multiplier))
-            cash += p["shares"] * fill * (1 - SELL_FEE_TAX)
+            cash += p["shares"] * fill * (1 - SELL_FEE_TAX * cost_multiplier)
             del positions[symbol]
             closed_today.add(symbol)
         # Candidate priority is cross-sectional strength, then momentum.
@@ -290,7 +290,7 @@ def simulate(frames: dict[str, pd.DataFrame], universe: pd.DataFrame, strategy: 
             if low <= p["stop"]:
                 fill = min(op, p["stop"]) * (1 - SLIPPAGE * cost_multiplier)
                 trades.append(_close_trade(p, day, fill, "atr_stop", cost_multiplier))
-                cash += p["shares"] * fill * (1 - SELL_FEE_TAX)
+                cash += p["shares"] * fill * (1 - SELL_FEE_TAX * cost_multiplier)
                 del positions[symbol]
                 closed_today.add(symbol)
         for symbol in list(positions):
@@ -311,7 +311,7 @@ def simulate(frames: dict[str, pd.DataFrame], universe: pd.DataFrame, strategy: 
             if last_dates.get(symbol) == day:
                 fill = float(row.close) * (1 - SLIPPAGE * cost_multiplier)
                 trades.append(_close_trade(p, day, fill, "symbol_data_end_close", cost_multiplier))
-                cash += p["shares"] * fill * (1 - SELL_FEE_TAX)
+                cash += p["shares"] * fill * (1 - SELL_FEE_TAX * cost_multiplier)
                 del positions[symbol]
         for symbol, row in today.items():
             last_close[symbol] = float(row.close)
@@ -335,7 +335,7 @@ def simulate(frames: dict[str, pd.DataFrame], universe: pd.DataFrame, strategy: 
                 exit_day = final_day
             fill = float(row.close) * (1 - SLIPPAGE * cost_multiplier)
             trades.append(_close_trade(p, exit_day, fill, "period_end_close", cost_multiplier))
-            cash += p["shares"] * fill * (1 - SELL_FEE_TAX)
+            cash += p["shares"] * fill * (1 - SELL_FEE_TAX * cost_multiplier)
         positions.clear()
         if curve:
             curve[-1].update({"equity": cash, "cash": cash, "market_value": 0.0, "exposure": 0.0, "positions": 0})
