@@ -110,7 +110,7 @@ def run(features_path: str, oracle_path: str, output_dir: str,
     manifest = {}
     if chip_manifest_path:
         manifest = json.loads(Path(chip_manifest_path).read_text(encoding="utf-8"))
-    broker_rows = int(manifest.get("broker_available_rows", manifest.get("broker_days_returned", 0)) or 0)
+    broker_rows = int(manifest.get("broker_rows", manifest.get("broker_available_rows", manifest.get("broker_days_returned", 0))) or 0)
     broker_complete = bool(manifest.get("broker_backfill_complete", False))
     results = {}
     for group_name, cols in groups.items():
