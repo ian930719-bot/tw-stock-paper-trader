@@ -40,7 +40,7 @@ def _to_number(frame: pd.DataFrame, col: str) -> pd.Series:
 
 
 def normalize_institutional(rows: list[dict]) -> pd.DataFrame:
-    """Normalize FinMind wide data to shares; foreign includes foreign dealers."""
+    """Normalize FinMind wide data to shares; foreign dealers remain separate."""
     cols = [
         "date", "foreign_buy_shares", "foreign_sell_shares", "foreign_net_shares",
         "foreign_dealer_buy_shares", "foreign_dealer_sell_shares", "foreign_dealer_net_shares",
