@@ -1,5 +1,6 @@
 import unittest
 import pandas as pd
+import numpy as np
 
 from tsmc_2330_chip_factor_ablation import feature_groups, evaluate
 
@@ -26,7 +27,7 @@ class TSMCChipFactorAblationTests(unittest.TestCase):
         y = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1]
         model = DummyClassifier(strategy="prior")
         model.fit(X, y)
-        metrics = evaluate(model, X, [True] * 10, pd.Series(y).to_numpy())
+        metrics = evaluate(model, X, np.ones(10, dtype=bool), pd.Series(y).to_numpy())
         self.assertAlmostEqual(metrics["prevalence"], 0.2)
         self.assertIn("top_decile_lift", metrics)
 
