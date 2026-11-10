@@ -2,7 +2,9 @@ import unittest
 
 import numpy as np
 
-from tsmc_2330_probability_strategy_backtest import probability_signal, score
+from tsmc_2330_probability_strategy_backtest import (
+    probability_signal, rolling_probability_signal, rolling_probability_threshold, score,
+)
 from tsmc_2330_selected_threshold_signal_diagnostics import build_target
 import pandas as pd
 
@@ -14,6 +16,22 @@ class ProbabilityStrategyTests(unittest.TestCase):
             probability_signal(p, 0.7),
             np.array([False, False, True, True, False]),
         )
+
+    def test_rolling_threshold_is_lagged_and_adapts(self):
+        p = np.array([0.1, 0.2, 0.9, 0.8, 0.7, 0.6])
+        threshold = rolling_probability_threshold(p, 0.5, window=2, min_periods=2)
+        self.assertTrue(np.isnan(threshold[0]))
+        self.assertTrue(np.isnan(threshold[1]))
+        self.assertAlmostEqual(threshold[2], 0.15)
+        self.assertAlmostEqual(threshold[3], 0.55)
+        signal, _ = rolling_probability_signal(p, 0.5, window=2, min_periods=2)
+        np.testing.assert_array_equal(signal, np.array([False, False, True, True, False, False]))
+
+    def test_rolling_threshold_rejects_invalid_parameters(self):
+        with self.assertRaises(ValueError):
+            rolling_probability_threshold(np.array([0.1, 0.2]), 1.0)
+        with self.assertRaises(ValueError):
+            rolling_probability_threshold(np.array([0.1, 0.2]), 0.5, window=2, min_periods=3)
 
     def test_score_penalizes_drawdown(self):
         strong = {"cagr": 0.30, "max_drawdown": -0.20}
