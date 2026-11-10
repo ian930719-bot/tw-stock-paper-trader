@@ -28,7 +28,7 @@ EXCLUDE = {
     "turnover", "corporate_action_window", "atr14",
 }
 INSTITUTIONAL_PREFIXES = (
-    "foreign_", "foreign_dealer_", "trust_", "dealer_", "institutional_",
+    "foreign_", "foreign_dealer_", "trust_", "dealer_", "institutional_", "broker_",
 )
 DEPTH = 3
 HORIZON = 1
