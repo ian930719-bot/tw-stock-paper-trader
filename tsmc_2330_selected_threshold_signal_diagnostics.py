@@ -24,6 +24,36 @@ from tsmc_2330_walk_forward import (
 )
 
 HORIZONS = (1, 3, 5)
+
+# Backward-compatible helpers used by existing institutional and rule studies.
+def period_events(events: pd.DataFrame, dates: pd.Series, start: str,
+                  end: str, horizon: int) -> pd.DataFrame:
+    if events.empty:
+        return events.copy()
+    dates = pd.to_datetime(dates).reset_index(drop=True)
+    lookup = {pd.Timestamp(value).normalize(): i for i, value in enumerate(dates)}
+    starts = [i for i, value in enumerate(dates) if value >= pd.Timestamp(start)]
+    ends = [i for i, value in enumerate(dates) if value <= pd.Timestamp(end)]
+    if not starts or not ends:
+        return events.iloc[0:0].copy()
+    start_idx, end_idx = starts[0], max(ends)
+    pivot_idx = pd.to_datetime(events["pivot_date"], errors="coerce").map(
+        lambda value: lookup.get(pd.Timestamp(value).normalize(), -1)
+    )
+    confirmation = pd.to_datetime(events["confirmation_date"], errors="coerce")
+    mask = (
+        (pivot_idx >= start_idx + horizon)
+        & (pivot_idx <= end_idx)
+        & (confirmation >= pd.Timestamp(start))
+        & (confirmation <= pd.Timestamp(end))
+    )
+    return events.loc[mask].copy()
+
+
+def build_target(dates: pd.Series, events: pd.DataFrame, horizon: int,
+                 kind: str) -> np.ndarray:
+    return event_target(dates, events, horizon, kind)
+
 MIN_REVERSAL_PCT = 0.05
 ATR_MULTIPLE = 2.0
 EXCLUDE = {
