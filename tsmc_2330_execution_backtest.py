@@ -53,6 +53,16 @@ def is_limit_locked(side: str, open_price: float, high: float, low: float,
     raise ValueError(f"Unknown side: {side}")
 
 
+def trailing_atr_stop_hit(close: float, peak_close: float, atr_pct: float,
+                          multiple: float) -> bool:
+    if not all(np.isfinite(v) for v in (close, peak_close, atr_pct, multiple)):
+        return False
+    if close <= 0 or peak_close <= 0 or atr_pct <= 0 or multiple <= 0:
+        return False
+    stop_level = peak_close - multiple * atr_pct * close
+    return close <= stop_level
+
+
 def buy_quantity(cash: float, execution_price: float) -> int:
     if cash <= 0 or execution_price <= 0:
         return 0
@@ -272,8 +282,7 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
             if atr_stop_multiple is not None:
                 atr_pct = pd.to_numeric(pd.Series([row.get("atr_pct14", np.nan)]), errors="coerce").iloc[0]
                 if np.isfinite(atr_pct) and atr_pct > 0:
-                    stop_level = peak_close - float(atr_stop_multiple) * float(atr_pct) * close
-                    if close <= stop_level:
+                    if trailing_atr_stop_hit(close, peak_close, float(atr_pct), float(atr_stop_multiple)):
                         pending_sell = True
 
         if strategy and i < len(period_bars) - 1:
