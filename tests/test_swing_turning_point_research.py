@@ -74,6 +74,28 @@ class SwingTurningPointTests(unittest.TestCase):
         self.assertGreater(metrics["trades"], 0)
         self.assertEqual(int(equity.positions.max()), 1)
 
+    def test_uncensored_forward_labels_are_unknown_not_negative(self):
+        n = 80
+        t = np.arange(n, dtype=float)
+        close = 100 * np.exp(0.0005 * t + 0.02 * np.sin(t / 5))
+        frame = pd.DataFrame({
+            "date": pd.bdate_range("2024-01-02", periods=n),
+            "open": close * 0.999,
+            "high": close * 1.01,
+            "low": close * 0.99,
+            "close": close,
+            "volume": np.full(n, 100_000.0),
+        })
+        panel = build_feature_panel({"2330": frame}).sort_values("date")
+        tail = panel.tail(20)
+        self.assertTrue(tail["future_max20"].isna().all())
+        self.assertTrue(tail["future_min20"].isna().all())
+        self.assertTrue(tail["low_label20"].isna().all())
+        self.assertTrue(tail["high_label20"].isna().all())
+        mature = panel.loc[panel["future_max20"].notna()]
+        self.assertTrue(mature["low_label20"].notna().all())
+        self.assertTrue(mature["high_label20"].notna().all())
+
 
 if __name__ == "__main__":
     unittest.main()
