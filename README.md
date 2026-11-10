@@ -212,3 +212,6 @@ The frozen hybrid strategy improved the previously selected prior-range strategy
 
 
 The next hybrid-specific risk stage, `tsmc_2330_hybrid_risk_research.py`, applies the same 4 entry filters and 3 ATR stop choices to the frozen prior-range-entry/MACD-divergence-exit pair. Selection remains restricted to 2017–2021; the 2022+ holdout is used only after the choice is frozen.
+
+
+To quantify whether the 200% CAGR target is even feasible under different swing definitions, `tsmc_2330_oracle_pivot_ceiling.py` sweeps 56 predeclared reversal/ATR thresholds and computes the perfect-foresight return from buying each retrospective low and selling the next retrospective high. It includes proportional cost sensitivity but deliberately assumes exact pivot fills and ignores causal confirmation delay; it is an optimistic theoretical ceiling, not a tradable result.
