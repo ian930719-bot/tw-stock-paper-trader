@@ -3,6 +3,8 @@ import unittest
 import numpy as np
 
 from tsmc_2330_probability_strategy_backtest import probability_signal, score
+from tsmc_2330_selected_threshold_signal_diagnostics import build_target
+import pandas as pd
 
 
 class ProbabilityStrategyTests(unittest.TestCase):
@@ -17,6 +19,17 @@ class ProbabilityStrategyTests(unittest.TestCase):
         strong = {"cagr": 0.30, "max_drawdown": -0.20}
         weak = {"cagr": 0.30, "max_drawdown": -0.50}
         self.assertGreater(score(strong), score(weak))
+
+    def test_next_session_target_marks_only_previous_session(self):
+        dates = pd.Series(pd.to_datetime([
+            "2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"
+        ]))
+        events = pd.DataFrame({
+            "type": ["LOW"],
+            "pivot_date": [pd.Timestamp("2024-01-04")],
+        })
+        target = build_target(dates, events, 1, "LOW")
+        np.testing.assert_array_equal(target, np.array([0, 1, 0, 0], dtype=np.int8))
 
     def test_probability_signal_is_boolean_and_causal_shape(self):
         p = np.linspace(0, 1, 21)
