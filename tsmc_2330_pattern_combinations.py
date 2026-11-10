@@ -48,6 +48,10 @@ def run(features_path: str, events_path: str, output_dir: str) -> dict:
         raise ValueError(f"No events for predeclared threshold {THRESHOLD_ID}")
     train = (x["date"] < SPLIT_DATE).to_numpy()
     test = (x["date"] >= SPLIT_DATE).to_numpy()
+    split_indices = np.flatnonzero(test)
+    if len(split_indices) == 0:
+        raise ValueError(f"No test rows at or after {SPLIT_DATE}")
+    split_index = int(split_indices[0])
     valid = x[list(FEATURES)].replace([np.inf, -np.inf], np.nan).notna().all(axis=1).to_numpy()
     if "corporate_action_window" in x:
         valid &= ~x["corporate_action_window"].fillna(True).astype(bool).to_numpy()
@@ -57,7 +61,9 @@ def run(features_path: str, events_path: str, output_dir: str) -> dict:
         direction = 1 if kind == "HIGH" else -1
         for horizon in (1, 3, 5):
             y = build_target(x["date"], events, horizon, kind)
-            train_mask = train & valid
+            # Purge pre-split rows whose forward pivot-label window overlaps test.
+            train_end = max(0, split_index - horizon - 1)
+            train_mask = train & valid & (np.arange(len(x)) <= train_end)
             test_mask = test & valid
             event_train = train_mask & y
             if int(event_train.sum()) < 10 or int((test_mask & y).sum()) < 5:
@@ -105,7 +111,8 @@ def run(features_path: str, events_path: str, output_dir: str) -> dict:
     summary = {
         "symbol": "2330",
         "threshold_id": THRESHOLD_ID,
-        "train_end": "2021-12-31",
+        "train_end": x.loc[train, "date"].max().date().isoformat(),
+        "purge_sessions": [1, 3, 5],
         "test_start": SPLIT_DATE,
         "test_end": x.loc[test, "date"].max().date().isoformat(),
         "features": list(FEATURES),
