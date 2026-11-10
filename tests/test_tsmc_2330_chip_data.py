@@ -3,6 +3,7 @@ import pandas as pd
 
 from tsmc_2330_chip_data import (
     normalize_institutional, normalize_broker_rows, broker_daily_features,
+    add_institutional_features,
 )
 
 
@@ -22,6 +23,24 @@ class TSMCChipDataTests(unittest.TestCase):
         self.assertEqual(row["trust_net_shares"], -1000)
         self.assertEqual(row["dealer_net_shares"], 0)
         self.assertEqual(row["institutional_net_shares"], 2000)
+
+    def test_institutional_streaks_start_at_one_and_use_trading_rows(self):
+        frame = pd.DataFrame({
+            "date": ["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"],
+            "foreign_net_shares": [1000, 2000, -500, 3000],
+            "foreign_dealer_net_shares": [0, 0, 0, 0],
+            "trust_net_shares": [0, 0, 0, 0],
+            "dealer_net_shares": [0, 0, 0, 0],
+            "institutional_net_shares": [1000, 2000, -500, 3000],
+        })
+        bars = pd.DataFrame({
+            "date": pd.to_datetime(frame["date"]),
+            "volume": [100000, 120000, 110000, 130000],
+        })
+        out = add_institutional_features(frame, bars)
+        self.assertEqual(out["foreign_net_positive_streak"].tolist(), [1, 2, 0, 1])
+        self.assertEqual(out["foreign_net_negative_streak"].tolist(), [0, 0, 1, 0])
+        self.assertEqual(out.loc[1, "foreign_net_5d_lots"], 3.0)
 
     def test_broker_rows_keep_branch_ids_and_convert_shares_to_lots(self):
         frame = normalize_broker_rows([{
