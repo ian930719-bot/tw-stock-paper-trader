@@ -333,7 +333,7 @@ def simulate(frames: dict[str, pd.DataFrame], universe: pd.DataFrame, strategy: 
                 exit_day = available[-1]
             else:
                 exit_day = final_day
-            fill = float(row.close) * (1 - SLIPPAGE)
+            fill = float(row.close) * (1 - SLIPPAGE * cost_multiplier)
             trades.append(_close_trade(p, exit_day, fill, "period_end_close", cost_multiplier))
             cash += p["shares"] * fill * (1 - SELL_FEE_TAX)
         positions.clear()
@@ -397,9 +397,10 @@ def run(input_dir: str, output_dir: str) -> dict:
     pd.concat(trades, ignore_index=True).to_csv(out / "trade_ledger.csv", index=False) if trades else pd.DataFrame().to_csv(out / "trade_ledger.csv", index=False)
     pd.concat(curves, ignore_index=True).to_csv(out / "equity_curves.csv", index=False) if curves else pd.DataFrame().to_csv(out / "equity_curves.csv", index=False)
     year_rows = []
-    for strategy, curve in [(s, next((x for x in curves if x.strategy.iloc[0] == s), pd.DataFrame())) for s in STRATEGIES]:
+    for curve in curves:
         if curve.empty:
             continue
+        strategy = str(curve.strategy.iloc[0])
         x = curve.copy()
         x["year"] = pd.to_datetime(x["date"]).dt.year
         for year, group in x.groupby("year"):
