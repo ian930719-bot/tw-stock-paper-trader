@@ -114,7 +114,7 @@ def run(features_path: str, oracle_path: str, output_dir: str,
     broker_complete = bool(manifest.get("broker_backfill_complete", False))
     results = {}
     for group_name, cols in groups.items():
-        is_broker = "broker" in group_name
+        is_broker = any(col.startswith("broker_") for col in cols)
         if is_broker and (not broker_complete or broker_rows < 500):
             results[group_name] = {
                 "status": "skipped_insufficient_broker_history",
@@ -123,43 +123,45 @@ def run(features_path: str, oracle_path: str, output_dir: str,
             continue
         X = features[cols].replace([np.inf, -np.inf], np.nan)
         # A feature must have observations in training, otherwise it cannot be learned.
-        train_cols = [c for c in cols if X.loc[train_mask_base, c].notna().any()]
+        train_cols = [col for col in cols if X.loc[train_mask_base, col].notna().any()]
         if not train_cols:
             results[group_name] = {"status": "skipped_no_trainable_features"}
             continue
         X = X[train_cols]
         rows = []
-        for horizon in HORIZONS:
-            tr_events = period_events(events, dates, TRAIN_START, TRAIN_END, horizon)
-            va_events = period_events(events, dates, VALIDATION_START, VALIDATION_END, horizon)
-            te_events = period_events(events, dates, TEST_START, dates.max().date().isoformat(), horizon)
-            y_train = build_target(dates, tr_events, horizon, "LOW")
-            y_val = build_target(dates, va_events, horizon, "LOW")
-            y_test = build_target(dates, te_events, horizon, "LOW")
-            train_mask = train_mask_base & (idx >= np.flatnonzero((dates >= pd.Timestamp(TRAIN_START)).to_numpy())[0] + horizon)
-            val_mask = validation_mask & (idx >= np.flatnonzero((dates >= pd.Timestamp(VALIDATION_START)).to_numpy())[0] + horizon)
-            test_mask_h = test_mask & (idx >= np.flatnonzero((dates >= pd.Timestamp(TEST_START)).to_numpy())[0] + horizon)
-            if len(np.unique(y_train[train_mask])) < 2 or len(np.unique(y_val[val_mask])) < 2:
-                rows.append({"horizon_sessions": horizon, "status": "skipped_one_class_segment"})
-                continue
-            model = make_model()
-            model.fit(X.loc[train_mask], y_train[train_mask])
-            validation = evaluate(model, X, val_mask, y_val)
-            # Refit through validation; the 2022+ result remains descriptive.
-            train_val_mask = (train_mask_base | validation_mask) & (idx <= np.flatnonzero((dates >= pd.Timestamp(TEST_START)).to_numpy())[0] - horizon)
-            y_train_val = np.maximum(y_train, y_val)
-            final_model = make_model()
-            if len(np.unique(y_train_val[train_val_mask])) == 2:
-                final_model.fit(X.loc[train_val_mask], y_train_val[train_val_mask])
-                test = evaluate(final_model, X, test_mask_h, y_test)
-            else:
-                test = {"error": "train-plus-validation target has one class"}
-            rows.append({
-                "horizon_sessions": horizon,
-                "feature_count": len(train_cols),
-                "validation": validation,
-                "test_2022_plus_descriptive": test,
-            })
+        for kind in ("LOW", "HIGH"):
+            for horizon in HORIZONS:
+                tr_events = period_events(events, dates, TRAIN_START, TRAIN_END, horizon)
+                va_events = period_events(events, dates, VALIDATION_START, VALIDATION_END, horizon)
+                te_events = period_events(events, dates, TEST_START, dates.max().date().isoformat(), horizon)
+                y_train = build_target(dates, tr_events, horizon, kind)
+                y_val = build_target(dates, va_events, horizon, kind)
+                y_test = build_target(dates, te_events, horizon, kind)
+                train_mask = train_mask_base & (idx >= np.flatnonzero((dates >= pd.Timestamp(TRAIN_START)).to_numpy())[0] + horizon)
+                val_mask = validation_mask & (idx >= np.flatnonzero((dates >= pd.Timestamp(VALIDATION_START)).to_numpy())[0] + horizon)
+                test_mask_h = test_mask & (idx >= np.flatnonzero((dates >= pd.Timestamp(TEST_START)).to_numpy())[0] + horizon)
+                if len(np.unique(y_train[train_mask])) < 2 or len(np.unique(y_val[val_mask])) < 2:
+                    rows.append({"pivot_type": kind, "horizon_sessions": horizon, "status": "skipped_one_class_segment"})
+                    continue
+                model = make_model()
+                model.fit(X.loc[train_mask], y_train[train_mask])
+                validation = evaluate(model, X, val_mask, y_val)
+                # Refit through validation; the 2022+ result remains descriptive.
+                train_val_mask = (train_mask_base | validation_mask) & (idx <= np.flatnonzero((dates >= pd.Timestamp(TEST_START)).to_numpy())[0] - horizon)
+                y_train_val = np.maximum(y_train, y_val)
+                final_model = make_model()
+                if len(np.unique(y_train_val[train_val_mask])) == 2:
+                    final_model.fit(X.loc[train_val_mask], y_train_val[train_val_mask])
+                    test = evaluate(final_model, X, test_mask_h, y_test)
+                else:
+                    test = {"error": "train-plus-validation target has one class"}
+                rows.append({
+                    "pivot_type": kind,
+                    "horizon_sessions": horizon,
+                    "feature_count": len(train_cols),
+                    "validation": validation,
+                    "test_2022_plus_descriptive": test,
+                })
         results[group_name] = {"status": "evaluated", "feature_count": len(train_cols), "features": train_cols, "horizons": rows}
     summary = {
         "symbol": "2330",
@@ -168,7 +170,7 @@ def run(features_path: str, oracle_path: str, output_dir: str,
         "validation_period": [VALIDATION_START, VALIDATION_END],
         "test_period": [TEST_START, dates.max().date().isoformat()],
         "model": "fixed logistic regression; median imputation; standard scaling; balanced class weights; C=0.2",
-        "target": "LOW pivot within next 1/3/5 sessions; features available at signal-day close; assumed execution no earlier than next session",
+        "target": "HIGH and LOW pivots within next 1/3/5 sessions; features available at signal-day close; assumed execution no earlier than next session",
         "results": results,
         "test_period_is_pristine": False,
         "test_period_used_for_selection": False,
@@ -184,7 +186,7 @@ def run(features_path: str, oracle_path: str, output_dir: str,
         for row in result.get("horizons", []):
             val, test = row.get("validation", {}), row.get("test_2022_plus_descriptive", {})
             flat.append({
-                "feature_group": group, "horizon_sessions": row.get("horizon_sessions"),
+                "feature_group": group, "pivot_type": row.get("pivot_type"), "horizon_sessions": row.get("horizon_sessions"),
                 "feature_count": row.get("feature_count"),
                 "validation_pr_auc": val.get("pr_auc"), "validation_top_decile_lift": val.get("top_decile_lift"),
                 "test_pr_auc": test.get("pr_auc"), "test_top_decile_lift": test.get("top_decile_lift"),
