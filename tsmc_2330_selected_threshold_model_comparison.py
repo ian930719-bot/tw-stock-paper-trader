@@ -143,22 +143,34 @@ def run(features_path: str, oracle_path: str, output_dir: str) -> dict:
             y_train_val = build_target(dates, train_val_events, horizon, kind)
             if len(np.unique(y_train[train_mask])) < 2:
                 continue
+            if not val_mask.any() or len(np.unique(y_val[val_mask])) < 2:
+                selections[f"{kind}_{horizon}"] = {
+                    "status": "skipped",
+                    "reason": "validation segment lacks rows or both target classes",
+                    "validation_rows": int(val_mask.sum()),
+                    "validation_event_days": int(y_val[val_mask].sum()),
+                }
+                continue
             candidate_results = {}
             for name in MODEL_NAMES:
                 model = fit_model(make_model(name), name, X.loc[train_mask], y_train[train_mask])
-                metrics = evaluate(model, X, val_mask, y_val) if len(np.unique(y_val[val_mask])) == 2 else {"pr_auc": -1.0}
+                metrics = evaluate(model, X, val_mask, y_val)
                 candidate_results[name] = {"validation": metrics}
             chosen = max(MODEL_NAMES, key=lambda name: (
-                candidate_results[name]["validation"].get("pr_auc", -1.0),
-                candidate_results[name]["validation"].get("top_10_precision", -1.0),
+                candidate_results[name]["validation"]["pr_auc"],
+                candidate_results[name]["validation"]["top_10_precision"],
             ))
             final_model = fit_model(
                 make_model(chosen), chosen, X.loc[train_val_mask], y_train_val[train_val_mask]
             )
             test_metrics = (
                 evaluate(final_model, X, test_mask, y_test)
-                if len(np.unique(y_test[test_mask])) == 2
-                else {"error": "test target has one class"}
+                if test_mask.any() and len(np.unique(y_test[test_mask])) == 2
+                else {
+                    "error": "test segment lacks rows or both target classes",
+                    "rows": int(test_mask.sum()),
+                    "event_days": int(y_test[test_mask].sum()),
+                }
             )
             selections[f"{kind}_{horizon}"] = {
                 "selected_model": chosen,
