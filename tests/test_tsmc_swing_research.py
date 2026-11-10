@@ -30,6 +30,42 @@ class TSMCSwingResearchTests(unittest.TestCase):
                 "rsi_divergence_strength_high20", "macd_divergence_strength_low20"]
         pd.testing.assert_frame_equal(a.loc[:249, cols], b.loc[:249, cols])
 
+    def test_expanded_indicator_panel_and_ranges(self):
+        close = 100 + np.cumsum(np.sin(np.arange(340) / 7) * 1.2 + 0.15)
+        bars = self.make_bars(close)
+        bars["volume"] = 80000 + (np.arange(len(bars)) % 17) * 3500
+        features = build_causal_features(bars)
+        required = [
+            "ema_5", "ema_20", "ema_50", "ema_200", "stoch_k14",
+            "stoch_d3", "cci20", "williams_r14", "adx14", "plus_di14",
+            "minus_di14", "obv", "mfi14", "chaikin_money_flow20",
+            "volume_sma5_ratio", "volume_sma20_ratio", "volume_zscore20",
+            "rolling_vwap_proxy_20", "roc_20", "ppo_hist",
+            "donchian_position20",
+        ]
+        self.assertTrue(set(required).issubset(features.columns))
+        valid_stoch = features["stoch_k14"].dropna()
+        self.assertTrue(((valid_stoch >= 0) & (valid_stoch <= 100)).all())
+        valid_williams = features["williams_r14"].dropna()
+        self.assertTrue(((valid_williams >= -100) & (valid_williams <= 0)).all())
+        valid_mfi = features["mfi14"].dropna()
+        self.assertTrue(((valid_mfi >= 0) & (valid_mfi <= 100)).all())
+        self.assertTrue(np.isfinite(features["ema_200"].dropna()).all())
+
+    def test_expanded_indicators_are_causal(self):
+        original = self.make_bars(100 + np.cumsum(np.sin(np.arange(340) / 9)))
+        original["volume"] = 50000 + (np.arange(len(original)) % 13) * 2000
+        changed = original.copy()
+        changed.loc[280:, ["open", "high", "low", "close", "volume"]] *= 1.7
+        a, b = build_causal_features(original), build_causal_features(changed)
+        cols = [
+            "ema_20", "distance_ema_50", "stoch_k14", "cci20", "williams_r14",
+            "adx14", "obv", "mfi14", "chaikin_money_flow20",
+            "volume_zscore20", "rolling_vwap_proxy_20", "ppo_hist",
+            "donchian_position20",
+        ]
+        pd.testing.assert_frame_equal(a.loc[:279, cols], b.loc[:279, cols])
+
     def test_pivot_confirmation_occurs_after_extreme(self):
         # Long enough warm-up, then a clear rise and reversal.
         close = np.r_[np.linspace(100, 130, 260), np.linspace(130, 105, 35), np.linspace(105, 125, 35)]
