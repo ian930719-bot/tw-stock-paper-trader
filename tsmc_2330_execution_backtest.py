@@ -398,7 +398,7 @@ def run(features_path: str, rules_path: str, limits_path: str, dividends_path: s
             "Slippage is a scenario assumption, not measured historical bid-ask spread.",
             "Broker-specific commission discounts are not applied.",
             "No cash interest or financing is modeled.",
-            "One-share granularity assumes odd-lot execution is available; actual fill prices can differ.",
+            "One-share granularity is a capital-sizing proxy, not proof of actual odd-lot fills; the latest TWT84U snapshot AllowOddLotTrade field reported 不可 and requires reconciliation before live use.",
         ],
     }
     out = Path(output_dir)
