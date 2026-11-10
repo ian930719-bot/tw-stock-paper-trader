@@ -17,6 +17,8 @@ on:
       - "tsmc_2330_oracle_pivot_ceiling.py"
       - "tsmc_2330_selected_threshold_signal_diagnostics.py"
       - "tsmc_2330_selected_threshold_model_comparison.py"
+      - "tsmc_2330_probability_strategy_backtest.py"
+      - "tests/test_tsmc_probability_strategy_backtest.py"
       - "tsmc_2330_interpretable_pivot_rules.py"
       - "tsmc_2330_tree_rule_execution_backtest.py"
       - "tsmc_2330_tree_exit_rule_research.py"
@@ -264,6 +266,14 @@ jobs:
           python tsmc_2330_selected_threshold_model_comparison.py \
             --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
             --oracle artifacts/tsmc_2330_swing/tsmc_2330_oracle_pivot_ceiling.json \
+            --output artifacts/tsmc_2330_swing
+      - name: Backtest probability-ranked high-low pivot strategy
+        run: |
+          python tsmc_2330_probability_strategy_backtest.py \
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --oracle artifacts/tsmc_2330_swing/tsmc_2330_oracle_pivot_ceiling.json \
+            --limits data/tsmc_2330/corporate_actions/price_limits_2330.csv \
+            --dividends data/tsmc_2330/corporate_actions/TaiwanStockDividendResult_2330.csv \
             --output artifacts/tsmc_2330_swing
       - name: Extract interpretable TSMC swing rules
         run: |
