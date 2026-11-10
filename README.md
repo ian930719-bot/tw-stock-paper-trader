@@ -218,3 +218,6 @@ To quantify whether the 200% CAGR target is even feasible under different swing 
 
 
 The full-period exploratory oracle grid found a 1% / 0.75 ATR definition with 445 perfect low-to-next-high swings and a 234.7% net theoretical CAGR at 10 bps per-side slippage. This is not a tradable return: it assumes exact retrospective pivot fills. The oracle script now separately selects a threshold on 2010–2016 and reports 2017–2021 / 2022+ to prevent full-period threshold leakage.
+
+
+The training-only oracle-selected pivot threshold is now passed to `tsmc_2330_selected_threshold_signal_diagnostics.py`. This fits a causal logistic model on 2010–2016, evaluates 2017–2021, then refits through 2021 and evaluates 2022+; each horizon purges both ends of its label window. This avoids training the classifier only on the older 3–8% pivot labels when the oracle grid points to a different swing scale.
