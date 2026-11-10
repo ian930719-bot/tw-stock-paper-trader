@@ -302,6 +302,13 @@ def simulate(frames: dict[str, pd.DataFrame], universe: pd.DataFrame, strategy: 
             elif p["bars_held"] >= MAX_HOLD_BARS:
                 p["pending_exit"], p["pending_reason"] = True, "max_hold_next_open"
             last_close[symbol] = float(row.close)
+            # If a security stops publishing bars (e.g. delisting/data end), do not
+            # carry a stale mark to the end of the portfolio sample.
+            if last_dates.get(symbol) == day:
+                fill = float(row.close) * (1 - SLIPPAGE)
+                trades.append(_close_trade(p, day, fill, "symbol_data_end_close"))
+                cash += p["shares"] * fill * (1 - SELL_FEE_TAX)
+                del positions[symbol]
         for symbol, row in today.items():
             last_close[symbol] = float(row.close)
         market_value = sum(p["shares"] * last_close.get(s, p["entry_price"]) for s, p in positions.items())
@@ -387,6 +394,8 @@ def run(input_dir: str, output_dir: str) -> dict:
             prior = x.loc[pd.to_datetime(x.date).dt.year < year, "equity"]
             start_equity = float(prior.iloc[-1]) if not prior.empty else INITIAL_CAPITAL
             year_rows.append({"strategy": strategy, "year": int(year),
+                              "is_partial_year": int(year) == END_YEAR,
+                              "year_end_date": str(pd.Timestamp(group.date.iloc[-1]).date()),
                               "year_end_equity": float(group.equity.iloc[-1]),
                               "annual_return": float(group.equity.iloc[-1] / start_equity - 1)})
     annual = pd.DataFrame(year_rows)
