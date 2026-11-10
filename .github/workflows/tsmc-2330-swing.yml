@@ -21,6 +21,8 @@ on:
       - "tsmc_2330_tree_atr_risk_research.py"
       - "tsmc_2330_chip_data.py"
       - "tsmc_2330_chip_factor_ablation.py"
+      - "tsmc_2330_institutional_high_exit_backtest.py"
+      - "tests/test_tsmc_2330_institutional_high_exit_backtest.py"
       - "tests/test_tsmc_2330_chip_data.py"
       - "tests/test_tsmc_2330_chip_factor_ablation.py"
       - "tests/test_tsmc_tree_atr_risk_research.py"
@@ -309,6 +311,15 @@ jobs:
             --rules artifacts/tsmc_2330_swing/tsmc_2330_frozen_rule_holdout.json \
             --limits data/tsmc_2330/corporate_actions/price_limits_2330.csv \
             --dividends data/tsmc_2330/corporate_actions/TaiwanStockDividendResult_2330.csv \
+            --output artifacts/tsmc_2330_swing
+      - name: Backtest institutional high-pivot probability exit
+        run: |
+          python tsmc_2330_institutional_high_exit_backtest.py \
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --rules artifacts/tsmc_2330_swing/tsmc_2330_frozen_rule_holdout.json \
+            --limits data/tsmc_2330/corporate_actions/price_limits_2330.csv \
+            --dividends data/tsmc_2330/corporate_actions/TaiwanStockDividendResult_2330.csv \
+            --oracle artifacts/tsmc_2330_swing/tsmc_2330_oracle_pivot_ceiling.json \
             --output artifacts/tsmc_2330_swing
       - name: Test ATR risk exits for frozen tree entry and SMA20 exit
         run: |
