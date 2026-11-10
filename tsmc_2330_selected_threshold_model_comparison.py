@@ -68,6 +68,29 @@ def fit_model(model, name: str, X: pd.DataFrame, y: np.ndarray):
     return model
 
 
+
+# Compatibility evaluator retained for existing unit tests and dependent studies.
+def evaluate(model, X: pd.DataFrame, mask: np.ndarray, y: np.ndarray) -> dict:
+    probability = model.predict_proba(X.loc[mask])[:, 1]
+    truth = np.asarray(y[mask], dtype=np.int8)
+    prevalence = float(truth.mean()) if len(truth) else 0.0
+    out = {
+        "rows": int(mask.sum()),
+        "event_days": int(truth.sum()),
+        "prevalence": prevalence,
+        "roc_auc": score_predictions(truth, probability).get("roc_auc"),
+        "pr_auc": score_predictions(truth, probability).get("pr_auc"),
+    }
+    for fraction in (0.01, 0.05, 0.10, 0.20):
+        count = max(1, int(np.ceil(len(probability) * fraction)))
+        top = np.argsort(probability)[-count:]
+        precision = float(truth[top].mean()) if len(truth) else 0.0
+        suffix = str(int(fraction * 100))
+        out[f"top_{suffix}_precision"] = precision
+        out[f"top_{suffix}_lift"] = precision / prevalence if prevalence else None
+        out[f"top_{suffix}_recall"] = float(truth[top].sum() / truth.sum()) if truth.sum() else None
+    return out
+
 def run(features_path: str, oracle_path: str | None, output_dir: str) -> dict:
     x = pd.read_csv(features_path, parse_dates=["date"]).sort_values("date").reset_index(drop=True)
     events = detect_confirmed_pivots(x, MIN_REVERSAL_PCT, ATR_MULTIPLE)
