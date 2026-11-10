@@ -25,6 +25,7 @@ THRESHOLDS = (
 HORIZONS = (1, 3, 5)
 SPLIT_DATE = "2022-01-01"
 EXCLUDE = {
+    "obv",  # cumulative level is non-stationary; use normalized OBV flow ratios instead
     "symbol", "date", "open", "high", "low", "close", "volume",
     "turnover", "corporate_action_window", "atr14",
 }
