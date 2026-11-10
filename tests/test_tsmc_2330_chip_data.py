@@ -62,6 +62,9 @@ class TSMCChipDataTests(unittest.TestCase):
         self.assertEqual(out["broker_branch_count"], 2)
         self.assertEqual(out["broker_net_lots"], 11)
         self.assertEqual(out["broker_top5_net_lots"], 11)
+        self.assertEqual(out["broker_top5_buy_net_lots"], 18)
+        self.assertEqual(out["broker_top5_sell_net_lots"], -7)
+        self.assertEqual(out["broker_buy_sell_balance_diff_lots"], 11)
         empty = broker_daily_features(pd.DataFrame())
         self.assertTrue(empty.empty)
 
