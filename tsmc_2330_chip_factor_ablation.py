@@ -1,9 +1,9 @@
-"""Compare technical-only vs technical-plus-institutional features for TSMC 2330.
+"""Annual expanding walk-forward ablation of TSMC 2330 technical/chip features.
 
-Uses the frozen training-selected pivot definition and a fixed logistic model.
-2010-2016 is train, 2017-2021 validation, and 2022+ descriptive historical check.
-Broker features are evaluated only when adequate broker history is present in
-both train and validation; otherwise the broker model is explicitly skipped.
+Each fold trains through the prior calendar year and validates on the next year.
+Pivot labels are fixed at 5% reversal / 2 ATR and only confirmed training events
+enter fitting. Broker features are skipped unless the backfill is sufficiently
+complete; unavailable broker data is never treated as zero.
 """
 from __future__ import annotations
 
