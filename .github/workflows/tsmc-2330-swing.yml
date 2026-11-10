@@ -15,6 +15,8 @@ on:
       - "tsmc_2330_oracle_pivot_ceiling.py"
       - "tsmc_2330_selected_threshold_signal_diagnostics.py"
       - "tsmc_2330_selected_threshold_model_comparison.py"
+      - "tsmc_2330_interpretable_pivot_rules.py"
+      - "tests/test_tsmc_interpretable_pivot_rules.py"
       - "tests/test_tsmc_selected_threshold_models.py"
       - "tests/test_tsmc_selected_threshold_diagnostics.py"
       - "tests/test_tsmc_oracle_pivot_ceiling.py"
@@ -204,6 +206,12 @@ jobs:
       - name: Compare predeclared nonlinear models for selected pivot threshold
         run: |
           python tsmc_2330_selected_threshold_model_comparison.py \
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --oracle artifacts/tsmc_2330_swing/tsmc_2330_oracle_pivot_ceiling.json \
+            --output artifacts/tsmc_2330_swing
+      - name: Extract interpretable TSMC swing rules
+        run: |
+          python tsmc_2330_interpretable_pivot_rules.py \
             --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
             --oracle artifacts/tsmc_2330_swing/tsmc_2330_oracle_pivot_ceiling.json \
             --output artifacts/tsmc_2330_swing
