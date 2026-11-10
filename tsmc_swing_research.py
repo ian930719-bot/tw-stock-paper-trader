@@ -139,6 +139,81 @@ def build_causal_features(bars: pd.DataFrame) -> pd.DataFrame:
     z["macd_divergence_strength_low20"] = (z["macd_hist_pct"] - macd_prior_low20).where(low_break)
     z["volume_divergence_strength_high20"] = (z["relative_volume20"] - rv_prior_high20).where(high_break)
     z["volume_divergence_strength_low20"] = (z["relative_volume20"] - rv_prior_low20).where(low_break)
+    # Expanded technical-indicator panel. Every feature at t uses data through t only.
+    for n in (5, 10, 12, 20, 26, 50, 60, 120, 200):
+        ema = c.ewm(span=n, adjust=False, min_periods=n).mean()
+        z[f"ema_{n}"] = ema
+        z[f"distance_ema_{n}"] = c / ema - 1
+    z["ema12_ema26_spread"] = (z["ema_12"] / z["ema_26"]) - 1
+    z["ema20_slope_5"] = z["ema_20"].pct_change(5)
+    z["ema50_slope_10"] = z["ema_50"].pct_change(10)
+    z["ema200_slope_20"] = z["ema_200"].pct_change(20)
+
+    # Stochastic oscillator, CCI and Williams %R.
+    low14 = l.rolling(14, min_periods=14).min()
+    high14 = h.rolling(14, min_periods=14).max()
+    z["stoch_k14"] = 100 * (c - low14) / (high14 - low14).replace(0, np.nan)
+    z["stoch_d3"] = z["stoch_k14"].rolling(3, min_periods=3).mean()
+    typical = (h + l + c) / 3
+    typical_ma20 = typical.rolling(20, min_periods=20).mean()
+    typical_mad20 = typical.rolling(20, min_periods=20).apply(
+        lambda x: np.mean(np.abs(x - np.mean(x))), raw=True
+    )
+    z["cci20"] = (typical - typical_ma20) / (0.015 * typical_mad20.replace(0, np.nan))
+    z["williams_r14"] = -100 * (high14 - c) / (high14 - low14).replace(0, np.nan)
+
+    # Directional movement and ADX (Wilder-style exponential smoothing).
+    up_move, down_move = h.diff(), -l.diff()
+    plus_dm = up_move.where((up_move > down_move) & (up_move > 0), 0.0)
+    minus_dm = down_move.where((down_move > up_move) & (down_move > 0), 0.0)
+    tr_smooth = tr.ewm(alpha=1/14, adjust=False, min_periods=14).mean()
+    plus_di = 100 * plus_dm.ewm(alpha=1/14, adjust=False, min_periods=14).mean() / tr_smooth.replace(0, np.nan)
+    minus_di = 100 * minus_dm.ewm(alpha=1/14, adjust=False, min_periods=14).mean() / tr_smooth.replace(0, np.nan)
+    z["plus_di14"], z["minus_di14"] = plus_di, minus_di
+    z["dx14"] = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+    z["adx14"] = z["dx14"].ewm(alpha=1/14, adjust=False, min_periods=14).mean()
+
+    # Volume / money-flow indicators. Daily OHLCV cannot reconstruct intraday VWAP;
+    # these are explicitly rolling daily-bar VWAP proxies, not exchange intraday VWAP.
+    direction = np.sign(c.diff()).fillna(0)
+    z["obv"] = (direction * v).cumsum()
+    z["obv_change_5"] = z["obv"].diff(5)
+    raw_money_flow = typical * v
+    positive_flow = raw_money_flow.where(typical.diff() > 0, 0.0)
+    negative_flow = raw_money_flow.where(typical.diff() < 0, 0.0)
+    pos14 = positive_flow.rolling(14, min_periods=14).sum()
+    neg14 = negative_flow.rolling(14, min_periods=14).sum()
+    money_ratio = pos14 / neg14.replace(0, np.nan)
+    z["mfi14"] = 100 - 100 / (1 + money_ratio)
+    money_range = ((c - l) - (h - c)) / (h - l).replace(0, np.nan)
+    z["chaikin_ad_line"] = (money_range.fillna(0) * v).cumsum()
+    z["chaikin_money_flow20"] = (
+        (money_range.fillna(0) * v).rolling(20, min_periods=20).sum()
+        / v.rolling(20, min_periods=20).sum().replace(0, np.nan)
+    )
+    z["volume_sma5_ratio"] = v / v.shift(1).rolling(5, min_periods=5).mean().replace(0, np.nan)
+    z["volume_sma20_ratio"] = v / v.shift(1).rolling(20, min_periods=20).mean().replace(0, np.nan)
+    z["volume_zscore20"] = (
+        (v - v.shift(1).rolling(20, min_periods=20).mean())
+        / v.shift(1).rolling(20, min_periods=20).std(ddof=0).replace(0, np.nan)
+    )
+    for n in (5, 10, 20):
+        vol_sum = v.rolling(n, min_periods=n).sum()
+        z[f"rolling_vwap_proxy_{n}"] = (
+            (typical * v).rolling(n, min_periods=n).sum() / vol_sum.replace(0, np.nan)
+        )
+        z[f"distance_vwap_proxy_{n}"] = c / z[f"rolling_vwap_proxy_{n}"] - 1
+
+    # Trend/momentum extensions and price structure.
+    for n in (5, 10, 20, 60):
+        z[f"roc_{n}"] = c.pct_change(n) * 100
+    z["ppo"] = 100 * (ema12 - ema26) / ema26.replace(0, np.nan)
+    z["ppo_signal"] = z["ppo"].ewm(span=9, adjust=False, min_periods=9).mean()
+    z["ppo_hist"] = z["ppo"] - z["ppo_signal"]
+    z["donchian_position20"] = (c - prior_low20) / (prior_high20 - prior_low20).replace(0, np.nan)
+    z["distance_donchian_high20"] = c / prior_high20 - 1
+    z["distance_donchian_low20"] = c / prior_low20 - 1
+
     # Event windows supplied by the collector are excluded from event diagnostics.
     if "corporate_action_window" in z:
         z["corporate_action_window"] = z["corporate_action_window"].fillna(True).astype(bool)
@@ -237,7 +312,7 @@ def build_lead_lag(events: pd.DataFrame, features: pd.DataFrame) -> pd.DataFrame
             "volatility_", "overnight_gap", "intraday_range", "close_location",
             "upper_wick", "lower_wick", "distance_prior", "bearish_", "bullish_",
             "rsi_divergence_", "macd_divergence_", "volume_divergence_", "price_breakout", "price_breakdown",
-            "foreign_", "trust_", "dealer_", "institutional_", "broker_",
+            "foreign_", "trust_", "dealer_", "institutional_", "broker_", "ema_", "distance_ema_", "stoch_", "cci", "williams_", "plus_di", "minus_di", "dx", "adx", "obv", "mfi", "chaikin_", "volume_sma", "volume_zscore", "rolling_vwap", "distance_vwap", "roc_", "ppo", "donchian_", "distance_donchian_",
         ))
     ]
     for event_id, event in events.reset_index(drop=True).iterrows():
