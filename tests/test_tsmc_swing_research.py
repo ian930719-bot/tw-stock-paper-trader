@@ -24,7 +24,10 @@ class TSMCSwingResearchTests(unittest.TestCase):
         changed = original.copy()
         changed.loc[250:, ["open", "high", "low", "close", "volume"]] *= 1.5
         a, b = build_causal_features(original), build_causal_features(changed)
-        cols = ["return_20", "distance_sma_50", "atr_pct14", "rsi14", "relative_volume20"]
+        cols = ["return_20", "distance_sma_50", "atr_pct14", "rsi14", "relative_volume20",
+                "bearish_rsi_divergence20", "bullish_rsi_divergence20",
+                "bearish_macd_divergence20", "bullish_macd_divergence20",
+                "rsi_divergence_strength_high20", "macd_divergence_strength_low20"]
         pd.testing.assert_frame_equal(a.loc[:249, cols], b.loc[:249, cols])
 
     def test_pivot_confirmation_occurs_after_extreme(self):
