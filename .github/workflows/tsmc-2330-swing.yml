@@ -304,7 +304,7 @@ jobs:
             --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
             --events artifacts/tsmc_2330_swing/tsmc_2330_pivot_events.csv \
             --output artifacts/tsmc_2330_swing
-      - name: Select frozen rules using 2010-2021 only, then report 2022+ holdout
+      - name: Evaluate all predeclared rules with annual expanding walk-forward
         run: |
           python tsmc_2330_frozen_rule_research.py \
             --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
