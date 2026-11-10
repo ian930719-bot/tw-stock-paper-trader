@@ -191,3 +191,6 @@ The TSMC-only workflow also runs `tsmc_2330_pattern_combinations.py`: it evaluat
 
 
 A nested chronological rule-development stage is available in `tsmc_2330_frozen_rule_research.py`. It estimates feature cutoffs on 2010–2016, selects one predeclared conjunction per direction using 2017–2021 mean F1 across 1/3/5-session pivot targets, purges five sessions at split boundaries, and reports the frozen rules on 2022+ data without using that period for selection. Since 2022+ has already been examined in earlier diagnostics, this remains exploratory rather than a pristine blind test. No trade simulation or CAGR is included.
+
+
+Execution testing is implemented in `tsmc_2330_execution_backtest.py`. It uses the frozen high/low rules, next-session raw open execution, FinMind `TaiwanStockPriceLimit` exchange limit fields, cash-only dividend entitlement, standard 0.1425% commission with a NT$20 minimum, 0.3% sell-side transaction tax, and 5/10/20/30 bps adverse slippage scenarios. It compares the rule-driven long-only strategy with a cost-matched TSMC buy-and-hold benchmark for the 2017–2021 rule-selection period and 2022+ historical holdout. This is a daily-OHLC execution approximation, not tick-level fill proof; 2022+ has already been inspected in prior diagnostics and is not a pristine blind holdout.
