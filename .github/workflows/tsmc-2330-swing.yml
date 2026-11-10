@@ -80,8 +80,72 @@ jobs:
           )
           print(json.dumps(manifest, ensure_ascii=False, indent=2))
           PY
+      - name: Collect and normalize TSMC corporate actions
+        run: |
+          mkdir -p data/tsmc_2330/corporate_actions
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import pandas as pd
+          from historical_data_collector import _api_get
+          from corporate_action_adjustments import normalize_corporate_action_events
+
+          start_date = "2010-01-04"
+          end_date = pd.Timestamp.now(tz="Asia/Taipei").date().isoformat()
+          out = Path("data/tsmc_2330/corporate_actions")
+          specs = {
+              "TaiwanStockSplitPrice": ("before_price", "after_price"),
+              "TaiwanStockCapitalReductionReferencePrice": ("ClosingPriceonTheLastTradingDay", "PostReductionReferencePrice"),
+              "TaiwanStockParValueChange": ("before_close", "after_ref_close"),
+          }
+          status = {}
+          globals_by_name = {}
+          for dataset in specs:
+              rows = _api_get({"dataset": dataset, "start_date": start_date, "end_date": end_date},
+                              token=__import__("os").getenv("FINMIND_TOKEN", ""), timeout=45, retries=4)
+              frame = pd.DataFrame(rows)
+              frame.to_csv(out / f"{dataset}.csv", index=False)
+              globals_by_name[dataset] = frame
+              status[dataset] = {"status": "downloaded" if len(frame) else "empty", "rows": len(frame)}
+
+          dividend_rows = _api_get({
+              "dataset": "TaiwanStockDividendResult", "data_id": "2330",
+              "start_date": start_date, "end_date": end_date,
+          }, token=__import__("os").getenv("FINMIND_TOKEN", ""), timeout=45, retries=4)
+          dividends = pd.DataFrame(dividend_rows)
+          if not dividends.empty and "stock_id" not in dividends:
+              dividends["stock_id"] = "2330"
+          dividends.to_csv(out / "TaiwanStockDividendResult_2330.csv", index=False)
+          status["TaiwanStockDividendResult_2330"] = {
+              "status": "downloaded" if len(dividends) else "empty", "rows": len(dividends)
+          }
+
+          events = normalize_corporate_action_events(
+              dividend_results=dividends,
+              split_prices=globals_by_name["TaiwanStockSplitPrice"],
+              capital_reductions=globals_by_name["TaiwanStockCapitalReductionReferencePrice"],
+              par_value_changes=globals_by_name["TaiwanStockParValueChange"],
+          )
+          events = events.loc[events["symbol"].astype(str) == "2330"].copy() if not events.empty else events
+          events.to_csv(out / "events_2330.csv", index=False)
+          conflicts = int(events["conflict"].fillna(False).sum()) if not events.empty else 0
+          manifest = {
+              "symbol": "2330", "source": "FinMind API v4 corporate-action datasets",
+              "start_date": start_date, "end_date": end_date,
+              "datasets": status, "all_datasets_retrieved": True,
+              "event_rows": int(len(events)), "conflicts": conflicts,
+              "complete_for_requested_symbol": conflicts == 0,
+              "note": "Empty endpoint response is recorded as empty, not treated as a failed request. Conflicting same-day ratios fail the research gate."
+          }
+          (out / "manifest_2330.json").write_text(
+              json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+          )
+          print(json.dumps(manifest, ensure_ascii=False, indent=2))
+          if conflicts:
+              raise RuntimeError(f"Conflicting corporate-action ratios for 2330: {conflicts}")
+          PY
       - name: Run causal swing pivot and lead-lag research
-        run: python tsmc_swing_research.py --input data/tsmc_2330 --output artifacts/tsmc_2330_swing
+        run: python tsmc_swing_research.py --input data/tsmc_2330 --output artifacts/tsmc_2330_swing --corporate-actions data/tsmc_2330/corporate_actions/events_2330.csv
       - name: Run purged chronological OOS signal diagnostics
         run: |
           python tsmc_2330_oos_signal_diagnostics.py \
@@ -97,4 +161,5 @@ jobs:
           path: |
             data/tsmc_2330/bars/2330.csv
             data/tsmc_2330/download_manifest.json
+            data/tsmc_2330/corporate_actions/
             artifacts/tsmc_2330_swing/
