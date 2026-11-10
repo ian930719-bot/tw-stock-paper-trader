@@ -32,9 +32,6 @@ CHIP_PREFIXES = (
     "institutional_", "broker_",
 )
 HORIZONS = (1, 3, 5)
-TRAIN_START, TRAIN_END = "2010-01-01", "2016-12-31"
-VALIDATION_START, VALIDATION_END = "2017-01-01", "2021-12-31"
-TEST_START = "2022-01-01"
 
 
 def feature_groups(features: pd.DataFrame) -> dict[str, list[str]]:
