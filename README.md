@@ -203,3 +203,6 @@ A further validation-only risk study, `tsmc_2330_trend_atr_risk_research.py`, ta
 
 
 The next turning-point research stage adds causal 20-session RSI, MACD-histogram and relative-volume divergence features to `tsmc_swing_research.py`. `tsmc_2330_divergence_research.py` compares predeclared bearish/bullish divergence patterns, including conjunctions with the frozen setup rules. Rule selection uses 2017–2021 only; 2022+ is descriptive and never used for selection.
+
+
+The divergence stage's validation-selected high rule is `base_high_and_bearish_macd`; its low-volume divergence rule did not generalize. A fixed hybrid backtest, `tsmc_2330_hybrid_divergence_backtest.py`, therefore combines the already validation-selected prior-range-break low entry with the validation-selected MACD-divergence high exit. Both are frozen before the 2022+ historical check; no test-period tuning is performed.
