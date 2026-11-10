@@ -79,6 +79,10 @@ jobs:
           key: tsmc-2330-chip-${{ github.run_id }}
           restore-keys: |
             tsmc-2330-chip-
+      - name: Compile probability strategy modules
+        run: |
+          python -m py_compile tsmc_2330_probability_strategy_backtest.py
+          python -m py_compile tests/test_tsmc_probability_strategy_backtest.py
       - name: Run TSMC swing unit tests
         run: python -m unittest discover -s tests -p "test_tsmc_*.py" -v
       - name: Download raw TSMC 2330 history
