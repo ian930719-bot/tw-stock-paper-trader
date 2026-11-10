@@ -19,6 +19,8 @@ on:
       - "tsmc_2330_tree_rule_execution_backtest.py"
       - "tsmc_2330_tree_exit_rule_research.py"
       - "tsmc_2330_tree_atr_risk_research.py"
+      - "tsmc_2330_chip_data.py"
+      - "tests/test_tsmc_2330_chip_data.py"
       - "tests/test_tsmc_tree_atr_risk_research.py"
       - "tests/test_tsmc_tree_exit_rule_research.py"
       - "tests/test_tsmc_tree_rule_execution_backtest.py"
@@ -190,6 +192,14 @@ jobs:
           if conflicts:
               raise RuntimeError(f"Conflicting corporate-action ratios for 2330: {conflicts}")
           PY
+      - name: Collect TSMC institutional and broker-branch flow data
+        run: |
+          python tsmc_2330_chip_data.py \
+            --symbol 2330 \
+            --start-date 2010-01-04 \
+            --end-date "$(date +%F)" \
+            --output data/tsmc_2330/chip \
+            --broker-days 20
       - name: Build historical price limits from TWSE official rules and references
         run: |
           python tsmc_2330_price_limits.py \
@@ -197,7 +207,7 @@ jobs:
             --dividends data/tsmc_2330/corporate_actions/TaiwanStockDividendResult_2330.csv \
             --output data/tsmc_2330/corporate_actions/price_limits_2330.csv
       - name: Run causal swing pivot and lead-lag research
-        run: python tsmc_swing_research.py --input data/tsmc_2330 --output artifacts/tsmc_2330_swing --corporate-actions data/tsmc_2330/corporate_actions/events_2330.csv
+        run: python tsmc_swing_research.py --input data/tsmc_2330 --output artifacts/tsmc_2330_swing --corporate-actions data/tsmc_2330/corporate_actions/events_2330.csv --chip-data data/tsmc_2330/chip/2330_chip_features.csv
       - name: Calculate perfect-foresight pivot-to-pivot upper bound (not tradable)
         run: |
           python tsmc_2330_oracle_pivot_ceiling.py \
@@ -320,4 +330,5 @@ jobs:
             data/tsmc_2330/bars/2330.csv
             data/tsmc_2330/download_manifest.json
             data/tsmc_2330/corporate_actions/
+            data/tsmc_2330/chip/
             artifacts/tsmc_2330_swing/
