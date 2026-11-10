@@ -22,7 +22,7 @@ class SelectedThresholdModelTests(unittest.TestCase):
         y = np.array([1, 1, 0, 0, 0, 0, 0, 0, 0, 0])
         result = evaluate(FakeModel(), frame, mask, y)
         self.assertAlmostEqual(result["top_10_precision"], 1.0)
-        self.assertAlmostEqual(result["top_10_recall"], 1.0)
+        self.assertAlmostEqual(result["top_10_recall"], 0.5)
         self.assertAlmostEqual(result["prevalence"], 0.2)
         self.assertIn("top_1_precision", result)
         self.assertIn("top_5_precision", result)
