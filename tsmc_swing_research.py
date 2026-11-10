@@ -213,6 +213,23 @@ def build_causal_features(bars: pd.DataFrame) -> pd.DataFrame:
     z["donchian_position20"] = (c - prior_low20) / (prior_high20 - prior_low20).replace(0, np.nan)
     z["distance_donchian_high20"] = c / prior_high20 - 1
     z["distance_donchian_low20"] = c / prior_low20 - 1
+    # Normalize signed volume flow so it is comparable across price/volume regimes.
+    for n in (5, 20):
+        signed_flow = (direction * v).rolling(n, min_periods=n).sum()
+        volume_total = v.rolling(n, min_periods=n).sum()
+        z[f"obv_flow_ratio_{n}"] = signed_flow / volume_total.replace(0, np.nan)
+
+    # Corporate-action windows invalidate share-volume-derived comparisons.
+    # The cumulative OBV level is retained for audit but is not a stationary predictor.
+    volume_derived = [
+        "obv_change_5", "obv_flow_ratio_5", "obv_flow_ratio_20", "mfi14",
+        "chaikin_ad_line", "chaikin_money_flow20", "volume_sma5_ratio",
+        "volume_sma20_ratio", "volume_zscore20", "rolling_vwap_proxy_5",
+        "rolling_vwap_proxy_10", "rolling_vwap_proxy_20",
+        "distance_vwap_proxy_5", "distance_vwap_proxy_10", "distance_vwap_proxy_20",
+    ]
+    action_mask = z.get("corporate_action_window", pd.Series(False, index=z.index)).fillna(True).astype(bool)
+    z.loc[action_mask, volume_derived] = np.nan
 
     # Event windows supplied by the collector are excluded from event diagnostics.
     if "corporate_action_window" in z:
