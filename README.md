@@ -200,3 +200,6 @@ The baseline execution backtest showed that the first frozen setup-only rules ma
 
 
 A further validation-only risk study, `tsmc_2330_trend_atr_risk_research.py`, takes the selected prior-range reversal confirmation as its fixed base and compares four predeclared entry regimes (none, above SMA200, positive SMA50 slope, full trend stack) against three ATR trailing-stop settings (none, 2.5 ATR, 4 ATR). The best combination is selected on 2017–2021 only; 2022+ is reported with 5/10/20/30 bps slippage but is not used for selection.
+
+
+The next turning-point research stage adds causal 20-session RSI, MACD-histogram and relative-volume divergence features to `tsmc_swing_research.py`. `tsmc_2330_divergence_research.py` compares predeclared bearish/bullish divergence patterns, including conjunctions with the frozen setup rules. Rule selection uses 2017–2021 only; 2022+ is descriptive and never used for selection.
