@@ -221,3 +221,6 @@ The full-period exploratory oracle grid found a 1% / 0.75 ATR definition with 44
 
 
 The training-only oracle-selected pivot threshold is now passed to `tsmc_2330_selected_threshold_signal_diagnostics.py`. This fits a causal logistic model on 2010–2016, evaluates 2017–2021, then refits through 2021 and evaluates 2022+; each horizon purges both ends of its label window. This avoids training the classifier only on the older 3–8% pivot labels when the oracle grid points to a different swing scale.
+
+
+The 1% / 0.75 ATR pivot definition was also selected using only 2010–2016 oracle results and retained high theoretical oracle CAGR in 2017–2021 and 2022+: 247.4%, 225.2%, and 237.5%, respectively, at 10 bps per-side slippage. These are exact-pivot hindsight ceilings only; the new causal classifier is the next test of whether any part of that theoretical edge is identifiable in real time.
