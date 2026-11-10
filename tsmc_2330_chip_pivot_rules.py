@@ -48,11 +48,11 @@ def feature_groups(frame: pd.DataFrame) -> dict[str, list[str]]:
     }
 
 
-def make_tree():
+def make_tree(depth: int = DEPTH):
     return make_pipeline(
         SimpleImputer(strategy="median"),
         DecisionTreeClassifier(
-            max_depth=DEPTH, min_samples_leaf=30,
+            max_depth=int(depth), min_samples_leaf=30,
             class_weight="balanced", random_state=0,
         ),
     )
