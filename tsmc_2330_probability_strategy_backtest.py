@@ -64,10 +64,22 @@ def rolling_probability_threshold(
 
 def rolling_probability_signal(
     probability: np.ndarray, quantile: float = SIGNAL_QUANTILE,
+    window: int = ROLLING_WINDOW, min_periods: int = ROLLING_MIN_PERIODS,
 ) -> tuple[np.ndarray, np.ndarray]:
     p = np.asarray(probability, dtype=float)
-    threshold = rolling_probability_threshold(p, quantile)
+    threshold = rolling_probability_threshold(p, quantile, window, min_periods)
     return (np.isfinite(p) & np.isfinite(threshold) & (p >= threshold)), threshold
+
+
+def probability_signal(probability: np.ndarray, threshold: float) -> np.ndarray:
+    """Compatibility helper for evaluating a fixed, externally predeclared cutoff."""
+    p = np.asarray(probability, dtype=float)
+    return np.isfinite(p) & (p >= float(threshold))
+
+
+def score(result: dict) -> float:
+    """Legacy score helper retained for downstream imports and tests."""
+    return float(result["cagr"]) - 0.5 * abs(float(result["max_drawdown"]))
 
 
 def compact(result: dict) -> dict:
