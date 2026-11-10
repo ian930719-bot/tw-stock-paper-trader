@@ -7,6 +7,8 @@ on:
       - research/200cagr-blind-validation
     paths:
       - "tsmc_swing_research.py"
+      - "tsmc_2330_indicator_family_ablation.py"
+      - "tests/test_tsmc_indicator_family_ablation.py"
       - "tsmc_2330_oos_signal_diagnostics.py"
       - "tsmc_2330_pattern_combinations.py"
       - "tsmc_2330_divergence_research.py"
@@ -238,6 +240,12 @@ jobs:
             --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
             --oracle artifacts/tsmc_2330_swing/tsmc_2330_oracle_pivot_ceiling.json \
             --chip-manifest data/tsmc_2330/chip/2330_chip_manifest.json \
+            --output artifacts/tsmc_2330_swing
+      - name: Ablate incremental technical indicator families
+        run: |
+          python tsmc_2330_indicator_family_ablation.py \
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --oracle artifacts/tsmc_2330_swing/tsmc_2330_oracle_pivot_ceiling.json \
             --output artifacts/tsmc_2330_swing
       - name: Extract interpretable high-low pivot rules with institutional flow
         run: |
