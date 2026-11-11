@@ -9,6 +9,7 @@ on:
       - "tsmc_2330_500_pivot_study_rebuilt.py"
       - "tsmc_2330_all_feature_event_audit.py"
       - "tsmc_2330_small_large_wave_walkforward.py"
+      - "tests/test_tsmc_2330_small_large_wave_walkforward.py"
       - "tests/test_tsmc_2330_daily_walkforward.py"
       - "tests/test_tsmc_2330_trader_strategy_event_audit.py"
       - "tests/test_tsmc_2330_all_in_all_out_trader_rules.py"
