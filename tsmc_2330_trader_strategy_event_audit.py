@@ -38,21 +38,30 @@ def paired_metrics(frame, fn, rng, n_boot):
     n = len(frame)
     if not n:
         raise ValueError("empty event/control slice")
+    diff_rows = event.astype(float) - control.astype(float)
+    labels = frame["control_date"].astype(str).to_numpy() if "control_date" in frame else np.arange(n).astype(str)
+    clusters = np.unique(labels)
+    groups = [np.flatnonzero(labels == cluster) for cluster in clusters]
     draws = np.empty(n_boot)
     for b in range(n_boot):
-        ix = rng.integers(0, n, size=n)
-        draws[b] = event[ix].mean() - control[ix].mean()
-    e_only = int((event & ~control).sum())
-    c_only = int((~event & control).sum())
-    p = float(binomtest(e_only, e_only + c_only, 0.5).pvalue) if e_only + c_only else 1.0
+        sampled = rng.integers(0, len(groups), size=len(groups))
+        idx = np.concatenate([groups[j] for j in sampled])
+        draws[b] = diff_rows[idx].mean()
+    cluster_means = np.array([diff_rows[idx].mean() for idx in groups])
+    positive = int((cluster_means > 0).sum())
+    negative = int((cluster_means < 0).sum())
+    p = float(binomtest(positive, positive + negative, 0.5).pvalue) if positive + negative else 1.0
     return {
-        "n_events": n, "event_hit_rate": float(event.mean()),
+        "n_events": n, "n_control_date_clusters": int(len(clusters)),
+        "event_hit_rate": float(event.mean()),
         "matched_control_hit_rate": float(control.mean()),
-        "paired_risk_difference": float(event.mean() - control.mean()),
+        "paired_risk_difference": float(diff_rows.mean()),
         "bootstrap_ci_low": float(np.quantile(draws, .025)),
         "bootstrap_ci_high": float(np.quantile(draws, .975)),
-        "event_only_pairs": e_only, "control_only_pairs": c_only,
-        "mcnemar_exact_p_unadjusted": p,
+        "positive_control_date_clusters": positive,
+        "negative_control_date_clusters": negative,
+        "cluster_positive_share": float(positive / (positive + negative)) if positive + negative else np.nan,
+        "cluster_sign_test_p_unadjusted": p,
     }
 
 def run(input_csv, output_dir, n_boot=BOOTSTRAPS):
@@ -69,6 +78,13 @@ def run(input_csv, output_dir, n_boot=BOOTSTRAPS):
     for name, (kind, fn) in rules().items():
         for lead in LEADS:
             part = d.loc[(d.pivot_type.str.upper() == kind) & (d.lead_sessions == lead)].copy()
+            if "foreign_and_trust" in name:
+                start = pd.Timestamp("2012-05-02")
+                required = ["foreign_net_5d_lots", "trust_net_5d_lots", "control_foreign_net_5d_lots", "control_trust_net_5d_lots"]
+                complete = part[required].notna().all(axis=1)
+                complete &= (part.feature_date >= start) & (part.control_date >= start)
+                complete &= part.pivot_date >= start
+                part = part.loc[complete].copy()
             m = paired_metrics(part, fn, rng, n_boot)
             rows.append({"rule": name, "pivot_type": kind, "lead_sessions": lead, **m})
             cf = part.copy()
@@ -87,7 +103,7 @@ def run(input_csv, output_dir, n_boot=BOOTSTRAPS):
                     "paired_risk_difference": float(ev[mask].mean() - ct[mask].mean()),
                 })
     summary = pd.DataFrame(rows)
-    p = summary.mcnemar_exact_p_unadjusted.to_numpy(float)
+    p = summary.cluster_sign_test_p_unadjusted.to_numpy(float)
     order = np.argsort(p)
     ranked = p[order] * len(p) / (np.arange(len(p)) + 1)
     ranked = np.minimum.accumulate(ranked[::-1])[::-1]
