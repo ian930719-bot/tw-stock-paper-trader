@@ -21,7 +21,7 @@ jobs:
     timeout-minutes: 30
     env:
       TZ: Asia/Taipei
-      VALIDATION_PROTOCOL_VERSION: paired-year-70-30-v5
+      VALIDATION_PROTOCOL_VERSION: paired-year-70-30-v6
       OPENBLAS_NUM_THREADS: "1"
       OMP_NUM_THREADS: "1"
       MKL_NUM_THREADS: "1"
@@ -51,7 +51,8 @@ jobs:
       - name: Compile research code and run protocol tests
         run: |
           python -m py_compile tsmc_swing_research.py corporate_action_adjustments.py tsmc_2330_paired_annual_blind_validation.py tsmc_2330_false_signal_diagnostics.py tests/test_tsmc_2330_paired_annual_blind_validation.py tests/test_tsmc_2330_false_signal_diagnostics.py
-          python -m unittest discover -s tests -p "test_tsmc_2330_*.py" -v
+          python -m unittest discover -s tests -p "test_tsmc_2330_paired_annual_blind_validation.py" -v
+          python -m unittest discover -s tests -p "test_tsmc_2330_false_signal_diagnostics.py" -v
       - name: Build causal TSMC features and retrospective pivot outcomes
         run: |
           python tsmc_swing_research.py \
