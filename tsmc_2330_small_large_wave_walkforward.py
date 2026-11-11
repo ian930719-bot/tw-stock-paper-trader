@@ -601,7 +601,8 @@ def run(features_path,events_path,output_dir):
        "Pivot amplitude is retrospective and available only after reversal confirmation.",
        "No cash dividends, corporate-action cashflows, official exchange price-limit/fill simulation, liquidity impact or odd-lot microstructure.",
        "2026 is partial. No independent forward validation or 200% CAGR claim."],
-      "stop_grid":{"multiples":[1.5,2.0,2.5,3.0],"reentry_wait_sessions":[1,3,5,10],"atr_period":14,"trailing_rule":"highest completed close since entry minus k times current completed-session ATR; stop ratchets upward only; execution begins next session","reentry_rule":"prior LOW alert is invalidated on stop; a new LOW signal after cooldown is required","outputs":["tsmc_2330_atr_stop_reentry_summary.csv","tsmc_2330_atr_stop_reentry_trades.csv","tsmc_2330_atr_stop_reentry_equity.csv","tsmc_2330_post_stop_behaviour.csv"]},\n      "fold_cutoffs":cutoff_rows}
+      "stop_grid":{"multiples":[1.5,2.0,2.5,3.0],"reentry_wait_sessions":[1,3,5,10],"atr_period":14,"trailing_rule":"highest completed close since entry minus k times current completed-session ATR; stop ratchets upward only; execution begins next session","reentry_rule":"prior LOW alert is invalidated on stop; a new LOW signal after cooldown is required","outputs":["tsmc_2330_atr_stop_reentry_summary.csv","tsmc_2330_atr_stop_reentry_trades.csv","tsmc_2330_atr_stop_reentry_equity.csv","tsmc_2330_post_stop_behaviour.csv"]},
+      "fold_cutoffs":cutoff_rows}
     (out/"tsmc_2330_small_large_wave_summary.json").write_text(json.dumps(meta,ensure_ascii=False,indent=2),encoding="utf-8")
     return fold_df,summaries,pd.DataFrame(bt_rows),meta
 
