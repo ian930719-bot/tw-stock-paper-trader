@@ -22,8 +22,8 @@ def analyze(input_csv, output_dir, bootstrap=2000, seed=23302027):
     d=pd.read_csv(input_csv,parse_dates=["pivot_date"])
     if not {"pivot_type","lead_sessions","pivot_date","event_no"}.issubset(d):
         raise ValueError("Input is not a 500-pivot snapshot file")
-    features=[c for c in d.columns if c not in META and not c.startswith("control_")
-              and "control_"+c in d.columns]
+    features=[c for c in d.columns if c not in META and c != "trend_stack"
+              and not c.startswith("control_") and "control_"+c in d.columns]
     if not features: raise ValueError("No paired event/control feature columns found")
     d["pivot_year"]=d.pivot_date.dt.year
     rng=np.random.default_rng(seed)
@@ -34,6 +34,14 @@ def analyze(input_csv, output_dir, bootstrap=2000, seed=23302027):
             paired[f]=pd.to_numeric(paired[f],errors="coerce")
             paired["control_"+f]=pd.to_numeric(paired["control_"+f],errors="coerce")
             paired=paired.replace([np.inf,-np.inf],np.nan).dropna()
+            # Institutional flow history is unavailable before 2012-05-02 in this dataset.
+            # Exclude event, feature, and control observations before that date.
+            if f.startswith(("foreign_", "trust_")):
+                event_dates=pd.to_datetime(g.pivot_date)
+                feature_dates=pd.to_datetime(g.feature_date)
+                control_dates=pd.to_datetime(g.control_date)
+                eligible=(event_dates >= pd.Timestamp("2012-05-02")) & (feature_dates >= pd.Timestamp("2012-05-02")) & (control_dates >= pd.Timestamp("2012-05-02"))
+                paired=paired.loc[eligible.loc[paired.index]]
             paired["diff"]=paired[f]-paired["control_"+f]
             annual=paired.groupby("pivot_year")["diff"].agg(["mean","count"])
             annual=annual[annual["count"]>=5]
@@ -73,9 +81,9 @@ def analyze(input_csv, output_dir, bootstrap=2000, seed=23302027):
     result={"input_rows":int(len(d)),"features_audited":int(len(features)),
       "pivot_types":sorted(d.pivot_type.unique().tolist()),
       "lead_sessions":sorted(map(int,d.lead_sessions.unique())),
-      "bootstrap_replicates":int(bootstrap),"minimum_events_per_year":5,
+      "bootstrap_replicates":int(bootstrap),"minimum_events_per_year":5,"institutional_feature_start_date":"2012-05-02","matching_feature_excluded":["trend_stack"],
       "candidate_rule":"At least four lead horizons, same dominant direction in >=75% of horizons, and year-cluster bootstrap CI excludes zero in >=2 horizons.",
-      "warning":"Exploratory feature stability screen only. Year-cluster bootstrap uses annual mean paired differences; overlapping events, repeated market regimes, feature multiplicity, and retrospective pivot labels remain. Candidate rules require untouched chronological validation and executable cost-aware backtests.",
+      "warning":"Exploratory feature stability screen only. Trend_stack is excluded because it was used for control matching. Foreign/trust features are restricted to event, feature, and control dates on/after 2012-05-02 because earlier institutional coverage is unavailable. Year-cluster bootstrap uses annual mean paired differences; overlapping events, repeated market regimes, feature multiplicity, and retrospective pivot labels remain. Candidate rules require untouched chronological validation and executable cost-aware backtests.",
       "stable_candidates":{k:int(v) for k,v in ranking[ranking.stable_candidate].groupby("pivot_type").size().items()},
       "outputs":["tsmc_2330_500_year_cluster_feature_audit.csv","tsmc_2330_500_stable_feature_candidates.csv"]}
     (out/"tsmc_2330_500_year_cluster_audit_summary.json").write_text(
