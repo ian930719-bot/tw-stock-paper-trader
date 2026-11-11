@@ -9,6 +9,8 @@ on:
       - "tsmc_2330_500_pivot_study_rebuilt.py"
       - "tsmc_2330_all_feature_event_audit.py"
       - "tsmc_2330_small_large_wave_walkforward.py"
+      - "tsmc_2330_rule_robustness.py"
+      - "tests/test_tsmc_2330_rule_robustness.py"
       - "tests/test_tsmc_2330_small_large_wave_walkforward.py"
       - "tests/test_tsmc_2330_daily_walkforward.py"
       - "tests/test_tsmc_2330_trader_strategy_event_audit.py"
@@ -60,13 +62,14 @@ jobs:
           TSMC_EVENTS: input/artifacts/tsmc_2330_swing/tsmc_2330_pivot_events.csv
           TSMC_500_SNAPSHOTS: artifacts/500_pivot_rebuilt/tsmc_2330_500_pivot_snapshots.csv
         run: |
-          python -m py_compile tsmc_2330_daily_walkforward.py tsmc_2330_trader_strategy_event_audit.py tsmc_2330_all_in_all_out_trader_rules.py tsmc_2330_500_pivot_study_rebuilt.py tsmc_2330_all_feature_event_audit.py tsmc_2330_small_large_wave_walkforward.py tests/test_tsmc_2330_daily_walkforward.py tests/test_tsmc_2330_trader_strategy_event_audit.py tests/test_tsmc_2330_all_in_all_out_trader_rules.py tests/test_tsmc_2330_500_pivot_study_rebuilt.py tests/test_tsmc_2330_all_feature_event_audit.py tests/test_tsmc_2330_small_large_wave_walkforward.py
+          python -m py_compile tsmc_2330_daily_walkforward.py tsmc_2330_trader_strategy_event_audit.py tsmc_2330_all_in_all_out_trader_rules.py tsmc_2330_500_pivot_study_rebuilt.py tsmc_2330_all_feature_event_audit.py tsmc_2330_small_large_wave_walkforward.py tsmc_2330_rule_robustness.py tests/test_tsmc_2330_rule_robustness.py tests/test_tsmc_2330_daily_walkforward.py tests/test_tsmc_2330_trader_strategy_event_audit.py tests/test_tsmc_2330_all_in_all_out_trader_rules.py tests/test_tsmc_2330_500_pivot_study_rebuilt.py tests/test_tsmc_2330_all_feature_event_audit.py tests/test_tsmc_2330_small_large_wave_walkforward.py
           PYTHONPATH=. python -m unittest discover -s tests -p "test_tsmc_2330_daily_walkforward.py" -v
           PYTHONPATH=. python -m unittest discover -s tests -p "test_tsmc_2330_trader_strategy_event_audit.py" -v
           PYTHONPATH=. python -m unittest discover -s tests -p "test_tsmc_2330_all_in_all_out_trader_rules.py" -v
           PYTHONPATH=. python -m unittest discover -s tests -p "test_tsmc_2330_500_pivot_study_rebuilt.py" -v
           PYTHONPATH=. python -m unittest discover -s tests -p "test_tsmc_2330_all_feature_event_audit.py" -v
           PYTHONPATH=. python -m unittest discover -s tests -p "test_tsmc_2330_small_large_wave_walkforward.py" -v
+          PYTHONPATH=. python -m unittest discover -s tests -p "test_tsmc_2330_rule_robustness.py" -v
       - name: Run corrected Taiwan trader-rule event/control audit
         run: |
           python tsmc_2330_trader_strategy_event_audit.py \
@@ -95,6 +98,11 @@ jobs:
             --features input/artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
             --events input/artifacts/tsmc_2330_swing/tsmc_2330_pivot_events.csv \
             --output artifacts/daily_walkforward
+      - name: Run frozen candidate rule robustness and execution stress audit
+        run: |
+          python tsmc_2330_rule_robustness.py \\
+            --features input/artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \\
+            --output artifacts/rule_robustness
       - uses: actions/upload-artifact@v4
         with:
           name: tsmc-2330-daily-walkforward-${{ github.run_number }}
