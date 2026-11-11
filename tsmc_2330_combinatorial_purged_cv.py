@@ -77,8 +77,20 @@ def build_feature_sets(frame):
         chip_available=np.zeros(len(frame),dtype=bool)
     min_chip_rows=min(300,max(30,int(len(frame)*0.10)))
     feature_sets={"technical_only":list(FEATURES)}
-    if chip_cols and int(chip_available.sum())>=min_chip_rows:
-        feature_sets["technical_plus_institutional"]=list(FEATURES)+chip_cols
+    foreign_cols=[c for c in chip_cols if c.startswith("foreign_") and not c.startswith("foreign_dealer_")]
+    trust_cols=[c for c in chip_cols if c.startswith("trust_")]
+    dealer_cols=[c for c in chip_cols if c.startswith("dealer_")]
+    groups={
+        "technical_plus_foreign_only":foreign_cols,
+        "technical_plus_trust_only":trust_cols,
+        "technical_plus_dealer_only":dealer_cols,
+        "technical_plus_three_major":foreign_cols+trust_cols+dealer_cols,
+        "technical_plus_all_institutional":chip_cols,
+    }
+    if int(chip_available.sum())>=min_chip_rows:
+        for name,columns in groups.items():
+            if columns:
+                feature_sets[name]=list(FEATURES)+columns
     return feature_sets,chip_available,len(chip_cols),min_chip_rows
 
 
@@ -109,7 +121,7 @@ def run(features_path,events_path,output_dir,threshold_ids=None):
     base_X=x[list(FEATURES)].replace([np.inf,-np.inf],np.nan)
     base_valid=base_X.notna().any(axis=1).to_numpy(copy=True)
     chip_rows=int(chip_available.sum())
-    compare_chip="technical_plus_institutional" in feature_sets
+    compare_chip=any(name != "technical_only" for name in feature_sets)
     # Both ablation arms use identical dates whenever institutional history is adequate.
     valid=base_valid & chip_available if compare_chip else base_valid
     fold_rows=[]; pred_rows=[]; coef_rows=[]
@@ -168,6 +180,7 @@ def run(features_path,events_path,output_dir,threshold_ids=None):
       "institutional_data_available_rows":chip_rows,"institutional_feature_count":chip_feature_count,
       "institutional_minimum_rows_required":min_chip_rows,
       "institutional_ablation_status":"evaluated_same_dates" if compare_chip else "skipped_insufficient_or_missing_institutional_history",
+      "feature_group_definitions":{"foreign_only":"foreign_* excluding foreign_dealer_*","trust_only":"trust_*","dealer_only":"dealer_*","three_major":"foreign + trust + dealer; excludes aggregate institutional_* and foreign_dealer_*","all_institutional":"all collected numeric institutional features including aggregate and foreign-dealer subcategory"},
       "probability_cutoff":.5,
       "evaluated_folds":int((folds.status=="evaluated").sum()) if not folds.empty else 0,
       "skipped_folds":int(folds.status.astype(str).str.startswith("skipped").sum()) if not folds.empty else 0,
