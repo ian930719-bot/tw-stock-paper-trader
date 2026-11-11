@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 import pandas as pd
-from tsmc_2330_combinatorial_purged_cv import make_groups, purged_train_mask, labels_for, GROUPS, TEST_GROUPS
+from tsmc_2330_combinatorial_purged_cv import make_groups, purged_train_mask, labels_for, summarize_coefficients, GROUPS, TEST_GROUPS
 import itertools
 
 class CombinatorialPurgedCVTests(unittest.TestCase):
@@ -20,6 +20,20 @@ class CombinatorialPurgedCVTests(unittest.TestCase):
         for gid in (2,4):
             lo,hi=int(groups[gid][0]),int(groups[gid][-1])
             self.assertFalse(mask[max(0,lo-5):min(600,hi+6)].any())
+
+    def test_coefficient_stability_summary(self):
+        coef=pd.DataFrame({
+            "threshold_id":["p0.03_atr2.0"]*4,
+            "horizon_sessions":[1]*4,
+            "pivot_type":["LOW"]*4,
+            "fold":[1,2,3,4],
+            "feature":["rsi14"]*4,
+            "coefficient":[0.4,0.2,-0.1,0.3],
+        })
+        out=summarize_coefficients(coef).iloc[0]
+        self.assertEqual(out.folds,4)
+        self.assertAlmostEqual(out.positive_fold_share,0.75)
+        self.assertAlmostEqual(out.median_coefficient,0.25)
 
     def test_exact_lead_labels(self):
         dates=pd.bdate_range("2020-01-01",periods=30)
