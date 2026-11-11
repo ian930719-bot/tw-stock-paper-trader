@@ -123,3 +123,5 @@ if __name__=="__main__":
     ap.add_argument("--features",required=True); ap.add_argument("--limits",required=True)
     ap.add_argument("--dividends",required=True); ap.add_argument("--output",default="artifacts/tsmc_2330_swing")
     a=ap.parse_args(); print(json.dumps(run(a.features,a.limits,a.dividends,a.output),ensure_ascii=False,indent=2,default=float))
+
+# Re-run after extending the workflow timeout for the full TSMC research pipeline.
