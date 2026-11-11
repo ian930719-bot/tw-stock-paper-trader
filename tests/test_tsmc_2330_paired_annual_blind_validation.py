@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from tsmc_2330_paired_annual_blind_validation import event_target, ambiguous_rows, calibrate, run
+from tsmc_2330_paired_annual_blind_validation import event_target, ambiguous_rows, calibrate, run, CORE_FEATURES
 
 class PairedAnnualBlindValidationTests(unittest.TestCase):
     def test_exact_lead_label_is_one_session_only(self):
@@ -28,6 +28,9 @@ class PairedAnnualBlindValidationTests(unittest.TestCase):
         rng=np.random.default_rng(7); close=100+np.cumsum(rng.normal(0,1,n))
         x=pd.DataFrame({"date":dates,"open":close,"high":close*1.01,"low":close*.99,
                         "close":close,"feature_a":rng.normal(size=n),"feature_b":rng.normal(size=n)})
+        # Mirror the production contract: include the complete predeclared core feature set.
+        for feature in CORE_FEATURES:
+            x[feature]=rng.normal(size=n)
         events=[]
         for year,months in ((2010,[2,3,4,5,10,11,12]),(2011,[2,4,6,8,10])):
             for kind in ("HIGH","LOW"):
