@@ -274,7 +274,7 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
             "candidate_universe_frozen": max_symbols is None and frozen_universe_path.exists(),
             "candidate_universe_sha256": hashlib.sha256(frozen_universe_path.read_bytes()).hexdigest() if max_symbols is None and frozen_universe_path.exists() else None,
             "completed_symbols": sum(x["status"] in {"downloaded", "cached", "empty"} for x in statuses),
-            "attempted_symbols": len(statuses),
+            "attempted_symbols": sum(x["status"] != "blocked" for x in statuses),
             "remaining_symbols": max(0, len(symbols) - sum(x["status"] in {"downloaded", "cached", "empty"} for x in statuses)),
             "collection_complete": (
                 sum(x["status"] in {"downloaded", "cached", "empty"} for x in statuses) >= len(symbols)
@@ -282,6 +282,7 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
             ),
             "successful_symbols": sum(x["status"] in {"downloaded", "cached"} for x in statuses),
             "failed_symbols": sum(x["status"] == "failed" for x in statuses),
+            "blocked_symbols": sum(x["status"] == "blocked" for x in statuses),
             "empty_symbols": sum(x["status"] == "empty" for x in statuses),
             "status_rows": statuses,
             "data_files_sha256": {},
@@ -312,6 +313,13 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
             done = sum(x["status"] in {"downloaded", "cached", "empty"} for x in statuses)
             if done % 10 == 0 or done == len(symbols):
                 print(f"[COLLECT PROGRESS] {done}/{len(symbols)} successful_or_empty; cached={sum(x['status']=='cached' for x in statuses)} empty={sum(x['status']=='empty' for x in statuses)} failed={sum(x['status']=='failed' for x in statuses)} current={symbol}", flush=True)
+            continue
+        if not api_token:
+            statuses.append({
+                "symbol": symbol, "status": "blocked",
+                "error": "FINMIND_TOKEN is not configured",
+            })
+            write_checkpoint()
             continue
         params = {"dataset": "TaiwanStockPrice", "data_id": symbol, "start_date": start_date}
         if end_date:
@@ -346,12 +354,13 @@ def collect_history(output_dir: str, start_date: str, end_date: str | None = Non
         "candidate_universe_frozen": max_symbols is None and frozen_universe_path.exists(),
         "candidate_universe_sha256": hashlib.sha256(frozen_universe_path.read_bytes()).hexdigest() if max_symbols is None and frozen_universe_path.exists() else None,
         "completed_symbols": processed_count,
-        "attempted_symbols": len(statuses),
+        "attempted_symbols": sum(x["status"] != "blocked" for x in statuses),
         "remaining_symbols": max(0, len(symbols) - processed_count),
         "collection_complete": processed_count >= len(symbols) and failed_count == 0,
         "runtime_seconds": round(time.monotonic() - collection_started, 2),
         "successful_symbols": sum(x["status"] in {"downloaded", "cached"} for x in statuses),
         "failed_symbols": failed_count,
+        "blocked_symbols": sum(x["status"] == "blocked" for x in statuses),
         "empty_symbols": sum(x["status"] == "empty" for x in statuses),
         "status_rows": statuses,
         "point_in_time_universe_complete": False,

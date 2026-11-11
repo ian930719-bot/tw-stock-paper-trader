@@ -29,6 +29,36 @@ class HistoricalCollectorTests(unittest.TestCase):
         self.assertTrue(_normalize_bars(rows, "2330").empty)
 
 
+    def test_missing_token_blocks_uncached_price_symbols_without_api_retries(self):
+        current = pd.DataFrame([
+            {"stock_id": "2330", "stock_name": "台積電", "industry_category": "半導體業", "type": "twse"},
+        ])
+        delisted = pd.DataFrame(columns=["stock_id", "stock_name", "date"])
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.dict("os.environ", {"FINMIND_TOKEN": ""}), \
+             patch("historical_data_collector.discover_symbols", return_value=(current, delisted)), \
+             patch("historical_data_collector._api_get") as api_get:
+            result = collect_history(tmp, "2010-01-04", token="", pause_seconds=0)
+        api_get.assert_not_called()
+        self.assertFalse(result["collection_complete"])
+        self.assertEqual(result["remaining_symbols"], 1)
+        self.assertEqual(result["blocked_symbols"], 1)
+        self.assertEqual(result["failed_symbols"], 0)
+
+    def test_missing_token_blocks_uncached_corporate_actions_without_api_calls(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.dict("os.environ", {"FINMIND_TOKEN": ""}), \
+             patch("historical_data_collector._api_get") as api_get:
+            pd.DataFrame({"symbol": ["2330"], "name": ["台積電"]}).to_csv(
+                f"{tmp}/candidate_symbols.csv", index=False
+            )
+            result = collect_corporate_actions(tmp, "2010-01-04", token="", pause_seconds=0)
+        api_get.assert_not_called()
+        self.assertFalse(result["corporate_actions_complete"])
+        self.assertEqual(result["blocked_symbols"], 1)
+        self.assertEqual(result["remaining_symbols"], 1)
+        self.assertFalse(result["global_datasets_complete"])
+
     def test_candidate_universe_prioritizes_common_equities_and_excludes_etfs(self):
         import pandas as pd
         current = pd.DataFrame([

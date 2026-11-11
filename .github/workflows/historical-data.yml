@@ -91,8 +91,11 @@ jobs:
           m=json.load(open("data/taiwan_history/download_manifest.json", encoding="utf-8"))
           print(f"collection_complete={str(m.get('collection_complete', False)).lower()}")
           print(f"corporate_actions_complete={str(m.get('corporate_actions_complete', False)).lower()}")
+          print(f"token_configured={str(m.get('token_configured', False)).lower()}")
           print(f"remaining_symbols={m.get('remaining_symbols', 0)}")
           print(f"completed_symbols={m.get('completed_symbols', 0)}")
+          print(f"failed_symbols={m.get('failed_symbols', 0)}")
+          print(f"blocked_symbols={m.get('blocked_symbols', 0)}")
           PY
       - name: Audit historical data and write quality reports
         if: always() && hashFiles('data/taiwan_history/download_manifest.json') != ''
@@ -145,7 +148,7 @@ jobs:
       - name: Dispatch next resumable batch
         # Resume only unfinished price-symbol batches. A blocked global corporate-action
         # dataset must not create an endless chain when all price symbols are done.
-        if: steps.collect.outcome == 'success' && steps.collect.outputs.collection_complete != 'true' && fromJSON(steps.collect.outputs.remaining_symbols || '0') > 0
+        if: steps.collect.outcome == 'success' && steps.collect.outputs.token_configured == 'true' && steps.collect.outputs.failed_symbols == '0' && steps.collect.outputs.collection_complete != 'true' && fromJSON(steps.collect.outputs.remaining_symbols || '0') > 0
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_REF: ${{ github.ref_name }}
