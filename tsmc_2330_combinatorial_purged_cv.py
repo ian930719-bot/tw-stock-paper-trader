@@ -67,7 +67,7 @@ CHIP_PREFIXES=("foreign_","foreign_dealer_","trust_","dealer_","institutional_")
 
 def build_feature_sets(frame):
     chip_cols=[c for c in frame.columns
-        if c.startswith(CHIP_PREFIXES)
+        if c.startswith(CHIP_PREFIXES) and c != "institutional_data_available"
         and pd.api.types.is_numeric_dtype(frame[c])]
     if "institutional_data_available" in frame:
         chip_available=frame["institutional_data_available"].fillna(0).astype(bool).to_numpy()
