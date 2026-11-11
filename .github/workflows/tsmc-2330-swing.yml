@@ -46,6 +46,7 @@ on:
       - "tests/test_tsmc_2330_walk_forward.py"
       - "tests/test_tsmc_2330_probability_policy.py"
       - "tsmc_2330_execution_backtest.py"
+      - "tsmc_2330_40pct_rule_search.py"
       - "tsmc_2330_reversal_confirmation_backtest.py"
       - "tsmc_2330_trend_atr_risk_research.py"
       - "tests/test_tsmc_trend_atr_risk.py"
@@ -313,6 +314,13 @@ jobs:
           python tsmc_2330_frozen_rule_research.py \
             --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
             --events artifacts/tsmc_2330_swing/tsmc_2330_pivot_events.csv \
+            --output artifacts/tsmc_2330_swing
+      - name: Search TSMC rule variants for 40% CAGR with win-rate floor
+        run: |
+          python tsmc_2330_40pct_rule_search.py \
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --limits data/tsmc_2330/corporate_actions/price_limits_2330.csv \
+            --dividends data/tsmc_2330/corporate_actions/TaiwanStockDividendResult_2330.csv \
             --output artifacts/tsmc_2330_swing
       # Legacy fixed-split rule-execution modules are intentionally withheld
       # until they are migrated to the same annual walk-forward protocol.
