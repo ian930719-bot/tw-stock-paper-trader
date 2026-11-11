@@ -89,5 +89,32 @@ class SmallLargeWaveTests(unittest.TestCase):
             self.assertGreaterEqual(entries[1]-int(trades.exit_index.iloc[0]),4)
 
 
+
+    def test_reentry_wait_requires_a_fresh_signal_after_full_cooldown(self):
+        from tsmc_2330_small_large_wave_walkforward import _new_low_reentry_signal
+        low=np.zeros(15,dtype=bool); high=np.zeros(15,dtype=bool)
+        low[6]=True
+        self.assertFalse(_new_low_reentry_signal(None,low,high,6,5,1))
+        self.assertTrue(_new_low_reentry_signal(None,low,high,7,5,1))
+        self.assertFalse(_new_low_reentry_signal(None,low,high,7,5,3))
+
+    def test_mfe_mae_exclude_entry_day_intraday_extremes(self):
+        from tsmc_2330_small_large_wave_walkforward import simulate_atr_reentry
+        d=pd.DataFrame({
+          "date":pd.date_range("2022-01-03",periods=36,freq="B"),
+          "raw_open":[100.0]*36,"raw_high":[102.0]*36,
+          "raw_low":[99.0]*36,"raw_close":[101.0]*36
+        })
+        d.loc[:13,"raw_high"]=110.0; d.loc[:13,"raw_low"]=90.0
+        d.loc[14,"raw_low"]=1.0
+        d.loc[15:20,"raw_high"]=125.0
+        d.loc[15:,"raw_low"]=98.0
+        low=np.zeros(36,dtype=bool); high=np.zeros(36,dtype=bool)
+        low[14]=True
+        _,trades,_=simulate_atr_reentry(d,low,high,"2022-01-03",3.0,1,100000)
+        self.assertGreater(len(trades),0)
+        self.assertGreater(trades.max_favorable_excursion_pct.iloc[0],0.1)
+        self.assertGreater(trades.max_adverse_excursion_pct.iloc[0],-0.05)
+
 if __name__=="__main__":
     unittest.main()
