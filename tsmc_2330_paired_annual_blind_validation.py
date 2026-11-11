@@ -91,7 +91,7 @@ def run(features_path,events_path,output_dir,threshold_ids=None,data_audit_path=
     cols=[c for c in x if c not in EXCLUDE and not c.startswith("raw_") and pd.api.types.is_numeric_dtype(x[c])]
     if not cols: raise ValueError("No numeric causal features")
     X=x[cols].replace([np.inf,-np.inf],np.nan)
-    valid=X.notna().any(axis=1).to_numpy()
+    valid=X.notna().any(axis=1).to_numpy(copy=True)
     if "corporate_action_window" in x: valid &= ~x.corporate_action_window.fillna(True).astype(bool).to_numpy()
     dates=x.date; years=dates.dt.year.to_numpy(); idx=np.arange(len(x))
     rows=[]; cals=[]; preds=[]
@@ -134,6 +134,8 @@ def run(features_path,events_path,output_dir,threshold_ids=None,data_audit_path=
                     model=make_pipeline(SimpleImputer(strategy="median"),StandardScaler(),
                         LogisticRegression(solver="liblinear",max_iter=1000,class_weight="balanced",C=.2,random_state=0))
                     model.fit(X.loc[tm,fcols],yt[tm])
+                    if nc==0:
+                        rows.append({**common,"status":"skipped_insufficient_calibration_rows"}); continue
                     cp=model.predict_proba(X.loc[cm,fcols])[:,1]
                     threshold,ci=calibrate(yc[cm],cp)
                     cals.append({**common,"training_end":dates.loc[tm].max().date().isoformat(),
@@ -142,6 +144,8 @@ def run(features_path,events_path,output_dir,threshold_ids=None,data_audit_path=
                         "calibration_cutoff":end.date().isoformat(),**ci})
                     if threshold is None:
                         rows.append({**common,"status":ci["status"]}); continue
+                    if nv==0:
+                        rows.append({**common,"status":"skipped_insufficient_validation_rows"}); continue
                     vp=model.predict_proba(X.loc[vm,fcols])[:,1]; truth=yv[vm]; sig=vp>=threshold
                     rows.append({**common,"status":"evaluated","training_start":dates.loc[tm].min().date().isoformat(),
                         "training_end":dates.loc[tm].max().date().isoformat(),"training_cutoff":train_cut.date().isoformat(),
