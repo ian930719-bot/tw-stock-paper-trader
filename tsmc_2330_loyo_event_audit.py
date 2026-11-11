@@ -48,25 +48,30 @@ def run_audit(input_csv: str | Path, output_dir: str | Path) -> dict:
     for kind, model_sets in CONFIG.items():
         for lead in sorted(d.lead_sessions.dropna().unique()):
             g = d[(d.pivot_type == kind) & (d.lead_sessions == lead)].copy()
-            # Institutional coverage begins on 2012-05-02; never impute pre-coverage
-            # flow values as if they were observed.
-            g = g[(g.feature_date >= INSTITUTIONAL_START) &
-                  (g.control_date >= INSTITUTIONAL_START)]
             if g.empty:
                 continue
             for model_name, features in model_sets.items():
-                missing = [f for f in features if f not in g or f"control_{f}" not in g]
+                # Keep the full historical span for technical-only tests. Restrict
+                # only models containing institutional flow to the verified coverage
+                # window, for both event and matched-control feature dates.
+                model_data = g
+                if model_name == "technical_plus_institutional":
+                    model_data = g[(g.feature_date >= INSTITUTIONAL_START) &
+                                   (g.control_date >= INSTITUTIONAL_START)]
+                if model_data.empty:
+                    continue
+                missing = [f for f in features if f not in model_data or f"control_{f}" not in model_data]
                 if missing:
                     raise ValueError(f"Missing paired features for {kind}: {missing}")
-                event_x = g[features].apply(pd.to_numeric, errors="coerce")
-                control_x = g[[f"control_{f}" for f in features]].apply(
+                event_x = model_data[features].apply(pd.to_numeric, errors="coerce")
+                control_x = model_data[[f"control_{f}" for f in features]].apply(
                     pd.to_numeric, errors="coerce")
                 control_x.columns = features
                 x = pd.concat([event_x, control_x], ignore_index=True)
                 y = np.r_[np.ones(len(event_x), dtype=int),
                           np.zeros(len(control_x), dtype=int)]
-                years = np.r_[g.pivot_year.to_numpy(), g.pivot_year.to_numpy()]
-                for heldout in sorted(g.pivot_year.unique()):
+                years = np.r_[model_data.pivot_year.to_numpy(), model_data.pivot_year.to_numpy()]
+                for heldout in sorted(model_data.pivot_year.unique()):
                     train, test = years != heldout, years == heldout
                     if len(np.unique(y[test])) != 2 or len(np.unique(y[train])) != 2:
                         continue
@@ -80,8 +85,8 @@ def run_audit(input_csv: str | Path, output_dir: str | Path) -> dict:
                     rows.append({
                         "pivot_type": kind, "lead_sessions": int(lead),
                         "model": model_name, "heldout_year": int(heldout),
-                        "test_events": int((g.pivot_year == heldout).sum()),
-                        "train_events": int((g.pivot_year != heldout).sum()),
+                        "test_events": int((model_data.pivot_year == heldout).sum()),
+                        "train_events": int((model_data.pivot_year != heldout).sum()),
                         "auc": float(roc_auc_score(y[test], probability)),
                         "balanced_accuracy": float(balanced_accuracy_score(
                             y[test], probability >= 0.5)),
@@ -102,7 +107,8 @@ def run_audit(input_csv: str | Path, output_dir: str | Path) -> dict:
     summary.to_csv(out / "tsmc_2330_loyo_summary.csv", index=False)
     result = {
         "input_rows": int(len(d)),
-        "institutional_coverage_start": "2012-05-02",
+        "institutional_coverage_start": "2012-05-02; applied only to models containing foreign/trust features",
+        "technical_only_uses_full_history": True,
         "validation": "leave-one-pivot-year-out; all observations from held-out year excluded from training",
         "models": CONFIG,
         "dealer_features": "excluded; only foreign-investor and investment-trust features used",
