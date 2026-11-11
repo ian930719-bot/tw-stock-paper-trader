@@ -49,7 +49,9 @@ class RuleRobustnessTests(unittest.TestCase):
         low = pd.Series([True, False, False, False])
         high = pd.Series([False, False, True, False])
         metrics, trades, _ = simulate(d, low, high, delay_sessions=1)
-        self.assertEqual(metrics["closed_trades"], 0)
+        self.assertEqual(metrics["closed_trades"], 1)
+        self.assertEqual(trades.iloc[0]["entry_date"], "2024-01-04")
+        self.assertEqual(trades.iloc[0]["exit_reason"], "end_of_test_close")
 
 
 if __name__ == "__main__":
