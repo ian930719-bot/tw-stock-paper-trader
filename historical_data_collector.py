@@ -25,9 +25,15 @@ API_URL = "https://api.finmindtrade.com/api/v4/data"
 
 def _api_get(params: dict, *, token: str = "", timeout: int = 20,
              retries: int = 3, pause_seconds: float = 2.0) -> list[dict]:
+    """Call FinMind with bounded retries and actionable, redacted HTTP errors.
+
+    Permanent 4xx responses are not retried. HTTP 429 and transient network/5xx
+    failures remain retryable.
+    """
     query = dict(params)
     if token:
         query["token"] = token
+    dataset = str(params.get("dataset", "unknown"))
     error = None
     for attempt in range(retries):
         try:
@@ -40,14 +46,27 @@ def _api_get(params: dict, *, token: str = "", timeout: int = 20,
             if not isinstance(rows, list):
                 raise RuntimeError("FinMind data field is not a list")
             return rows
+        except requests.HTTPError as exc:
+            response = exc.response
+            status = getattr(response, "status_code", None)
+            body = str(getattr(response, "text", "") or "")[:1200]
+            if token:
+                body = body.replace(token, "[REDACTED]")
+            detail = f"FinMind HTTP {status} dataset={dataset}: {body or str(exc)}"
+            if status is not None and 400 <= int(status) < 500 and int(status) != 429:
+                raise RuntimeError(detail) from exc
+            error = RuntimeError(detail)
         except (requests.RequestException, ValueError, RuntimeError) as exc:
             error = exc
-            if attempt + 1 < retries:
-                delay = min(20, 2 ** (attempt + 1) * pause_seconds)
-                print(f"[API RETRY] attempt={attempt + 2}/{retries} delay={delay:.1f}s error={type(exc).__name__}: {exc}", flush=True)
-                time.sleep(delay)
+        if attempt + 1 < retries:
+            delay = min(20, 2 ** (attempt + 1) * pause_seconds)
+            print(
+                f"[API RETRY] dataset={dataset} attempt={attempt + 2}/{retries} "
+                f"delay={delay:.1f}s error={type(error).__name__}: {error}",
+                flush=True,
+            )
+            time.sleep(delay)
     raise RuntimeError(f"FinMind request failed: {error}") from error
-
 
 def save_universe_snapshot(output_dir: str, frame: pd.DataFrame) -> dict:
     """Persist the first security-master observation for each Taiwan calendar day."""
@@ -398,6 +417,9 @@ def collect_corporate_actions(output_dir: str, start_date: str, end_date: str | 
                 continue
             except Exception:
                 path.unlink(missing_ok=True)
+        if not api_token:
+            global_status[dataset] = "blocked: FINMIND_TOKEN is not configured"
+            continue
         params = {"dataset": dataset, "start_date": start_date}
         if end_date:
             params["end_date"] = end_date
@@ -413,7 +435,7 @@ def collect_corporate_actions(output_dir: str, start_date: str, end_date: str | 
             global_frames[dataset] = frame
         except Exception as exc:
             global_status[dataset] = f"failed: {type(exc).__name__}: {exc}"
-    global_ok = all(not value.startswith("failed") for value in global_status.values())
+    global_ok = all(not value.startswith(("failed", "blocked")) for value in global_status.values())
 
     statuses = []
     started = time.monotonic()
@@ -428,6 +450,12 @@ def collect_corporate_actions(output_dir: str, start_date: str, end_date: str | 
                 continue
             except Exception:
                 path.unlink(missing_ok=True)
+        if not api_token:
+            statuses.append({
+                "symbol": symbol, "status": "blocked",
+                "error": "FINMIND_TOKEN is not configured",
+            })
+            continue
         try:
             params = {
                 "dataset": "TaiwanStockDividendResult",
@@ -449,7 +477,7 @@ def collect_corporate_actions(output_dir: str, start_date: str, end_date: str | 
             frame.to_csv(path, index=False)
             statuses.append({"symbol": symbol, "status": status, "rows": int(len(frame))})
         except Exception as exc:
-            statuses.append({"symbol": symbol, "status": "failed", "error": str(exc)[:300]})
+            statuses.append({"symbol": symbol, "status": "failed", "error": str(exc)[:500]})
         if index + 1 < len(symbols):
             time.sleep(pause)
 
@@ -482,13 +510,16 @@ def collect_corporate_actions(output_dir: str, start_date: str, end_date: str | 
         "token_configured": bool(api_token),
         "requested_symbols": len(symbols),
         "completed_symbols": completed,
-        "attempted_symbols": len(statuses),
+        "attempted_symbols": sum(x["status"] != "blocked" for x in statuses),
         "remaining_symbols": max(0, len(symbols) - completed),
         "failed_symbols": failed,
+        "blocked_symbols": sum(x["status"] == "blocked" for x in statuses),
         "empty_symbols": sum(x["status"] == "empty" for x in statuses),
         "global_dataset_status": global_status,
         "global_datasets_complete": global_ok,
-        "corporate_actions_complete": completed >= len(symbols) and failed == 0 and global_ok,
+        "corporate_actions_complete": completed >= len(symbols) and failed == 0
+                                      and not any(x["status"] == "blocked" for x in statuses)
+                                      and global_ok,
         "event_rows": int(len(events)),
         "event_symbols": int(events["symbol"].nunique()) if not events.empty else 0,
         "event_conflicts": int(events["conflict"].fillna(False).sum()) if not events.empty and "conflict" in events else 0,
