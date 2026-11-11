@@ -21,13 +21,15 @@ class TraderStrategyAuditTests(unittest.TestCase):
         self.assertGreater(metrics["paired_risk_difference"], 0)
 
     def test_run_writes_outputs(self):
-        source = Path(os.environ.get("TSMC_500_SNAPSHOTS", "/mnt/data/500_github/tsmc_2330_500_pivot_snapshots.csv"))
+        source = Path(os.environ.get("TSMC_500_SNAPSHOTS", "/mnt/data/500study_final/tsmc_2330_500_pivot_snapshots.csv"))
         if not source.exists():
             self.skipTest("frozen 500-pivot snapshot artifact unavailable")
         with tempfile.TemporaryDirectory() as tmp:
             summary = run(str(source), tmp, n_boot=20)
             self.assertEqual(len(summary), 55)
             self.assertIn("q_bh_all_rule_lead_tests", summary.columns)
+            self.assertIn("n_control_date_clusters", summary.columns)
+            self.assertIn("cluster_sign_test_p_unadjusted", summary.columns)
             self.assertTrue((Path(tmp) / "tsmc_2330_trader_rule_event_control_summary.csv").exists())
             self.assertTrue((Path(tmp) / "tsmc_2330_trader_rule_year_stability.csv").exists())
 
