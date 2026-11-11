@@ -105,8 +105,10 @@ def simulate(
 
     for k, i in enumerate(ix):
         row = d.iloc[i]
-        if k > 0:
-            prev = ix[k - 1]
+        # The immediately preceding session's signal is known even when this
+        # evaluation window starts today.
+        if i > 0:
+            prev = i - 1
             lo_now = bool(lo.iloc[prev])
             hi_now = bool(hi.iloc[prev])
             if lo_now and hi_now:
@@ -262,13 +264,33 @@ def run(features_path: str, output_dir: str) -> dict:
                 "win_rate": metrics["win_rate"],
             })
 
+    # Derive annual returns from one continuous portfolio path. Never reset
+    # capital at each January or discard positions carried across year-end.
+    full_metrics, full_trades, full_curve = simulate(d, low, high)
+    full_curve["date"] = pd.to_datetime(full_curve["date"])
+    full_curve["year"] = full_curve["date"].dt.year
     yearly_rows = []
-    for year in range(2016, 2027):
-        metrics, trades, _ = simulate(
-            d, low, high, start=f"{year}-01-01", end=f"{year}-12-31"
+    previous_year_end_equity = INITIAL_CAPITAL
+    for year, group in full_curve.groupby("year", sort=True):
+        year_end_equity = float(group.equity.iloc[-1])
+        year_return = year_end_equity / previous_year_end_equity - 1
+        running_peak = group.equity.cummax()
+        year_drawdown = group.equity / running_peak - 1
+        closed_in_year = (
+            int((pd.to_datetime(full_trades.exit_date).dt.year == int(year)).sum())
+            if len(full_trades) else 0
         )
-        metrics["year"] = year
-        yearly_rows.append(metrics)
+        yearly_rows.append({
+            "year": int(year),
+            "year_start_date": group.date.iloc[0].date().isoformat(),
+            "year_end_date": group.date.iloc[-1].date().isoformat(),
+            "opening_equity": previous_year_end_equity,
+            "closing_equity": year_end_equity,
+            "annual_return": year_return,
+            "max_drawdown_within_year": float(year_drawdown.min()),
+            "trades_closed_in_year": closed_in_year,
+        })
+        previous_year_end_equity = year_end_equity
 
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -296,6 +318,7 @@ def run(features_path: str, output_dir: str) -> dict:
             "slippage_each_side": SLIPPAGE,
         },
         "sensitivity": "one-factor neighbouring thresholds only; no parameter selection",
+        "annual_returns": "derived from one continuous full-period equity curve; capital is not reset at year boundaries",
         "limitations": [
             "Candidate thresholds were discovered after inspecting the same historical period; sensitivity is not independent validation.",
             "No cash dividends/corporate-action cashflows, official exchange price-limit lock/fill simulation, liquidity impact or broker-specific discounts.",
