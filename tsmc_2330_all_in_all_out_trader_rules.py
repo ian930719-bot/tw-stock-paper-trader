@@ -149,8 +149,9 @@ def run(features_path,events_path,output_dir):
     high=e.loc[e.type.astype(str).str.upper()=="HIGH","pivot_index"].astype(int).to_numpy()
     low=e.loc[e.type.astype(str).str.upper()=="LOW","pivot_index"].astype(int).to_numpy()
     alerts=[]; summaries=[]; trades_all=[]; equity_all=[]
+    action_window=d.corporate_action_window.fillna(True).astype(bool) if "corporate_action_window" in d else pd.Series(False,index=d.index)
     for name,(lo,hi) in build_rules(d).items():
-        lo=lo.fillna(False); hi=hi.fillna(False)
+        lo=lo.fillna(False)&~action_window; hi=hi.fillna(False)&~action_window
         for kind,sig,piv in (("LOW",lo,low),("HIGH",hi,high)):
             for h in HORIZONS:
                 alerts.append({"strategy":name,"pivot_type":kind,"horizon_sessions":h,
