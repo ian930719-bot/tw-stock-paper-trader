@@ -71,7 +71,7 @@ jobs:
           python tsmc_swing_research.py \
             --input data/tsmc_2330 \
             --output artifacts/tsmc_2330_swing \
-            --corporate-actions historical_artifact/data/taiwan_history/corporate_actions/events.csv \\
+            --corporate-actions historical_artifact/data/taiwan_history/corporate_actions/events.csv \
             --chip-data data/tsmc_2330/chip/2330_chip_features.csv
       - name: Run combinatorial purged cross-validation
         run: |
