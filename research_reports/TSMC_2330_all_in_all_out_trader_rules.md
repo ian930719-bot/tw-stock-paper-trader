@@ -3,6 +3,10 @@
 ## Strategy constraint
 The strategy remains one position only: all available cash enters after a LOW signal and the entire position exits after a HIGH signal. No shorting, scaling, permanent trend holding, stop/time exit, or leverage is used. Signals form at session close and execute at the next session open.
 
+## Corrected event/control context
+
+The first matched-control sample was biased because corporate-action windows were not excluded. After rebuilding controls and using control-date cluster inference, no positive candidate rule survives the 55-test multiple-comparison correction at q < 0.05. The all-in/all-out results below remain a descriptive historical simulation of fixed rules, but they are not evidence that the entry/exit rules reliably predict pivots.
+
 ## Data and assumptions
 - Frozen TSMC 2330 causal feature/pivot artifact, 2010-01-04 through 2026-11-09; threshold `p0.020_atr1.0`.
 - Backtest: 2016-01-04 through 2026-11-09 (2026 partial).
@@ -31,7 +35,7 @@ All six combinations are reported. The best-performing combination is not select
 | dryup_green / blowoff | NT$286,407 | +186.4% | +10.19% | -52.9% | 38 | 44.7% | 62.6% |
 | Buy-and-hold benchmark | NT$1,556,027 | +1,456.0% | +28.79% | -45.7% | 1 | — | 100% |
 
-All rows use the same starting capital and estimated costs, and exclude cash dividends. The highest-return tested variant is `dryup_green / blowoff`, but it materially underperforms buy-and-hold and has a larger maximum drawdown. It is exploratory, not validated.
+All rows use the same starting capital and estimated costs, and exclude cash dividends. The highest-return tested variant is `dryup_green / blowoff`, but it materially underperforms buy-and-hold and has a larger maximum drawdown. The corrected event/control audit does not establish either side of this pair as a statistically robust pivot predictor. It is exploratory, not validated.
 
 ## Daily alert quality of the highest-return tested variant
 
