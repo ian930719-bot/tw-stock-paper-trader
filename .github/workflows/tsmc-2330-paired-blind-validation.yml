@@ -21,7 +21,7 @@ jobs:
     timeout-minutes: 30
     env:
       TZ: Asia/Taipei
-      VALIDATION_PROTOCOL_VERSION: paired-year-70-30-v6
+      VALIDATION_PROTOCOL_VERSION: paired-year-70-30-v7-core28
       OPENBLAS_NUM_THREADS: "1"
       OMP_NUM_THREADS: "1"
       MKL_NUM_THREADS: "1"
