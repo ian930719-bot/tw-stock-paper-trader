@@ -3,6 +3,7 @@ on:
   push:
     branches: [research/200cagr-blind-validation]
     paths:
+      - "tsmc_swing_research.py"
       - "tsmc_2330_paired_annual_blind_validation.py"
       - "tsmc_2330_false_signal_diagnostics.py"
       - "tests/test_tsmc_2330_paired_annual_blind_validation.py"
