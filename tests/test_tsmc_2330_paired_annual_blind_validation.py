@@ -5,8 +5,14 @@ import numpy as np
 import pandas as pd
 
 from tsmc_2330_paired_annual_blind_validation import event_target, ambiguous_rows, calibrate, run, CORE_FEATURES
+from tsmc_swing_research import THRESHOLDS
 
 class PairedAnnualBlindValidationTests(unittest.TestCase):
+    def test_sample_expansion_grid_is_predeclared_and_unique(self):
+        self.assertEqual(len(THRESHOLDS), len(set(THRESHOLDS)))
+        for threshold in ((0.01, 1.0), (0.02, 1.0), (0.03, 1.0), (0.04, 1.0), (0.02, 1.5)):
+            self.assertIn(threshold, THRESHOLDS)
+
     def test_exact_lead_label_is_one_session_only(self):
         dates=pd.Series(pd.bdate_range("2020-01-01",periods=20))
         events=pd.DataFrame({"type":["HIGH"],"pivot_date":[dates.iloc[10]]})
