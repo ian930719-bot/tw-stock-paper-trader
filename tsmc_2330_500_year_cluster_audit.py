@@ -35,7 +35,7 @@ def analyze(input_csv, output_dir, bootstrap=2000, seed=23302027):
             paired["control_"+f]=pd.to_numeric(paired["control_"+f],errors="coerce")
             paired=paired.replace([np.inf,-np.inf],np.nan).dropna()
             paired["diff"]=paired[f]-paired["control_"+f]
-            annual=paired.groupby("pivot_year").diff.agg(["mean","count"])
+            annual=paired.groupby("pivot_year")["diff"].agg(["mean","count"])
             annual=annual[annual["count"]>=5]
             if len(annual)<8: continue
             vals=annual["mean"].to_numpy(float)
@@ -52,12 +52,6 @@ def analyze(input_csv, output_dir, bootstrap=2000, seed=23302027):
               "median_absolute_annual_difference":float(np.median(np.abs(vals)))})
     detail=pd.DataFrame(rows)
     if detail.empty: raise ValueError("No feature had enough year-clustered observations")
-    detail["fdr_q_value"]=np.nan
-    for _,idx in detail.groupby(["pivot_type","lead_sessions"]).groups.items():
-        sub=detail.loc[idx]
-        # Two-sided sign-bootstrap approximation based on cluster CI is retained separately;
-        # q-values are deliberately not fabricated from confidence intervals.
-        detail.loc[idx,"fdr_q_value"]=np.nan
     summary=[]
     for (kind,f),g in detail.groupby(["pivot_type","feature"]):
         g=g.sort_values("lead_sessions")
