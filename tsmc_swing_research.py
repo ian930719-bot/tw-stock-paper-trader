@@ -17,7 +17,12 @@ from corporate_action_adjustments import apply_back_adjustments
 
 REQUIRED = {"date", "open", "high", "low", "close", "volume"}
 LEADS = (1, 3, 5, 10, 20)
-THRESHOLDS = ((0.03, 2.0), (0.05, 2.0), (0.08, 2.0), (0.03, 3.0), (0.05, 3.0))
+THRESHOLDS = (
+    # Existing reference definitions remain unchanged.
+    (0.03, 2.0), (0.05, 2.0), (0.08, 2.0), (0.03, 3.0), (0.05, 3.0),
+    # Predeclared lower-amplitude sample-expansion grid; each remains a separate label set.
+    (0.01, 1.0), (0.02, 1.0), (0.03, 1.0), (0.04, 1.0), (0.02, 1.5),
+)
 
 
 def load_tsmc(path: str) -> pd.DataFrame:
