@@ -47,5 +47,47 @@ class SmallLargeWaveTests(unittest.TestCase):
         self.assertEqual(trades.iloc[0].exit_reason,"high_alert_next_open")
         self.assertEqual(int(curve.shares.iloc[-1]),0)
 
+
+    def test_atr_stop_ratchets_up_and_never_down(self):
+        from tsmc_2330_small_large_wave_walkforward import simulate_atr_reentry
+        d=pd.DataFrame({
+          "date":pd.date_range("2020-01-01",periods=35,freq="B"),
+          "raw_open":[100.0]*35,"raw_high":[102.0]*35,
+          "raw_low":[99.0]*35,"raw_close":[101.0]*35
+        })
+        # Seed a volatile history so ATR is defined; a signal buys on next open.
+        d.loc[0:13,"raw_high"]=110.0
+        d.loc[0:13,"raw_low"]=90.0
+        d.loc[0:13,"raw_close"]=100.0
+        d.loc[14:20,"raw_high"]=120.0
+        d.loc[14:20,"raw_close"]=119.0
+        d.loc[21:,"raw_low"]=80.0
+        low=np.zeros(35,dtype=bool); high=np.zeros(35,dtype=bool)
+        low[14]=True
+        _, trades, curve=simulate_atr_reentry(d,low,high,"2020-01-01",2.0,1,100000)
+        held=curve.loc[curve.shares>0,"active_stop"].dropna().to_numpy()
+        self.assertGreater(len(held),1)
+        self.assertTrue(np.all(np.diff(held)>=-1e-9))
+        self.assertTrue((trades.stop_width_at_entry>0).all())
+
+    def test_invalidated_signal_does_not_reenter_immediately(self):
+        from tsmc_2330_small_large_wave_walkforward import simulate_atr_reentry
+        d=pd.DataFrame({
+          "date":pd.date_range("2021-01-01",periods=40,freq="B"),
+          "raw_open":[100.0]*40,"raw_high":[101.0]*40,
+          "raw_low":[99.0]*40,"raw_close":[100.0]*40
+        })
+        d.loc[:13,"raw_high"]=110.0;d.loc[:13,"raw_low"]=90.0
+        low=np.zeros(40,dtype=bool);high=np.zeros(40,dtype=bool)
+        low[14]=True;low[17]=True;low[23]=True
+        # First fresh entry, then a deliberate stop caused by a low print.
+        d.loc[17,"raw_low"]=1.0
+        _, trades, _=simulate_atr_reentry(d,low,high,"2021-01-01",1.5,3,100000)
+        entries=trades.entry_index.tolist()
+        # Re-entry needs a newly generated low after stop + 3 complete sessions.
+        if len(entries)>1:
+            self.assertGreaterEqual(entries[1]-int(trades.exit_index.iloc[0]),4)
+
+
 if __name__=="__main__":
     unittest.main()
