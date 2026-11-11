@@ -81,7 +81,9 @@ def _add_missing_pivots(x,events,requested):
 
 def run(features_path,events_path,output_dir,threshold_ids=None,data_audit_path=None):
     x=pd.read_csv(features_path,parse_dates=["date"]).sort_values("date").reset_index(drop=True)
-    ev=pd.read_csv(events_path,parse_dates=["pivot_date","confirmation_date"])
+    ev=pd.read_csv(events_path)
+    ev["pivot_date"]=pd.to_datetime(ev["pivot_date"],errors="coerce")
+    ev["confirmation_date"]=pd.to_datetime(ev["confirmation_date"],errors="coerce")
     if not {"date","close"}.issubset(x): raise ValueError("Features need date and close")
     if not {"threshold_id","type","pivot_date","confirmation_date"}.issubset(ev): raise ValueError("Pivot events schema incomplete")
     if x.date.duplicated().any() or not x.date.is_monotonic_increasing: raise ValueError("Dates must be unique and ascending")
