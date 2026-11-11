@@ -63,7 +63,7 @@ def metrics(y,p,cut=.5):
       "roc_auc":float(roc_auc_score(y,p)) if len(np.unique(y))==2 else None,
       "pr_auc":float(average_precision_score(y,p)) if e else 0.}
 
-CHIP_PREFIXES=("foreign_","foreign_dealer_","trust_","dealer_","institutional_")
+CHIP_PREFIXES=("foreign_","trust_")
 
 def build_feature_sets(frame):
     chip_cols=[c for c in frame.columns
@@ -79,13 +79,10 @@ def build_feature_sets(frame):
     feature_sets={"technical_only":list(FEATURES)}
     foreign_cols=[c for c in chip_cols if c.startswith("foreign_") and not c.startswith("foreign_dealer_")]
     trust_cols=[c for c in chip_cols if c.startswith("trust_")]
-    dealer_cols=[c for c in chip_cols if c.startswith("dealer_")]
     groups={
         "technical_plus_foreign_only":foreign_cols,
         "technical_plus_trust_only":trust_cols,
-        "technical_plus_dealer_only":dealer_cols,
-        "technical_plus_three_major":foreign_cols+trust_cols+dealer_cols,
-        "technical_plus_all_institutional":chip_cols,
+        "technical_plus_foreign_and_trust":foreign_cols+trust_cols,
     }
     if int(chip_available.sum())>=min_chip_rows:
         for name,columns in groups.items():
@@ -180,12 +177,12 @@ def run(features_path,events_path,output_dir,threshold_ids=None):
       "institutional_data_available_rows":chip_rows,"institutional_feature_count":chip_feature_count,
       "institutional_minimum_rows_required":min_chip_rows,
       "institutional_ablation_status":"evaluated_same_dates" if compare_chip else "skipped_insufficient_or_missing_institutional_history",
-      "feature_group_definitions":{"foreign_only":"foreign_* excluding foreign_dealer_*","trust_only":"trust_*","dealer_only":"dealer_*","three_major":"foreign + trust + dealer; excludes aggregate institutional_* and foreign_dealer_*","all_institutional":"all collected numeric institutional features including aggregate and foreign-dealer subcategory"},
+      "feature_group_definitions":{"foreign_only":"foreign_* excluding foreign_dealer_*","trust_only":"trust_*","foreign_only":"foreign_* excluding foreign_dealer_*","trust_only":"trust_*","foreign_and_trust":"foreign_* excluding foreign_dealer_* plus trust_*; excludes dealer_* and institutional_*"},
       "probability_cutoff":.5,
       "evaluated_folds":int((folds.status=="evaluated").sum()) if not folds.empty else 0,
       "skipped_folds":int(folds.status.astype(str).str.startswith("skipped").sum()) if not folds.empty else 0,
       "pooled_results":pooled,"uses_future_training_blocks":True,
-      "interpretation":"Robustness across historical regimes only. Some training folds contain dates later than held-out folds, so this is not a deployability test. Institutional ablation arms use identical dates when chip coverage is sufficient. Freeze research choices, then run a final untouched chronological holdout before paper trading.",
+      "interpretation":"Robustness across historical regimes only. Institutional feature sets include foreign investors excluding foreign dealers, and investment trusts; dealer_* and institutional_* aggregate features are excluded. Some training folds contain dates later than held-out folds, so this is not a deployability test. All institutional ablation arms use identical dates when chip coverage is sufficient. Freeze research choices, then run a final untouched chronological holdout before paper trading.",
       "trading_backtest":False}
     (out/"tsmc_2330_combinatorial_purged_cv.json").write_text(json.dumps(summary,ensure_ascii=False,indent=2),encoding="utf-8")
     return summary
