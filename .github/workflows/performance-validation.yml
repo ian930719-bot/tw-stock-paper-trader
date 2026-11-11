@@ -2,7 +2,7 @@ name: Taiwan Stock OOS Performance Validation
 
 on:
   push:
-    branches: [main]
+    branches: [main, research/200cagr-blind-validation]
     paths:
       - "performance_validation.py"
       - ".github/workflows/performance-validation.yml"
@@ -21,7 +21,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: performance-validation-main
+  group: performance-validation-${{ github.ref_name }}
   cancel-in-progress: true
 
 jobs:
