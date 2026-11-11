@@ -79,6 +79,8 @@ jobs:
             artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv
             artifacts/tsmc_2330_swing/tsmc_2330_pivot_events.csv
             artifacts/tsmc_2330_swing/tsmc_2330_combinatorial_purged_cv_folds.csv
+            artifacts/tsmc_2330_swing/tsmc_2330_combinatorial_purged_cv_coefficients.csv
+            artifacts/tsmc_2330_swing/tsmc_2330_combinatorial_purged_cv_coefficient_stability.csv
             artifacts/tsmc_2330_swing/tsmc_2330_combinatorial_purged_cv_predictions.csv
             artifacts/tsmc_2330_swing/tsmc_2330_combinatorial_purged_cv_summary.csv
             artifacts/tsmc_2330_swing/tsmc_2330_combinatorial_purged_cv.json
