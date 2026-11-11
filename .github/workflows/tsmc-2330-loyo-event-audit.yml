@@ -1,0 +1,52 @@
+name: TSMC 2330 Leave-One-Year-Out Event Audit
+on:
+  push:
+    branches: [research/200cagr-blind-validation]
+    paths:
+      - "tsmc_2330_loyo_event_audit.py"
+      - "tests/test_tsmc_2330_loyo_event_audit.py"
+      - ".github/workflows/tsmc-2330-loyo-event-audit.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: tsmc-2330-loyo-event-audit
+  cancel-in-progress: false
+jobs:
+  loyo-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TZ: Asia/Taipei
+      OPENBLAS_NUM_THREADS: "1"
+      OMP_NUM_THREADS: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/200cagr-blind-validation
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip pandas numpy scikit-learn
+      - name: Download frozen 500-pivot sample
+        uses: actions/download-artifact@v4
+        with:
+          name: tsmc-2330-fast-500-pivot-study-1
+          run-id: 42986851249
+          repository: ${{ github.repository }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: input
+      - name: Compile and test
+        run: |
+          python -m py_compile tsmc_2330_loyo_event_audit.py tests/test_tsmc_2330_loyo_event_audit.py
+          python -m unittest discover -s tests -p "test_tsmc_2330_loyo_event_audit.py" -v
+      - name: Run leave-one-year-out diagnostic
+        run: |
+          python tsmc_2330_loyo_event_audit.py --input input/tsmc_2330_500_pivot_snapshots.csv --output artifacts/loyo
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tsmc-2330-loyo-event-audit-${{ github.run_number }}
+          if-no-files-found: error
+          retention-days: 30
+          path: artifacts/loyo/
