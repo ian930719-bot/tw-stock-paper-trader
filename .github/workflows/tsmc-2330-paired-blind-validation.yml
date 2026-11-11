@@ -4,7 +4,9 @@ on:
     branches: [research/200cagr-blind-validation]
     paths:
       - "tsmc_2330_paired_annual_blind_validation.py"
+      - "tsmc_2330_false_signal_diagnostics.py"
       - "tests/test_tsmc_2330_paired_annual_blind_validation.py"
+      - "tests/test_tsmc_2330_false_signal_diagnostics.py"
       - ".github/workflows/tsmc-2330-paired-blind-validation.yml"
   workflow_dispatch:
 permissions:
@@ -19,7 +21,7 @@ jobs:
     timeout-minutes: 30
     env:
       TZ: Asia/Taipei
-      VALIDATION_PROTOCOL_VERSION: paired-year-70-30-v4
+      VALIDATION_PROTOCOL_VERSION: paired-year-70-30-v5
       OPENBLAS_NUM_THREADS: "1"
       OMP_NUM_THREADS: "1"
       MKL_NUM_THREADS: "1"
@@ -48,8 +50,8 @@ jobs:
           cp historical_artifact/data/taiwan_history/bars/2330.csv data/tsmc_2330/bars/2330.csv
       - name: Compile research code and run protocol tests
         run: |
-          python -m py_compile tsmc_swing_research.py corporate_action_adjustments.py tsmc_2330_paired_annual_blind_validation.py tests/test_tsmc_2330_paired_annual_blind_validation.py
-          python -m unittest discover -s tests -p "test_tsmc_2330_paired_annual_blind_validation.py" -v
+          python -m py_compile tsmc_swing_research.py corporate_action_adjustments.py tsmc_2330_paired_annual_blind_validation.py tsmc_2330_false_signal_diagnostics.py tests/test_tsmc_2330_paired_annual_blind_validation.py tests/test_tsmc_2330_false_signal_diagnostics.py
+          python -m unittest discover -s tests -p "test_tsmc_2330_*.py" -v
       - name: Build causal TSMC features and retrospective pivot outcomes
         run: |
           python tsmc_swing_research.py \
@@ -63,6 +65,13 @@ jobs:
             --events artifacts/tsmc_2330_swing/tsmc_2330_pivot_events.csv \
             --output artifacts/tsmc_2330_swing \
             --data-audit historical_artifact/data/taiwan_history/data_audit_summary.json
+      - name: Classify OOF true and false signal outcomes
+        run: |
+          python tsmc_2330_false_signal_diagnostics.py \
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --events artifacts/tsmc_2330_swing/tsmc_2330_pivot_events.csv \
+            --predictions artifacts/tsmc_2330_swing/tsmc_2330_paired_annual_predictions.csv \
+            --output artifacts/tsmc_2330_swing
       - name: Upload reproducible blind-validation outputs
         uses: actions/upload-artifact@v4
         with:
@@ -79,3 +88,6 @@ jobs:
             artifacts/tsmc_2330_swing/tsmc_2330_paired_annual_calibration.csv
             artifacts/tsmc_2330_swing/tsmc_2330_paired_annual_predictions.csv
             artifacts/tsmc_2330_swing/tsmc_2330_paired_annual_pooled_oof.csv
+            artifacts/tsmc_2330_swing/tsmc_2330_oof_signal_outcomes.csv
+            artifacts/tsmc_2330_swing/tsmc_2330_oof_signal_outcome_summary.csv
+            artifacts/tsmc_2330_swing/tsmc_2330_oof_signal_feature_medians.csv
