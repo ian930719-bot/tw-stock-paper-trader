@@ -1,0 +1,330 @@
+name: TSMC 2330 Swing Research
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - research/200cagr-blind-validation
+    paths:
+      - "tsmc_swing_research.py"
+      - "tsmc_2330_annual_swing_scale_research.py"
+      - "tests/test_tsmc_2330_annual_swing_scale_research.py"
+      - "tsmc_2330_indicator_family_ablation.py"
+      - "tests/test_tsmc_indicator_family_ablation.py"
+      - "tsmc_2330_oos_signal_diagnostics.py"
+      - "tsmc_2330_pattern_combinations.py"
+      - "tsmc_2330_divergence_research.py"
+      - "tsmc_2330_hybrid_divergence_backtest.py"
+      - "tsmc_2330_hybrid_risk_research.py"
+      - "tsmc_2330_oracle_pivot_ceiling.py"
+      - "tsmc_2330_selected_threshold_signal_diagnostics.py"
+      - "tsmc_2330_selected_threshold_model_comparison.py"
+      - "tsmc_2330_probability_strategy_backtest.py"
+      - "tests/test_tsmc_probability_strategy_backtest.py"
+      - "tsmc_2330_interpretable_pivot_rules.py"
+      - "tsmc_2330_tree_rule_execution_backtest.py"
+      - "tsmc_2330_tree_exit_rule_research.py"
+      - "tsmc_2330_tree_atr_risk_research.py"
+      - "tsmc_2330_chip_data.py"
+      - "tsmc_2330_chip_factor_ablation.py"
+      - "tsmc_2330_chip_pivot_rules.py"
+      - "tsmc_2330_institutional_high_exit_backtest.py"
+      - "tests/test_tsmc_2330_institutional_high_exit_backtest.py"
+      - "tests/test_tsmc_2330_chip_data.py"
+      - "tests/test_tsmc_2330_chip_factor_ablation.py"
+      - "tests/test_tsmc_2330_chip_pivot_rules.py"
+      - "tests/test_tsmc_tree_atr_risk_research.py"
+      - "tests/test_tsmc_tree_exit_rule_research.py"
+      - "tests/test_tsmc_tree_rule_execution_backtest.py"
+      - "tests/test_tsmc_interpretable_pivot_rules.py"
+      - "tests/test_tsmc_selected_threshold_models.py"
+      - "tests/test_tsmc_selected_threshold_diagnostics.py"
+      - "tests/test_tsmc_oracle_pivot_ceiling.py"
+      - "tests/test_tsmc_divergence_research.py"
+      - "tsmc_2330_frozen_rule_research.py"
+      - "tsmc_2330_walk_forward.py"
+      - "tests/test_tsmc_2330_walk_forward.py"
+      - "tests/test_tsmc_2330_probability_policy.py"
+      - "tsmc_2330_execution_backtest.py"
+      - "tsmc_2330_reversal_confirmation_backtest.py"
+      - "tsmc_2330_trend_atr_risk_research.py"
+      - "tests/test_tsmc_trend_atr_risk.py"
+      - "tests/test_tsmc_reversal_confirmation.py"
+      - "tsmc_2330_price_limits.py"
+      - "tests/test_tsmc_price_limits.py"
+      - "tests/test_tsmc_execution_backtest.py"
+      - "corporate_action_adjustments.py"
+      - "historical_data_collector.py"
+      - "tests/test_tsmc_swing_research.py"
+      - ".github/workflows/tsmc-2330-swing.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  tsmc-swing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+      TZ: Asia/Taipei
+    steps:
+      - name: Checkout research branch
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install research dependencies
+        run: python -m pip install --upgrade pip pandas numpy requests scikit-learn
+      - name: Restore persistent broker-branch history cache
+        uses: actions/cache/restore@v4
+        with:
+          path: data/tsmc_2330/chip
+          key: tsmc-2330-chip-${{ github.run_id }}
+          restore-keys: |
+            tsmc-2330-chip-
+      - name: Compile probability strategy modules
+        run: |
+          python -m py_compile tsmc_2330_annual_swing_scale_research.py
+          python -m py_compile tests/test_tsmc_2330_annual_swing_scale_research.py
+          python -m py_compile tsmc_2330_probability_strategy_backtest.py
+          python -m py_compile tests/test_tsmc_probability_strategy_backtest.py
+          python -m py_compile tsmc_2330_frozen_rule_research.py
+          python -m py_compile tsmc_2330_walk_forward.py
+          python -m py_compile tsmc_2330_oos_signal_diagnostics.py
+          python -m py_compile tsmc_2330_chip_pivot_rules.py
+          python -m py_compile tests/test_tsmc_2330_chip_pivot_rules.py
+          python -m py_compile tests/test_tsmc_2330_walk_forward.py
+          python -m py_compile tests/test_tsmc_2330_probability_policy.py
+      - name: Run TSMC swing unit tests
+        run: python -m unittest discover -s tests -p "test_tsmc_*.py" -v
+      - name: Download raw TSMC 2330 history
+        run: |
+          mkdir -p data/tsmc_2330/bars
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from datetime import datetime
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+          import pandas as pd
+          from historical_data_collector import _api_get, _normalize_bars
+
+          start_date = "2010-01-04"
+          end_date = datetime.now(ZoneInfo("Asia/Taipei")).date().isoformat()
+          token = os.getenv("FINMIND_TOKEN", "").strip()
+          rows = _api_get({
+              "dataset": "TaiwanStockPrice",
+              "data_id": "2330",
+              "start_date": start_date,
+              "end_date": end_date,
+          }, token=token, timeout=45, retries=4)
+          bars = _normalize_bars(rows, "2330")
+          if len(bars) < 260:
+              raise RuntimeError(f"Insufficient TSMC 2330 history: {len(bars)} rows")
+          path = Path("data/tsmc_2330/bars/2330.csv")
+          bars.to_csv(path, index=False)
+          digest = hashlib.sha256(path.read_bytes()).hexdigest()
+          manifest = {
+              "symbol": "2330",
+              "source": "FinMind API v4 TaiwanStockPrice",
+              "price_basis": "raw, unadjusted OHLCV",
+              "start_date_requested": start_date,
+              "end_date_requested": end_date,
+              "first_date_returned": str(bars["date"].min()),
+              "last_date_returned": str(bars["date"].max()),
+              "rows": int(len(bars)),
+              "sha256": digest,
+              "token_configured": bool(token),
+              "retrieved_at_taipei": datetime.now(ZoneInfo("Asia/Taipei")).isoformat(),
+              "point_in_time_universe_complete": False,
+              "official_exchange_reconciled": False,
+              "note": "Single-symbol raw price history only. Corporate-action windows and official-source reconciliation remain separate research gates."
+          }
+          Path("data/tsmc_2330/download_manifest.json").write_text(
+              json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+          )
+          print(json.dumps(manifest, ensure_ascii=False, indent=2))
+          PY
+      - name: Collect and normalize TSMC corporate actions
+        run: |
+          mkdir -p data/tsmc_2330/corporate_actions
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import pandas as pd
+          from historical_data_collector import _api_get
+          from corporate_action_adjustments import normalize_corporate_action_events
+
+          start_date = "2010-01-04"
+          end_date = pd.Timestamp.now(tz="Asia/Taipei").date().isoformat()
+          out = Path("data/tsmc_2330/corporate_actions")
+          specs = {
+              "TaiwanStockSplitPrice": ("before_price", "after_price"),
+              "TaiwanStockCapitalReductionReferencePrice": ("ClosingPriceonTheLastTradingDay", "PostReductionReferencePrice"),
+              "TaiwanStockParValueChange": ("before_close", "after_ref_close"),
+          }
+          status = {}
+          globals_by_name = {}
+          for dataset, columns in specs.items():
+              params = {"dataset": dataset, "start_date": start_date, "end_date": end_date}
+              # Free-tier API requires a single-symbol filter for capital-reduction reference prices.
+              if dataset == "TaiwanStockCapitalReductionReferencePrice":
+                  params["data_id"] = "2330"
+              rows = _api_get(params, token=__import__("os").getenv("FINMIND_TOKEN", ""), timeout=45, retries=4)
+              frame = pd.DataFrame(rows)
+              expected = {"date", "stock_id", *columns}
+              if not frame.empty and not expected.issubset(frame.columns):
+                  raise RuntimeError(f"{dataset} schema mismatch; missing {sorted(expected - set(frame.columns))}")
+              if not frame.empty:
+                  frame["stock_id"] = frame["stock_id"].astype(str).str.strip()
+                  frame = frame.loc[frame["stock_id"] == "2330"].copy()
+              frame.to_csv(out / f"{dataset}.csv", index=False)
+              globals_by_name[dataset] = frame
+              status[dataset] = {"status": "downloaded" if len(frame) else "empty", "rows": len(frame), "symbol": "2330"}
+
+          dividend_rows = _api_get({
+              "dataset": "TaiwanStockDividendResult", "data_id": "2330",
+              "start_date": start_date, "end_date": end_date,
+          }, token=__import__("os").getenv("FINMIND_TOKEN", ""), timeout=45, retries=4)
+          dividends = pd.DataFrame(dividend_rows)
+          if not dividends.empty:
+              expected_dividend = {"date", "before_price", "reference_price"}
+              if not expected_dividend.issubset(dividends.columns):
+                  raise RuntimeError(f"TaiwanStockDividendResult schema mismatch; missing {sorted(expected_dividend - set(dividends.columns))}")
+              if "stock_id" not in dividends:
+                  dividends["stock_id"] = "2330"
+              dividends["stock_id"] = dividends["stock_id"].astype(str).str.strip()
+              dividends = dividends.loc[dividends["stock_id"] == "2330"].copy()
+          dividends.to_csv(out / "TaiwanStockDividendResult_2330.csv", index=False)
+          status["TaiwanStockDividendResult_2330"] = {
+              "status": "downloaded" if len(dividends) else "empty", "rows": len(dividends)
+          }
+
+          events = normalize_corporate_action_events(
+              dividend_results=dividends,
+              split_prices=globals_by_name["TaiwanStockSplitPrice"],
+              capital_reductions=globals_by_name["TaiwanStockCapitalReductionReferencePrice"],
+              par_value_changes=globals_by_name["TaiwanStockParValueChange"],
+          )
+          events = events.loc[events["symbol"].astype(str) == "2330"].copy() if not events.empty else events
+          events.to_csv(out / "events_2330.csv", index=False)
+          conflicts = int(events["conflict"].fillna(False).sum()) if not events.empty else 0
+          manifest = {
+              "symbol": "2330", "source": "FinMind API v4 corporate-action datasets",
+              "start_date": start_date, "end_date": end_date,
+              "datasets": status, "all_datasets_retrieved": True,
+              "event_rows": int(len(events)), "conflicts": conflicts,
+              "complete_for_requested_symbol": conflicts == 0 and all(item["status"] in {"downloaded", "empty"} for item in status.values()),
+              "note": "Empty endpoint response is recorded as empty, not treated as a failed request. Conflicting same-day ratios fail the research gate."
+          }
+          (out / "manifest_2330.json").write_text(
+              json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+          )
+          print(json.dumps(manifest, ensure_ascii=False, indent=2))
+          if conflicts:
+              raise RuntimeError(f"Conflicting corporate-action ratios for 2330: {conflicts}")
+          PY
+      - name: Collect TSMC institutional and broker-branch flow data
+        run: |
+          python tsmc_2330_chip_data.py \
+            --symbol 2330 \
+            --start-date 2010-01-04 \
+            --end-date "$(date +%F)" \
+            --output data/tsmc_2330/chip \
+            --broker-days 20
+      - name: Save updated broker-branch history cache
+        if: always() && hashFiles('data/tsmc_2330/chip/2330_broker_coverage.csv') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: data/tsmc_2330/chip
+          key: tsmc-2330-chip-${{ github.run_id }}
+      - name: Build historical price limits from TWSE official rules and references
+        run: |
+          python tsmc_2330_price_limits.py \
+            --bars data/tsmc_2330/bars/2330.csv \
+            --dividends data/tsmc_2330/corporate_actions/TaiwanStockDividendResult_2330.csv \
+            --output data/tsmc_2330/corporate_actions/price_limits_2330.csv
+      - name: Run causal swing pivot and lead-lag research
+        run: python tsmc_swing_research.py --input data/tsmc_2330 --output artifacts/tsmc_2330_swing --corporate-actions data/tsmc_2330/corporate_actions/events_2330.csv --chip-data data/tsmc_2330/chip/2330_chip_features.csv
+      - name: Analyze annual small, medium and large swing highs and lows
+        run: |
+          python tsmc_2330_annual_swing_scale_research.py \
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --events artifacts/tsmc_2330_swing/tsmc_2330_pivot_events.csv \
+            --output artifacts/tsmc_2330_swing
+      - name: Calculate perfect-foresight pivot-to-pivot upper bound (not tradable)
+        run: |
+          python tsmc_2330_oracle_pivot_ceiling.py \
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --output artifacts/tsmc_2330_swing
+      - name: Compare technical-only and institutional chip features
+        run: |
+          python tsmc_2330_chip_factor_ablation.py \
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --oracle artifacts/tsmc_2330_swing/tsmc_2330_oracle_pivot_ceiling.json \
+            --chip-manifest data/tsmc_2330/chip/2330_chip_manifest.json \
+            --output artifacts/tsmc_2330_swing
+      # Fixed-split tree and indicator-family experiments are withheld until
+      # each is migrated to annual expanding walk-forward validation.
+      - name: Evaluate annual OOF technical versus institutional pivot rules
+        run: |
+          python tsmc_2330_chip_pivot_rules.py \
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --oracle artifacts/tsmc_2330_swing/tsmc_2330_oracle_pivot_ceiling.json \
+            --output artifacts/tsmc_2330_swing
+      - name: Train causal signals for the training-selected pivot definition
+        run: |
+          python tsmc_2330_selected_threshold_signal_diagnostics.py \
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --oracle artifacts/tsmc_2330_swing/tsmc_2330_oracle_pivot_ceiling.json \
+            --output artifacts/tsmc_2330_swing
+      - name: Compare predeclared nonlinear models for selected pivot threshold
+        run: |
+          python tsmc_2330_selected_threshold_model_comparison.py \
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --oracle artifacts/tsmc_2330_swing/tsmc_2330_oracle_pivot_ceiling.json \
+            --output artifacts/tsmc_2330_swing
+      - name: Run annual OOF probability strategy backtest with Taiwan costs
+        run: |
+          python tsmc_2330_probability_strategy_backtest.py \
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --oracle artifacts/tsmc_2330_swing/tsmc_2330_oracle_pivot_ceiling.json \
+            --limits data/tsmc_2330/corporate_actions/price_limits_2330.csv \
+            --dividends data/tsmc_2330/corporate_actions/TaiwanStockDividendResult_2330.csv \
+            --output artifacts/tsmc_2330_swing
+      # Legacy fixed-split interpretable tree is withheld; migrate before re-enabling.
+      - name: Run purged chronological OOS signal diagnostics
+        run: |
+          python tsmc_2330_oos_signal_diagnostics.py \
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --events artifacts/tsmc_2330_swing/tsmc_2330_pivot_events.csv \
+            --output artifacts/tsmc_2330_swing
+      - name: Run predeclared feature-conjunction diagnostics
+        run: |
+          python tsmc_2330_pattern_combinations.py \
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --events artifacts/tsmc_2330_swing/tsmc_2330_pivot_events.csv \
+            --output artifacts/tsmc_2330_swing
+      - name: Evaluate all predeclared rules with annual expanding walk-forward
+        run: |
+          python tsmc_2330_frozen_rule_research.py \
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --events artifacts/tsmc_2330_swing/tsmc_2330_pivot_events.csv \
+            --output artifacts/tsmc_2330_swing
+      # Legacy fixed-split rule-execution modules are intentionally withheld
+      # until they are migrated to the same annual walk-forward protocol.
+      - name: Upload reproducible research outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: tsmc-2330-swing-research
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            data/tsmc_2330/bars/2330.csv
+            data/tsmc_2330/download_manifest.json
+            data/tsmc_2330/corporate_actions/
+            data/tsmc_2330/chip/
+            artifacts/tsmc_2330_swing/

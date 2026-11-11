@@ -1,0 +1,592 @@
+"""Resumable FinMind daily-history collector for Taiwan equities.
+
+The collector builds a candidate symbol list from the current security master
+plus historical delisting announcements, then downloads raw daily bars per
+symbol. This improves coverage but does NOT prove complete point-in-time
+universe membership; that remains an explicit research limitation.
+"""
+from __future__ import annotations
+
+import argparse
+from datetime import datetime
+from zoneinfo import ZoneInfo
+import hashlib
+import json
+import os
+import time
+from pathlib import Path
+
+import pandas as pd
+import numpy as np
+import requests
+
+API_URL = "https://api.finmindtrade.com/api/v4/data"
+
+
+def _api_get(params: dict, *, token: str = "", timeout: int = 20,
+             retries: int = 3, pause_seconds: float = 2.0) -> list[dict]:
+    """Call FinMind with bounded retries and actionable, redacted HTTP errors.
+
+    Permanent 4xx responses are not retried. HTTP 429 and transient network/5xx
+    failures remain retryable.
+    """
+    query = dict(params)
+    if token:
+        query["token"] = token
+    dataset = str(params.get("dataset", "unknown"))
+    error = None
+    for attempt in range(retries):
+        try:
+            response = requests.get(API_URL, params=query, timeout=(8, timeout))
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, dict) or str(payload.get("status", "200")) not in {"200", "success", "Success"}:
+                raise RuntimeError(str(payload.get("msg", "FinMind API status error")) if isinstance(payload, dict) else "Invalid API payload")
+            rows = payload.get("data")
+            if not isinstance(rows, list):
+                raise RuntimeError("FinMind data field is not a list")
+            return rows
+        except requests.HTTPError as exc:
+            response = exc.response
+            status = getattr(response, "status_code", None)
+            body = str(getattr(response, "text", "") or "")[:1200]
+            if token:
+                body = body.replace(token, "[REDACTED]")
+            detail = f"FinMind HTTP {status} dataset={dataset}: {body or str(exc)}"
+            if status is not None and 400 <= int(status) < 500 and int(status) != 429:
+                raise RuntimeError(detail) from exc
+            error = RuntimeError(detail)
+        except (requests.RequestException, ValueError, RuntimeError) as exc:
+            error = exc
+        if attempt + 1 < retries:
+            delay = min(20, 2 ** (attempt + 1) * pause_seconds)
+            print(
+                f"[API RETRY] dataset={dataset} attempt={attempt + 2}/{retries} "
+                f"delay={delay:.1f}s error={type(error).__name__}: {error}",
+                flush=True,
+            )
+            time.sleep(delay)
+    raise RuntimeError(f"FinMind request failed: {error}") from error
+
+def save_universe_snapshot(output_dir: str, frame: pd.DataFrame) -> dict:
+    """Persist the first security-master observation for each Taiwan calendar day."""
+    now = datetime.now(ZoneInfo("Asia/Taipei"))
+    snapshot_date = now.date().isoformat()
+    directory = Path(output_dir) / "universe_snapshots"
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{snapshot_date}.csv"
+    if not path.exists():
+        snapshot = frame.copy()
+        if snapshot.empty or not {"stock_id", "type"}.issubset(snapshot.columns):
+            raise RuntimeError("TaiwanStockInfo did not return a usable daily universe snapshot")
+        snapshot["stock_id"] = snapshot["stock_id"].astype(str).str.strip()
+        snapshot["snapshot_date"] = snapshot_date
+        snapshot["captured_at_taipei"] = now.isoformat()
+        snapshot["source"] = "FinMind TaiwanStockInfo"
+        snapshot.to_csv(path, index=False)
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    return {
+        "snapshot_date": snapshot_date,
+        "snapshot_path": str(path.relative_to(Path(output_dir))),
+        "snapshot_sha256": digest,
+        "snapshot_rows": int(len(pd.read_csv(path))),
+    }
+
+
+def snapshot_current_universe(output_dir: str, *, token: str | None = None) -> dict:
+    """Fetch and persist today's master only when today's immutable snapshot is absent."""
+    now = datetime.now(ZoneInfo("Asia/Taipei"))
+    path = Path(output_dir) / "universe_snapshots" / f"{now.date().isoformat()}.csv"
+    if path.exists():
+        return save_universe_snapshot(output_dir, pd.read_csv(path, dtype={"stock_id": str}))
+    api_token = (token or os.getenv("FINMIND_TOKEN", "")).strip()
+    rows = _api_get({"dataset": "TaiwanStockInfo"}, token=api_token, timeout=30)
+    return save_universe_snapshot(output_dir, pd.DataFrame(rows))
+
+
+def discover_symbols(start_date: str, end_date: str | None = None, *,
+                     token: str = "", timeout: int = 30) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Return current security master and historical delisting symbol candidates."""
+    current = pd.DataFrame(_api_get({"dataset": "TaiwanStockInfo"}, token=token, timeout=timeout))
+    if current.empty or not {"stock_id", "type"}.issubset(current.columns):
+        raise RuntimeError("TaiwanStockInfo did not return a usable security master")
+    current = current.copy()
+    current["stock_id"] = current["stock_id"].astype(str).str.strip()
+    current = current[current["type"].astype(str).str.lower().isin({"twse", "tpex"})]
+    params = {"dataset": "TaiwanStockDelisting", "start_date": start_date}
+    if end_date:
+        params["end_date"] = end_date
+    delisted = pd.DataFrame(_api_get(params, token=token, timeout=timeout))
+    if not delisted.empty and "stock_id" in delisted:
+        delisted["stock_id"] = delisted["stock_id"].astype(str).str.strip()
+    return current, delisted
+
+
+def build_candidate_universe(current: pd.DataFrame, delisted: pd.DataFrame) -> pd.DataFrame:
+    """Build a stock-only candidate list, excluding ETFs, bonds and warrants.
+
+    Current common equities and historical delisting notices are candidates,
+    not proof of complete point-in-time membership or delisted-price coverage.
+    """
+    id_pattern = r"^[1-9][0-9]{3}(?:-[A-Z]+)?$"
+    current = current.copy()
+    for col in ("stock_name", "industry_category", "type"):
+        if col not in current:
+            current[col] = ""
+    industry = current["industry_category"].astype(str)
+    current_equities = current[
+        current["stock_id"].astype(str).str.fullmatch(id_pattern, na=False)
+        & ~industry.str.contains(
+            r"ETF|指數股票型基金|債|受益證券|權證|認購|認售|牛熊", case=False, regex=True
+        )
+    ][["stock_id", "stock_name", "industry_category", "type"]].copy()
+    current_equities["candidate_source"] = "current_common_equity"
+    current_equities["delisting_date"] = ""
+
+    delisted_equities = pd.DataFrame(columns=[
+        "stock_id", "stock_name", "industry_category", "type", "candidate_source", "delisting_date"
+    ])
+    if not delisted.empty and "stock_id" in delisted:
+        old = delisted.copy()
+        for col in ("stock_name", "industry_category", "type"):
+            if col not in old:
+                old[col] = ""
+        old["stock_id"] = old["stock_id"].astype(str).str.strip()
+        old = old[old["stock_id"].str.fullmatch(id_pattern, na=False)]
+        delisted_equities = old[["stock_id", "stock_name", "industry_category", "type"]].copy()
+        delisted_equities["candidate_source"] = "delisted_common_equity_candidate"
+        delisted_equities["delisting_date"] = old["date"].astype(str) if "date" in old else ""
+
+    candidates = pd.concat([current_equities, delisted_equities], ignore_index=True)
+    candidates = candidates.drop_duplicates("stock_id", keep="first")
+    return candidates.sort_values(["candidate_source", "stock_id"]).reset_index(drop=True)
+
+
+def select_candidate_metadata(candidates: pd.DataFrame, max_symbols: int | None,
+                              *, seed: int = 20261109) -> pd.DataFrame:
+    """Select a deterministic, industry-stratified smoke-test sample.
+
+    Reserve up to 20% for delisted candidates, then round-robin current names
+    across industry groups. Full-universe collection passes max_symbols=None.
+    """
+    if max_symbols is None or len(candidates) <= max_symbols:
+        return candidates.reset_index(drop=True)
+    if max_symbols <= 0:
+        return candidates.iloc[0:0].copy()
+    z = candidates.copy()
+    old = z[z["candidate_source"] == "delisted_common_equity_candidate"]
+    current = z[z["candidate_source"] == "current_common_equity"]
+    old_n = min(len(old), max(1, int(round(max_symbols * 0.20)))) if len(old) and max_symbols >= 5 else 0
+    current_n = max_symbols - old_n
+    selected_current = []
+    groups = []
+    for _, group in current.groupby("industry_category", dropna=False, sort=True):
+        shuffled = group.sample(frac=1, random_state=seed).reset_index(drop=True)
+        groups.append(shuffled)
+    while len(selected_current) < current_n and any(len(g) for g in groups):
+        for group in groups:
+            if len(selected_current) >= current_n:
+                break
+            if len(group):
+                selected_current.append(group.iloc[0])
+                group.drop(index=0, inplace=True)
+                group.reset_index(drop=True, inplace=True)
+    selected_old = old.sample(n=old_n, random_state=seed) if old_n else old.iloc[0:0]
+    if selected_current:
+        current_pick = pd.DataFrame(selected_current)
+    else:
+        current_pick = current.iloc[0:0]
+    selected = pd.concat([current_pick, selected_old], ignore_index=True)
+    return selected.sort_values(["candidate_source", "industry_category", "stock_id"]).reset_index(drop=True)
+
+
+def _normalize_bars(rows: list[dict], symbol: str) -> pd.DataFrame:
+    if not rows:
+        return pd.DataFrame(columns=["symbol", "date", "open", "high", "low", "close", "volume", "turnover"])
+    raw = pd.DataFrame(rows).rename(columns={
+        "max": "high", "min": "low", "Trading_Volume": "volume",
+        "Trading_money": "turnover",
+    })
+    required = {"date", "open", "high", "low", "close", "volume"}
+    if not required.issubset(raw.columns):
+        raise RuntimeError(f"{symbol}: missing columns {sorted(required - set(raw.columns))}")
+    for col in ("open", "high", "low", "close", "volume"):
+        raw[col] = pd.to_numeric(raw[col], errors="coerce")
+    if "turnover" not in raw:
+        raw["turnover"] = np.nan
+    else:
+        raw["turnover"] = pd.to_numeric(raw["turnover"], errors="coerce")
+    raw["date"] = pd.to_datetime(raw["date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    raw = raw.dropna(subset=["date", "open", "high", "low", "close", "volume"])
+    valid = (
+        (raw[["open", "high", "low", "close"]] > 0).all(axis=1)
+        & (raw["volume"] >= 0)
+        & (raw["high"] >= raw[["open", "close", "low"]].max(axis=1))
+        & (raw["low"] <= raw[["open", "close", "high"]].min(axis=1))
+    )
+    raw = raw.loc[valid].drop_duplicates("date", keep="last").sort_values("date")
+    raw.insert(0, "symbol", str(symbol))
+    return raw[["symbol", "date", "open", "high", "low", "close", "volume", "turnover"]].reset_index(drop=True)
+
+
+def collect_history(output_dir: str, start_date: str, end_date: str | None = None, *,
+                    token: str | None = None, pause_seconds: float = 6.1,
+                    max_symbols: int | None = None,
+                    max_runtime_minutes: float | None = None) -> dict:
+    """Resume per-symbol downloads and write raw CSV plus provenance manifest."""
+    api_token = (token or os.getenv("FINMIND_TOKEN", "")).strip()
+    if not api_token:
+        # FinMind free-tier requests are rate-limited; keep a conservative
+        # inter-symbol delay while still bounding each failed request.
+        pause_seconds = max(float(pause_seconds), 12.1)
+    else:
+        pause_seconds = max(float(pause_seconds), 2.1)
+    out = Path(output_dir)
+    bars_dir = out / "bars"
+    bars_dir.mkdir(parents=True, exist_ok=True)
+    frozen_universe_path = out / "candidate_universe_full.csv"
+    if max_symbols is None and frozen_universe_path.exists():
+        # Reuse the exact initial full-universe snapshot across chained batches.
+        candidate_meta = pd.read_csv(frozen_universe_path, dtype={"stock_id": str})
+        universe_snapshot = snapshot_current_universe(out, token=api_token)
+    else:
+        current, delisted = discover_symbols(start_date, end_date, token=api_token)
+        candidate_meta = build_candidate_universe(current, delisted)
+        current.to_csv(out / "current_security_master.csv", index=False)
+        delisted.to_csv(out / "delisting_announcements.csv", index=False)
+        universe_snapshot = save_universe_snapshot(out, current)
+        if max_symbols is None:
+            candidate_meta.to_csv(frozen_universe_path, index=False)
+    candidate_meta = select_candidate_metadata(candidate_meta, max_symbols)
+    symbols = candidate_meta["stock_id"].astype(str).tolist()
+    candidate_meta.rename(columns={"stock_id": "symbol", "stock_name": "name"}).to_csv(
+        out / "candidate_symbols.csv", index=False
+    )
+    statuses = []
+
+    def write_checkpoint() -> None:
+        checkpoint = {
+            "source": "FinMind API v4",
+            "price_dataset": "TaiwanStockPrice (raw, unadjusted execution bars)",
+            "start_date": start_date, "end_date": end_date,
+            "token_configured": bool(api_token),
+            "requested_symbols": len(symbols),
+            "candidate_universe_frozen": max_symbols is None and frozen_universe_path.exists(),
+            "candidate_universe_sha256": hashlib.sha256(frozen_universe_path.read_bytes()).hexdigest() if max_symbols is None and frozen_universe_path.exists() else None,
+            "completed_symbols": sum(x["status"] in {"downloaded", "cached", "empty"} for x in statuses),
+            "attempted_symbols": sum(x["status"] != "blocked" for x in statuses),
+            "remaining_symbols": max(0, len(symbols) - sum(x["status"] in {"downloaded", "cached", "empty"} for x in statuses)),
+            "collection_complete": (
+                sum(x["status"] in {"downloaded", "cached", "empty"} for x in statuses) >= len(symbols)
+                and not any(x["status"] == "failed" for x in statuses)
+            ),
+            "successful_symbols": sum(x["status"] in {"downloaded", "cached"} for x in statuses),
+            "failed_symbols": sum(x["status"] == "failed" for x in statuses),
+            "blocked_symbols": sum(x["status"] == "blocked" for x in statuses),
+            "empty_symbols": sum(x["status"] == "empty" for x in statuses),
+            "status_rows": statuses,
+            "data_files_sha256": {},
+            "checkpoint_only": True,
+            "point_in_time_universe_complete": False,
+            "delisted_price_coverage_verified": False,
+            "note": "Checkpoint written during collection; hashes are finalized only after the run completes. Candidate symbols are not a verified historical point-in-time universe.",
+        }
+        (out / "download_manifest.json").write_text(
+            json.dumps(checkpoint, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    collection_started = time.monotonic()
+    print(
+        f"[COLLECT START] candidates={len(symbols)} cached_files={len(list(bars_dir.glob('*.csv')))} "
+        f"token_configured={bool(api_token)} pause_seconds={pause_seconds:.1f}",
+        flush=True,
+    )
+    for i, symbol in enumerate(symbols):
+        if max_runtime_minutes is not None and (time.monotonic() - collection_started) >= max(0.0, float(max_runtime_minutes)) * 60:
+            break
+        path = bars_dir / f"{symbol}.csv"
+        if path.exists() and path.stat().st_size > 20:
+            cached_rows = int(len(pd.read_csv(path)))
+            cached_status = "cached" if cached_rows > 0 else "empty"
+            statuses.append({"symbol": symbol, "status": cached_status, "rows": cached_rows, "cache_hit": True})
+            write_checkpoint()
+            done = sum(x["status"] in {"downloaded", "cached", "empty"} for x in statuses)
+            if done % 10 == 0 or done == len(symbols):
+                print(f"[COLLECT PROGRESS] {done}/{len(symbols)} successful_or_empty; cached={sum(x['status']=='cached' for x in statuses)} empty={sum(x['status']=='empty' for x in statuses)} failed={sum(x['status']=='failed' for x in statuses)} current={symbol}", flush=True)
+            continue
+        if not api_token:
+            statuses.append({
+                "symbol": symbol, "status": "blocked",
+                "error": "FINMIND_TOKEN is not configured",
+            })
+            write_checkpoint()
+            continue
+        params = {"dataset": "TaiwanStockPrice", "data_id": symbol, "start_date": start_date}
+        if end_date:
+            params["end_date"] = end_date
+        try:
+            rows = _api_get(params, token=api_token)
+            frame = _normalize_bars(rows, symbol)
+            frame.to_csv(path, index=False)
+            status = "downloaded" if not frame.empty else "empty"
+            statuses.append({"symbol": symbol, "status": status, "rows": int(len(frame))})
+        except Exception as exc:
+            statuses.append({"symbol": symbol, "status": "failed", "error": str(exc)[:500]})
+        write_checkpoint()
+        done = sum(x["status"] in {"downloaded", "cached", "empty"} for x in statuses)
+        failed = sum(x["status"] == "failed" for x in statuses)
+        print(
+            f"[COLLECT PROGRESS] attempted={len(statuses)}/{len(symbols)} "
+            f"successful_or_empty={done} failed={failed} current={symbol} "
+            f"status={statuses[-1]['status']}",
+            flush=True,
+        )
+        if i + 1 < len(symbols):
+            time.sleep(max(0.0, float(pause_seconds)))
+    processed_count = sum(x["status"] in {"downloaded", "cached", "empty"} for x in statuses)
+    failed_count = sum(x["status"] == "failed" for x in statuses)
+    manifest = {
+        "source": "FinMind API v4",
+        "price_dataset": "TaiwanStockPrice (raw, unadjusted execution bars)",
+        "start_date": start_date, "end_date": end_date,
+        "token_configured": bool(api_token),
+        "requested_symbols": len(symbols),
+        "candidate_universe_frozen": max_symbols is None and frozen_universe_path.exists(),
+        "candidate_universe_sha256": hashlib.sha256(frozen_universe_path.read_bytes()).hexdigest() if max_symbols is None and frozen_universe_path.exists() else None,
+        "completed_symbols": processed_count,
+        "attempted_symbols": sum(x["status"] != "blocked" for x in statuses),
+        "remaining_symbols": max(0, len(symbols) - processed_count),
+        "collection_complete": processed_count >= len(symbols) and failed_count == 0,
+        "runtime_seconds": round(time.monotonic() - collection_started, 2),
+        "successful_symbols": sum(x["status"] in {"downloaded", "cached"} for x in statuses),
+        "failed_symbols": failed_count,
+        "blocked_symbols": sum(x["status"] == "blocked" for x in statuses),
+        "empty_symbols": sum(x["status"] == "empty" for x in statuses),
+        "status_rows": statuses,
+        "point_in_time_universe_complete": False,
+        "daily_universe_snapshot": universe_snapshot,
+        "delisted_price_coverage_verified": False,
+        "checkpoint_only": False,
+        "note": "Current master plus delisting announcements is a candidate list, not a verified historical point-in-time universe. Reconcile coverage before research-grade use.",
+    }
+    manifest["data_files_sha256"] = {}
+    for path in sorted(bars_dir.glob("*.csv")):
+        manifest["data_files_sha256"][path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
+    (out / "download_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(
+        f"[COLLECT END] complete={manifest['collection_complete']} "
+        f"successful={manifest['successful_symbols']} empty={manifest['empty_symbols']} "
+        f"failed={manifest['failed_symbols']} remaining={manifest['remaining_symbols']} "
+        f"runtime_seconds={manifest['runtime_seconds']:.1f}",
+        flush=True,
+    )
+    return manifest
+
+
+def collect_corporate_actions(output_dir: str, start_date: str, end_date: str | None = None, *,
+                              token: str | None = None, pause_seconds: float = 6.1,
+                              max_runtime_minutes: float | None = None) -> dict:
+    """Collect per-symbol dividend results and market-wide split/reduction/par-value events.
+
+    The stage is resumable. Empty event files are valid completed responses;
+    failed requests remain retryable and never count as complete.
+    """
+    from corporate_action_adjustments import normalize_corporate_action_events
+
+    api_token = (token or os.getenv("FINMIND_TOKEN", "")).strip()
+    pause = max(float(pause_seconds), 12.1 if not api_token else 6.1)
+    out = Path(output_dir)
+    action_dir = out / "corporate_actions"
+    symbol_dir = action_dir / "by_symbol"
+    symbol_dir.mkdir(parents=True, exist_ok=True)
+    candidates_path = out / "candidate_symbols.csv"
+    if not candidates_path.exists():
+        raise RuntimeError("candidate_symbols.csv is required before corporate-action collection")
+    candidates = pd.read_csv(candidates_path, dtype={"symbol": str, "stock_id": str})
+    symbol_col = "symbol" if "symbol" in candidates else "stock_id"
+    if symbol_col not in candidates:
+        raise RuntimeError("candidate_symbols.csv has no symbol/stock_id column")
+    symbols = candidates[symbol_col].dropna().astype(str).str.strip().unique().tolist()
+
+    global_specs = {
+        "TaiwanStockSplitPrice": ("before_price", "after_price"),
+        "TaiwanStockCapitalReductionReferencePrice": (
+            "ClosingPriceonTheLastTradingDay", "PostReductionReferencePrice"
+        ),
+        "TaiwanStockParValueChange": ("before_close", "after_ref_close"),
+    }
+    global_frames = {}
+    global_status = {}
+    for dataset in global_specs:
+        path = action_dir / f"{dataset}.csv"
+        if path.exists() and path.stat().st_size > 20:
+            try:
+                global_frames[dataset] = pd.read_csv(path, dtype={"stock_id": str})
+                global_status[dataset] = "cached"
+                continue
+            except Exception:
+                path.unlink(missing_ok=True)
+        if not api_token:
+            global_status[dataset] = "blocked: FINMIND_TOKEN is not configured"
+            continue
+        params = {"dataset": dataset, "start_date": start_date}
+        if end_date:
+            params["end_date"] = end_date
+        try:
+            rows = _api_get(params, token=api_token)
+            frame = pd.DataFrame(rows)
+            if frame.empty:
+                frame = pd.DataFrame(columns=["stock_id", "date", *global_specs[dataset]])
+                global_status[dataset] = "empty"
+            else:
+                global_status[dataset] = "downloaded"
+            frame.to_csv(path, index=False)
+            global_frames[dataset] = frame
+        except Exception as exc:
+            global_status[dataset] = f"failed: {type(exc).__name__}: {exc}"
+    global_ok = all(not value.startswith(("failed", "blocked")) for value in global_status.values())
+
+    statuses = []
+    started = time.monotonic()
+    for index, symbol in enumerate(symbols):
+        if max_runtime_minutes is not None and (time.monotonic() - started) >= max(0.0, float(max_runtime_minutes)) * 60:
+            break
+        path = symbol_dir / f"{symbol}.csv"
+        if path.exists() and path.stat().st_size > 20:
+            try:
+                cached = pd.read_csv(path)
+                statuses.append({"symbol": symbol, "status": "cached" if len(cached) else "empty"})
+                continue
+            except Exception:
+                path.unlink(missing_ok=True)
+        if not api_token:
+            statuses.append({
+                "symbol": symbol, "status": "blocked",
+                "error": "FINMIND_TOKEN is not configured",
+            })
+            continue
+        try:
+            params = {
+                "dataset": "TaiwanStockDividendResult",
+                "data_id": symbol,
+                "start_date": start_date,
+            }
+            if end_date:
+                params["end_date"] = end_date
+            rows = _api_get(params, token=api_token)
+            frame = pd.DataFrame(rows)
+            if frame.empty:
+                frame = pd.DataFrame(columns=[
+                    "date", "stock_id", "before_price", "after_price",
+                    "stock_and_cache_dividend", "reference_price",
+                ])
+                status = "empty"
+            else:
+                status = "downloaded"
+            frame.to_csv(path, index=False)
+            statuses.append({"symbol": symbol, "status": status, "rows": int(len(frame))})
+        except Exception as exc:
+            statuses.append({"symbol": symbol, "status": "failed", "error": str(exc)[:500]})
+        if index + 1 < len(symbols):
+            time.sleep(pause)
+
+    completed = sum(x["status"] in {"downloaded", "cached", "empty"} for x in statuses)
+    failed = sum(x["status"] == "failed" for x in statuses)
+    all_dividend_frames = []
+    for symbol in symbols:
+        path = symbol_dir / f"{symbol}.csv"
+        if path.exists() and path.stat().st_size > 20:
+            try:
+                frame = pd.read_csv(path)
+                if not frame.empty:
+                    if "stock_id" not in frame:
+                        frame["stock_id"] = symbol
+                    all_dividend_frames.append(frame)
+            except Exception:
+                pass
+    dividend_results = pd.concat(all_dividend_frames, ignore_index=True) if all_dividend_frames else pd.DataFrame()
+    events = normalize_corporate_action_events(
+        dividend_results=dividend_results,
+        split_prices=global_frames.get("TaiwanStockSplitPrice"),
+        capital_reductions=global_frames.get("TaiwanStockCapitalReductionReferencePrice"),
+        par_value_changes=global_frames.get("TaiwanStockParValueChange"),
+    )
+    events.to_csv(action_dir / "events.csv", index=False)
+    action_manifest = {
+        "source": "FinMind API v4",
+        "start_date": start_date,
+        "end_date": end_date,
+        "token_configured": bool(api_token),
+        "requested_symbols": len(symbols),
+        "completed_symbols": completed,
+        "attempted_symbols": sum(x["status"] != "blocked" for x in statuses),
+        "remaining_symbols": max(0, len(symbols) - completed),
+        "failed_symbols": failed,
+        "blocked_symbols": sum(x["status"] == "blocked" for x in statuses),
+        "empty_symbols": sum(x["status"] == "empty" for x in statuses),
+        "global_dataset_status": global_status,
+        "global_datasets_complete": global_ok,
+        "corporate_actions_complete": completed >= len(symbols) and failed == 0
+                                      and not any(x["status"] == "blocked" for x in statuses)
+                                      and global_ok,
+        "event_rows": int(len(events)),
+        "event_symbols": int(events["symbol"].nunique()) if not events.empty else 0,
+        "event_conflicts": int(events["conflict"].fillna(False).sum()) if not events.empty and "conflict" in events else 0,
+        "runtime_seconds": round(time.monotonic() - started, 2),
+        "status_rows": statuses,
+    }
+    (action_dir / "manifest.json").write_text(
+        json.dumps(action_manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    main_manifest_path = out / "download_manifest.json"
+    if main_manifest_path.exists():
+        main_manifest = json.loads(main_manifest_path.read_text(encoding="utf-8"))
+        main_manifest.update({
+            "corporate_actions_complete": action_manifest["corporate_actions_complete"],
+            "corporate_action_event_rows": action_manifest["event_rows"],
+            "corporate_action_symbols": action_manifest["event_symbols"],
+            "corporate_action_conflicts": action_manifest["event_conflicts"],
+            "corporate_action_manifest": "corporate_actions/manifest.json",
+        })
+        main_manifest_path.write_text(
+            json.dumps(main_manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    print(
+        f"[CORPORATE ACTIONS] complete={action_manifest['corporate_actions_complete']} "
+        f"symbols={completed}/{len(symbols)} failed={failed} events={len(events)}",
+        flush=True,
+    )
+    return action_manifest
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", default="data/taiwan_history")
+    parser.add_argument("--start-date", default="2010-01-04")
+    parser.add_argument("--end-date", default=None)
+    parser.add_argument("--pause-seconds", type=float, default=6.1)
+    parser.add_argument("--max-symbols", type=int, default=None)
+    parser.add_argument("--max-runtime-minutes", type=float, default=None,
+                        help="Stop cleanly after this many minutes so a later run can resume")
+    parser.add_argument("--collect-corporate-actions", action="store_true",
+                        help="Also collect resumable ex-rights, split, capital-reduction and par-value events")
+    args = parser.parse_args()
+    result = collect_history(args.output, args.start_date, args.end_date,
+                             pause_seconds=args.pause_seconds, max_symbols=args.max_symbols,
+                             max_runtime_minutes=args.max_runtime_minutes)
+    if args.collect_corporate_actions:
+        remaining = None
+        if args.max_runtime_minutes is not None:
+            remaining = max(0.0, float(args.max_runtime_minutes) - float(result.get("runtime_seconds", 0)) / 60.0)
+        action_result = collect_corporate_actions(
+            args.output, args.start_date, args.end_date,
+            max_runtime_minutes=remaining,
+        )
+        result["corporate_actions_complete"] = action_result["corporate_actions_complete"]
+        result["corporate_action_event_rows"] = action_result["event_rows"]
+    print(json.dumps({k: v for k, v in result.items() if k != "status_rows"}, 
+                     ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    main()

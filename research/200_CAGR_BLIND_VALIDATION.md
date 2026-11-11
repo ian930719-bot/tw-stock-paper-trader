@@ -1,0 +1,159 @@
+# 100% CAGR Reverse-Research and Walk-Forward Validation Protocol
+
+Status: research specification; no strategy is approved for live capital.
+Target: investigate whether a robust, executable Taiwan-equity strategy can reach 100% net CAGR. This is a research hurdle, not an expected or guaranteed result.
+
+## Non-negotiable rules
+
+1. Never tune on the blind period. Record the cutoff date, code commit, data digest, universe rules, parameters, execution model, and hypotheses before opening blind results.
+2. Separate discovery, inner validation, outer walk-forward, and final blind forward paper trading. The final blind period is evaluated once per pre-registered version. Any change creates a new version and a new future blind period.
+3. Use only information available at each decision timestamp. Signals computed from a completed daily bar may fill no earlier than the next tradable session. No same-bar close/high/low look-ahead.
+4. Use point-in-time constituents, delisted securities, ticker changes, suspensions, corporate actions, and historical listing dates wherever verifiable. If historical universe coverage is incomplete, label survivorship bias as unresolved and prohibit a research-grade pass.
+5. Keep latest fundamental snapshots out of historical signals. Historical fundamentals require publication/availability timestamps and point-in-time vintages.
+6. Include commissions, transaction tax by instrument and date, bid/ask spread or conservative slippage, market impact, board-lot constraints, price limits, suspensions, liquidity and partial-fill constraints. Stress costs at 1.5x and 2.0x.
+7. Never use future data to fill missing bars or corporate actions. Missing or suspicious records are excluded or flagged with a reproducible reason.
+8. Do not optimize solely for CAGR. Report drawdown, volatility, Sharpe/Sortino, Calmar, profit factor, expectancy, turnover, exposure, capacity, trade concentration, tail losses, and year/regime/sector dispersion.
+
+
+## Stage 0: historical-data-first research (must precede strategy mining)
+
+Do not begin large-scale factor mining until the historical dataset has passed a reproducible audit. The first research deliverable is a data dossier, not a strategy leaderboard.
+
+1. Inventory available raw daily OHLCV, turnover, trading calendar, security master, listing/delisting dates, suspensions, price limits, corporate actions, dividends, historical industry classifications, and point-in-time index constituents. Record source, license/access method, earliest/latest date, symbol count, row count, update timestamp, and missingness.
+2. Prefer exchange/regulator primary sources for Taiwan listed and OTC data. Treat vendor feeds as convenience mirrors until reconciled against official samples. Record whether delisted securities remain queryable and whether historical identifiers can be mapped across ticker changes.
+3. Build a reproducible sample spanning large/small caps, liquid/illiquid names, listed/OTC, currently listed/delisted, corporate-action dates, suspensions, and limit-up/down days. Compare raw OHLCV and action records with exchange publications.
+4. Validate price/volume units, duplicate dates, impossible OHLC relationships, zero-volume sessions, missing trading sessions against the official calendar, stale prices, adjusted-vs-unadjusted semantics, dividend/split handling, and timezone/date conventions.
+5. Quantify universe coverage by year and market. Publish explicit exclusions and unresolved gaps. A current constituent snapshot, a current security master, or a vendor's adjusted history must never silently stand in for historical point-in-time membership.
+6. Only after the audit, create a frozen research panel and data manifest with source version, retrieval timestamp, raw-file hashes, transformation code SHA, and per-symbol coverage. Strategy experiments must reference this manifest.
+7. If historical delisted coverage, point-in-time constituents, or action reconciliation is insufficient, limit conclusions to exploratory research and do not label results research-grade. Do not fill gaps with fabricated data.
+
+## 2016–2026 evaluation schedule and evidence status
+
+The research window is 2016-01-01 through the latest available trading date in 2026. The 2026 calendar year is partial and must never be represented as a complete year.
+
+Historical development is organized chronologically:
+- Discovery: 2016-01-01 through 2019-12-31.
+- Inner validation and model/parameter selection: 2020-01-01 through 2022-12-31.
+- Historical outer evaluation: 2023-01-01 through 2025-12-31.
+- Latest partial-year regime evaluation: 2026-01-01 through the latest verified trading date.
+
+Important evidence-status rule: portions of 2023–2026 have already been inspected in prior research. They are not an untouched blind holdout and must not be described as such. Use nested, purged chronological walk-forward evaluation across the full 2016–2026 window for development evidence. Freeze every candidate version, code commit, data manifest, universe rule, and execution assumption before each forward evaluation. Any tuning informed by a previously evaluated period invalidates that period as a blind test for the revised version. A genuinely untouched prospective test begins only after a candidate is frozen; report it separately from historical walk-forward results.
+
+For the headline 100% hurdle, report net CAGR from the continuous portfolio equity curve over the exact covered dates, alongside annual returns and drawdown. State the exact start/end dates and whether the period is partial. Do not annualize a short or partial sample without prominently disclosing the limitation. No single in-sample or retrospectively selected subperiod can satisfy the hurdle.
+
+## Research design
+
+### A. Data and universe
+
+- Build a timestamped daily OHLCV panel for listed and OTC Taiwan equities, including delisted names when obtainable.
+- Preserve raw source payloads, retrieval timestamps, adjustment/action tables, and per-symbol quality reports.
+- Build each date's eligible universe using listing status and information actually known on that date; do not use today's constituents retrospectively.
+- Keep separate coverage flags for delisted names, suspensions, limit-up/down sessions, missing prices, and corporate actions.
+- Exclude securities with insufficient warm-up history, invalid prices, stale bars, or inadequate liquidity under rules declared before testing.
+- Document every source gap. A contemporary Yahoo-derived constituent snapshot is not a point-in-time universe.
+
+### B. Factor discovery (training data only)
+
+Explore interpretable features in predeclared families:
+- Trend and price structure: multi-horizon returns, moving-average slope/order, breakout distance, distance to highs/lows.
+- Momentum and relative strength: 1/3/6/12-month momentum, cross-sectional ranks, industry-relative strength.
+- Volume and liquidity: relative volume, turnover, dollar volume, volume shock, participation capacity.
+- Volatility and compression: ATR, realized volatility, range compression, volatility expansion.
+- Market/industry regime: broad-market trend, breadth, dispersion, industry breadth and relative momentum.
+- Risk and execution: gap risk, limit proximity, liquidity, volatility-scaled stops and portfolio heat.
+
+Use interpretable feature combinations and bounded symbolic regression. Penalize formula complexity and unstable coefficients. Keep a complete registry of every tested hypothesis and parameter configuration to measure multiple-testing risk. No factor may be selected from final blind results.
+
+### C. Nested validation
+
+- Discovery/training: earliest chronological segment only.
+- Inner validation: select feature families and parameters using purged/embargoed time splits.
+- Outer validation: rolling or expanding walk-forward with non-overlapping OOS windows and continuous portfolio capital.
+- Group results by year, bull/bear/sideways regime, industry, market-cap/liquidity bucket, and individual symbol.
+- Use block/bootstrap uncertainty estimates and multiple-testing-aware statistics (e.g. Deflated Sharpe and Probability of Backtest Overfitting where sample design permits).
+- Compare against matched-cost 0050 buy-and-hold and simple trend/momentum baselines.
+- Reject a candidate that relies on one symbol, one sector, one year, a handful of outsized trades, or one narrow parameter setting.
+
+### D. Portfolio and execution model
+
+- Rank candidates using only prior-close data; execute next session with conservative price assumptions.
+- Position size is the minimum of risk-budget sizing, cash/slot allocation, board-lot constraints, and ADV participation capacity.
+- Enforce portfolio-level risk limits: aggregate stop risk, sector concentration, single-name concentration, gross exposure, cash reserve, and drawdown circuit breakers.
+- Model gaps through stops at the first executable price; never assume a stop fills at its trigger when the market gaps through it.
+- Include open positions and receivables correctly in marked-to-market equity; report realized and unrealized P&L separately.
+- Run baseline, 1.5x-cost, and 2.0x-cost cases without changing signals or parameters.
+
+### E. Frozen blind forward test
+
+Before the blind period begins, write an immutable manifest containing:
+- git commit SHA and strategy version;
+- training/validation cutoff and blind start date;
+- exact symbol eligibility and delisting policy;
+- factor formula, parameter values, and portfolio rules;
+- fees, taxes, slippage, participation and fill assumptions;
+- data source/version and input hashes;
+- pass/fail criteria.
+
+During the blind period, do not retune, change symbols, or revise fills retrospectively. Log every signal, intended order, simulated fill, rejected order, position, cash movement, corporate action, and daily equity. Evaluate the frozen version at predeclared checkpoints only.
+
+
+### F. Strategy-family search (no five-strategy ceiling)
+
+The five strategies already present in the codebase are legacy baselines only. They are not the permitted strategy universe, and weak results must not be rescued through endless parameter tuning. Research may add, combine, or reject entirely different families, subject to data availability and realistic execution:
+
+- Cross-sectional momentum, relative strength rotation, sector/industry rotation, dual momentum, and trend-following across multiple horizons.
+- Mean reversion: short-horizon reversal, gap fade, oversold bounce, volatility-scaled pullback, pairs/statistical arbitrage, and market-neutral residual reversal.
+- Breakout/expansion: volatility squeeze, range expansion, opening-range breakout, price-volume confirmation, and post-consolidation continuation.
+- Regime-adaptive and allocation strategies: trend/risk-on filters, breadth thrust, volatility targeting, defensive rotation, and dynamic cash allocation.
+- Event-driven effects: earnings/publication-date reactions, dividend/corporate-action effects, index additions/deletions, and other timestamp-verifiable public events. Only information public by the decision time is eligible.
+- Intraday and time-of-day effects, overnight/intraday separation, opening/closing auction effects, and multi-day holding strategies, only if the underlying data resolution and historical market microstructure support credible fills.
+- Portfolio construction strategies: risk parity variants, volatility scaling, hierarchical/sector constraints, rank aggregation, ensemble voting, and portfolio-level stop/rotation logic.
+- Market-neutral and hedged strategies where instrument availability, borrow/short constraints, financing, and hedge execution can be modeled honestly.
+- Fundamental/quality/value-growth signals only when point-in-time financial statements, release timestamps, revisions, and survivorship-safe coverage exist.
+- Machine-learning candidates (regularized linear models, tree ensembles, sequence models) only after leakage-safe feature generation, nested chronological validation, calibration checks, and strict complexity controls.
+
+Each family receives a comparable research budget and identical data, cost, and OOS standards. Register hypotheses before running them; log failed experiments as well as winners. Separate family-level discovery from final selection to control multiple testing. No family receives privileged status because it is already implemented.
+
+### G. Candidate generation and promotion
+
+1. Start with broad, economically motivated hypotheses across the families above; include simple baselines and deliberately different holding periods.
+2. Run cheap data/leakage checks and low-cost screening first. Do not promote candidates on in-sample CAGR alone.
+3. Promote only candidates with positive net expectancy in chronological validation, sufficient independent trades, and acceptable turnover/capacity.
+4. Re-test promoted candidates in outer walk-forward windows with fixed costs and portfolio constraints. Evaluate family diversity and correlation between candidate return streams.
+5. Compare standalone candidates with diversified combinations; ensembles must be trained only on prior data and must beat their complexity/cost penalty OOS.
+6. Retire weak families/candidates with a recorded reason. Do not keep them alive by repeatedly searching nearby parameters.
+7. Reserve a genuinely untouched final period and future forward period for the selected frozen candidate. The selection process itself must be documented to expose winner's curse.
+
+
+## Proposed acceptance gates
+
+These are initial research gates and may be tightened before blind testing; they must not be relaxed after seeing blind results.
+
+- Data integrity: no known look-ahead; corporate-action reconciliation; point-in-time universe coverage documented. Unresolved survivorship bias blocks research-grade approval.
+- Breadth: positive net expectancy across multiple independent years and industries; results not dominated by a single symbol or a small set of trades.
+- Robustness: positive OOS net expectancy after baseline costs and no catastrophic collapse at 1.5x costs; 2.0x costs reported even if it fails.
+- Stability: performance survives nearby parameter perturbations and alternative reasonable execution assumptions.
+- Risk: predeclared maximum drawdown, exposure, concentration, and liquidity constraints respected.
+- Blind evidence: at least 12 months of frozen forward paper trading before considering any live deployment; longer is preferable for low-frequency strategies.
+- Target reporting: show whether net CAGR reaches 100%, but do not waive any risk, data, or generalization gate to achieve that number.
+
+## Required outputs
+
+1. data_coverage.csv and data_quality.csv
+2. point_in_time_universe_audit.csv
+3. hypothesis_registry.csv and factor_stability.csv
+4. nested_walk_forward_windows.csv
+5. symbol_sector_regime_breakdown.csv
+6. trade_ledger.csv and daily_equity.csv
+7. cost_stress.csv and concentration_diagnostics.csv
+8. frozen_blind_manifest.json and forward_paper_log.csv
+9. final_report.md with limitations and reproducible commands
+
+## Decision labels
+
+- REJECT: invalid data, look-ahead, non-positive net OOS expectancy, or unacceptable risk.
+- RESEARCH_ONLY: promising historical results but incomplete universe, weak robustness, insufficient independent OOS evidence, or insufficient blind duration.
+- BLIND_PAPER: all historical gates pass and the version is frozen for forward paper testing.
+- LIVE_CANDIDATE: only after the blind period and all pre-registered gates pass; this label is not a recommendation to deploy capital.
+
+No result may be described as a universal formula or 100% strategy until independently reproduced across symbols, sectors, regimes, and a frozen future period.

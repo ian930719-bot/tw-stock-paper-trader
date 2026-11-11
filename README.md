@@ -109,3 +109,118 @@ The paper-account area also offers a consistent SQLite snapshot download contain
 ## Point-in-time security-universe snapshots and survivorship bias
 
 After a successful FinMind TaiwanStockInfo fetch, the app stores the first observed listed/OTC security universe of each Taiwan calendar day as an immutable SQLite snapshot alongside market history. `universe_history.load_universe_as_of(as_of)` only returns a snapshot actually captured by the requested instant. If no earlier snapshot exists, it returns an explicit unavailable status rather than substituting today's surviving listings. Continuous capture can preserve future listing, transfer, and delisting changes, but it cannot reconstruct delisted securities or historical index constituents from before the first captured snapshot. Earlier backtests must therefore continue to disclose survivorship-bias limitations. SQLite persistence still depends on the deployment disk; Streamlit Community Cloud temporary storage can be cleared on restart or redeploy.
+
+
+## Historical data-first factor research (research branch)
+
+A research-only command is available in `historical_research.py`. It audits an OHLCV panel and computes a broad, auditable set of momentum, reversal, trend, breakout, volume, volatility, gap/range and relative-strength factors. Signals are formed from completed closes; forward outcomes assume entry at the next session open.
+
+Download a resumable raw-history candidate panel (current TWSE/TPEx master plus historical delisting announcements):
+
+\x60\x60\x60bash
+python historical_data_collector.py --output data/taiwan_history --start-date 2010-01-04
+\x60\x60\x60
+
+Set `FINMIND_TOKEN` in the environment to use the higher documented request allowance. The collector writes one CSV per symbol, a candidate symbol list, source snapshots, and a SHA-256 manifest. It resumes by skipping already-downloaded symbol files. The API request allowance is rate-limited (documented as 300/hour without a token and 600/hour with a token), so a full-market pull can take hours and may need multiple resumable runs. The collector does not claim full historical point-in-time constituents or verified delisted-price coverage.
+
+Alternatively, pass a single combined CSV. The research runner can read the collector output directory directly and merge its per-symbol CSVs. For custom input, prepare a CSV with columns:
+
+```text
+symbol,date,open,high,low,close,volume
+2330,2020-01-02,....
+```
+
+Optional `turnover` is used for turnover-shock features. Example:
+
+```bash
+python historical_research.py --input data/taiwan_history --output artifacts/historical_research --split-date 2024-01-01 --source "FinMind TaiwanStockPrice" --price-basis raw
+```
+
+Outputs: `data_coverage.csv`, `data_audit_summary.json`, `historical_factor_panel.csv`, `factor_research_results.csv`, and `hypothesis_registry.csv`.
+
+Important limitations:
+- This command does not download the whole Taiwan market. The panel must be acquired and archived separately; use official exchange sources where available and reconcile vendor feeds.
+- `--point-in-time-universe` and `--delisted-coverage` are explicit evidence assertions, not switches that create missing data. Only pass them when the supplied panel's provenance proves the coverage.
+- A current security master plus delisting notices is only a candidate symbol list, not historical membership. A current 0050 constituent snapshot is not historical membership. Without verified point-in-time constituents and delisted securities, the audit intentionally remains research-grade-ineligible.
+- Factor IC and top-minus-bottom spreads are descriptive screens, not net strategy returns. They do not include transaction costs, portfolio constraints, capacity, or multiple-testing correction; candidates must proceed to nested walk-forward and blind forward paper tests.
+- Never pass retrospectively adjusted prices as executable raw fills without a separately validated corporate-action treatment.
+
+
+## Historical Taiwan market research pipeline
+
+The research branch includes a resumable FinMind raw daily-bar collector and a research-only factor screening stage.
+
+- The full collection workflow builds a stock-only candidate list, including current common equities and historical delisting candidates; ETF/bond/warrant products are filtered from the common-stock universe.
+- Smoke tests use deterministic industry-stratified sampling and reserve a portion for delisted candidates. A smoke test is not a representative performance backtest.
+- Full collection runs in bounded 330-minute batches. Each batch restores the prior GitHub Actions cache, skips successfully downloaded symbols, checkpoints per symbol, saves the cache, and dispatches the next batch until all candidates have been attempted.
+- The workflow only runs factor screening after the candidate collection is complete. It does not assert that the candidate list is a complete historical point-in-time universe.
+- The resulting factor IC and quintile spreads are exploratory diagnostics, not a tradable portfolio backtest. Research-grade approval remains blocked until point-in-time universe, delisted-price, corporate-action, official-calendar and exchange-source reconciliation are independently verified.
+- Add a repository Actions secret named `FINMIND_TOKEN` to use the higher FinMind request allowance. Without it, collection uses conservative pacing and may require multiple automatically chained runs.
+
+Manual full-universe collection is available through the GitHub Actions workflow_dispatch input `max_symbols=0`; bounded smoke tests use a positive cap.
+
+
+The full-universe research workflow uses `streaming_factor_research.py` after collection. It processes one symbol at a time, partitions factor panels by year, and reports daily cross-sectional rank IC, gross quintile spreads, horizon-aware HAC t-statistics, Benjamini-Hochberg q-values, per-symbol OHLC quality, candidate-to-file coverage, and SHA-256 manifest checks. Its post-split segment is explicitly descriptive, not a final blind test. It never labels the result research-grade while the PIT-universe and official-source gates remain unresolved.
+
+
+## Corporate-action-aware historical research (research branch)
+
+- The historical collector can resume collection of `TaiwanStockDividendResult` per symbol plus market-wide `TaiwanStockSplitPrice`, `TaiwanStockCapitalReductionReferencePrice`, and `TaiwanStockParValueChange` events. It writes raw source files, a normalized event table, and a separate manifest. Empty event responses are recorded as completed responses; API failures remain retryable.
+- The factor screen uses event-adjusted OHLC for relative price signals and forward-return labels while preserving the original raw OHLCV files for execution-price provenance. Each event's reference-price / pre-event-price ratio is applied only to bars strictly before its effective date. This removes mechanical ex-right / split gaps from realized returns without changing the raw execution bars.
+- Volume-based factors are suppressed for 20 sessions after a corporate action because the collector does not yet have a fully reconciled share-count adjustment history. Conflicting same-day event ratios are excluded rather than guessed and are reported as blockers.
+- The GitHub Actions pipeline now waits for the resumable corporate-action collection stage before running the factor screen. With the unauthenticated FinMind request allowance, collecting event data for the full candidate list can take multiple batches; set the repository Actions secret `FINMIND_TOKEN` if an appropriately entitled token is available. Never paste the token into source code or chat.
+- The collector also stores the first current-security-master snapshot observed each Taiwan calendar day as an immutable CSV with a SHA-256 digest. This improves prospective point-in-time coverage from the first captured date onward; it cannot reconstruct historical membership before capture began.
+- This stage does not create a complete historical point-in-time universe, prove complete delisted/suspended-price coverage, or independently reconcile vendor data against official TWSE / TPEx records. The research eligibility gate remains closed until those requirements and a costed continuous-capital blind OOS portfolio backtest are completed.
+
+## TSMC 2330 causal swing turning-point research
+
+The first single-stock research stage is isolated in `tsmc_swing_research.py`. It accepts only symbol 2330, reads raw OHLCV, computes close-known technical/volume/volatility features, and labels multi-scale swing highs/lows with a causal reversal-confirmation date. The pivot date is retrospective ground truth; the later confirmation date records when the reversal threshold became observable. Feature snapshots are exported 1/3/5/10/20 sessions before each pivot to inspect lead/lag behavior.
+
+Run after the 2330 raw daily-bar history has been collected:
+
+```bash
+python tsmc_swing_research.py --input data/taiwan_history --output artifacts/tsmc_2330_swing
+```
+
+Outputs: `tsmc_2330_pivot_events.csv`, `tsmc_2330_pivot_leadlag.csv`, `tsmc_2330_causal_features.csv`, and `tsmc_2330_research_summary.json`. Five predeclared reversal/ATR thresholds are reported side by side; the script does not select a winning threshold, run a return backtest, or deploy a strategy. 研究工作流會先取得 2330 的現金股利、分割、減資及面額變更事件，依已核對的除權息參考價比例建立 point-in-time-safe 訊號價格序列；原始 OHLC 仍保留作為成交價格參考。事件日及其後 20 個交易日的量能特徵會遮罩，極值日或確認日落在公司行動窗口的轉折標籤會排除。若同日事件比例衝突，工作流 fail-closed，不輸出可用轉折標籤。若自行輸入資料未提供公司行動檔，結果仍屬未校正的初步研究。這個階段仍是轉折樣本與訊號時序研究，不代表已達 200% CAGR。
+
+The follow-on TSMC-only ranking diagnostic is in `tsmc_2330_oos_signal_diagnostics.py`. It uses a chronological 2010–2021 / 2022+ split, purges the training boundary by the forecast horizon, and reports ranking metrics for 1/3/5-session high- and low-pivot labels. It is explicitly not a trading backtest. First-round interpretation and limitations are recorded in `research/TSMC_2330_SWING_PRELIMINARY_FINDINGS.md`.
+
+
+The TSMC-only workflow also runs `tsmc_2330_pattern_combinations.py`: it evaluates a small, predeclared set of two- and three-feature conjunctions. Feature cutoffs are estimated from the 2010–2021 training segment only; 2022+ metrics are descriptive diagnostics, not a parameter-selection target. Because the 2022+ segment has already been inspected in earlier diagnostics, it is not considered a fresh blind final holdout. Outputs are `tsmc_2330_pattern_combinations.csv/json`; no trades or CAGR are simulated.
+
+
+A nested chronological rule-development stage is available in `tsmc_2330_frozen_rule_research.py`. It estimates feature cutoffs on 2010–2016, selects one predeclared conjunction per direction using 2017–2021 mean F1 across 1/3/5-session pivot targets, purges five sessions at split boundaries, and reports the frozen rules on 2022+ data without using that period for selection. Since 2022+ has already been examined in earlier diagnostics, this remains exploratory rather than a pristine blind test. No trade simulation or CAGR is included.
+
+
+Execution testing is implemented in `tsmc_2330_execution_backtest.py`. It uses the frozen high/low rules, next-session raw open execution, FinMind `TaiwanStockPriceLimit` exchange limit fields, cash-only dividend entitlement, standard 0.1425% commission with a NT$20 minimum, 0.3% sell-side transaction tax, and 5/10/20/30 bps adverse slippage scenarios. It compares the rule-driven long-only strategy with a cost-matched TSMC buy-and-hold benchmark for the 2017–2021 rule-selection period and 2022+ historical holdout. This is a daily-OHLC execution approximation, not tick-level fill proof; 2022+ has already been inspected in prior diagnostics and is not a pristine blind holdout.
+
+
+The baseline execution backtest showed that the first frozen setup-only rules materially underperformed TSMC buy-and-hold. The next development stage, `tsmc_2330_reversal_confirmation_backtest.py`, keeps the training-derived low/high setup thresholds fixed, arms each setup for at most five sessions, and tests five predeclared reversal confirmations (close reversal, prior-range break, RSI turn, SMA5 reclaim, SMA20 reclaim). It selects a confirmation pair using 2017–2021 only, then reports the frozen pair on 2022+ with the same dividend, cost, slippage and official-rule price-limit model. No 2022+ tuning is permitted.
+
+
+A further validation-only risk study, `tsmc_2330_trend_atr_risk_research.py`, takes the selected prior-range reversal confirmation as its fixed base and compares four predeclared entry regimes (none, above SMA200, positive SMA50 slope, full trend stack) against three ATR trailing-stop settings (none, 2.5 ATR, 4 ATR). The best combination is selected on 2017–2021 only; 2022+ is reported with 5/10/20/30 bps slippage but is not used for selection.
+
+
+The next turning-point research stage adds causal 20-session RSI, MACD-histogram and relative-volume divergence features to `tsmc_swing_research.py`. `tsmc_2330_divergence_research.py` compares predeclared bearish/bullish divergence patterns, including conjunctions with the frozen setup rules. Rule selection uses 2017–2021 only; 2022+ is descriptive and never used for selection.
+
+
+The divergence stage's validation-selected high rule is `base_high_and_bearish_macd`; its low-volume divergence rule did not generalize. A fixed hybrid backtest, `tsmc_2330_hybrid_divergence_backtest.py`, therefore combines the already validation-selected prior-range-break low entry with the validation-selected MACD-divergence high exit. Both are frozen before the 2022+ historical check; no test-period tuning is performed.
+
+
+The frozen hybrid strategy improved the previously selected prior-range strategy's 2022+ historical CAGR from about 4.8% to 6.5% at 10 bps slippage, but still substantially underperformed TSMC buy-and-hold (about 31% CAGR) and had a larger drawdown. The next risk-filter study applies the same predeclared trend filters and ATR stops to this hybrid, with all selection restricted to 2017–2021.
+
+
+The next hybrid-specific risk stage, `tsmc_2330_hybrid_risk_research.py`, applies the same 4 entry filters and 3 ATR stop choices to the frozen prior-range-entry/MACD-divergence-exit pair. Selection remains restricted to 2017–2021; the 2022+ holdout is used only after the choice is frozen.
+
+
+To quantify whether the 200% CAGR target is even feasible under different swing definitions, `tsmc_2330_oracle_pivot_ceiling.py` sweeps 56 predeclared reversal/ATR thresholds and computes the perfect-foresight return from buying each retrospective low and selling the next retrospective high. It includes proportional cost sensitivity but deliberately assumes exact pivot fills and ignores causal confirmation delay; it is an optimistic theoretical ceiling, not a tradable result.
+
+
+The full-period exploratory oracle grid found a 1% / 0.75 ATR definition with 445 perfect low-to-next-high swings and a 234.7% net theoretical CAGR at 10 bps per-side slippage. This is not a tradable return: it assumes exact retrospective pivot fills. The oracle script now separately selects a threshold on 2010–2016 and reports 2017–2021 / 2022+ to prevent full-period threshold leakage.
+
+
+The training-only oracle-selected pivot threshold is now passed to `tsmc_2330_selected_threshold_signal_diagnostics.py`. This fits a causal logistic model on 2010–2016, evaluates 2017–2021, then refits through 2021 and evaluates 2022+; each horizon purges both ends of its label window. This avoids training the classifier only on the older 3–8% pivot labels when the oracle grid points to a different swing scale.
+
+
+The 1% / 0.75 ATR pivot definition was also selected using only 2010–2016 oracle results and retained high theoretical oracle CAGR in 2017–2021 and 2022+: 247.4%, 225.2%, and 237.5%, respectively, at 10 bps per-side slippage. These are exact-pivot hindsight ceilings only; the new causal classifier is the next test of whether any part of that theoretical edge is identifiable in real time.

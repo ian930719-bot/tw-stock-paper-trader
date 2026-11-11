@@ -1,0 +1,74 @@
+name: Sector Rotation Historical Backtest
+
+on:
+  push:
+    branches: [research/200cagr-blind-validation]
+    paths:
+      - sector_rotation_backtest.py
+      - tests/test_sector_rotation_backtest.py
+      - .github/workflows/sector-rotation-research.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sector-rotation-research-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/200cagr-blind-validation
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - uses: actions/cache/restore@v4
+        id: history-cache
+        with:
+          path: data/taiwan_history/
+          key: sector-rotation-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            taiwan-history-${{ github.ref_name }}-
+      - name: Verify historical data cache
+        run: |
+          test -s data/taiwan_history/candidate_symbols.csv
+          test -s data/taiwan_history/download_manifest.json
+          test -d data/taiwan_history/bars
+          echo "Restored historical data cache."
+      - run: pip install -r requirements.txt
+      - name: Compile and test
+        run: |
+          python -m py_compile sector_rotation_backtest.py
+          python -m unittest tests.test_sector_rotation_backtest -v
+      - name: Run historical sector rotation backtest
+        run: |
+          python sector_rotation_backtest.py \
+            --input data/taiwan_history \
+            --output artifacts/sector_rotation \
+            --initial-capital 1000000 \
+            --top-sectors 3 \
+            --stocks-per-sector 3 \
+            --stop-pct 0.12
+      - name: Add research summary to workflow report
+        if: always()
+        run: |
+          if [ -f artifacts/sector_rotation/summary.json ]; then
+            {
+              echo "## Sector rotation backtest summary"
+              cat artifacts/sector_rotation/summary.json
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sector-rotation-results-${{ github.run_id }}
+          path: artifacts/sector_rotation/
+          if-no-files-found: warn
+          retention-days: 30

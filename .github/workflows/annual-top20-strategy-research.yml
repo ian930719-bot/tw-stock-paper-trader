@@ -1,0 +1,94 @@
+name: Annual Top 20 Shared-Capital Strategy Research
+
+on:
+  push:
+    branches: [research/200cagr-blind-validation]
+    paths:
+      - annual_top20_shared_capital_research.py
+      - tests/test_annual_top20_shared_capital_research.py
+      - .github/workflows/annual-top20-strategy-research.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: annual-top20-strategy-research-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/200cagr-blind-validation
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Restore latest historical data cache
+        uses: actions/cache/restore@v4
+        with:
+          path: data/taiwan_history/
+          key: taiwan-history-${{ github.ref_name }}-nonexistent
+          restore-keys: |
+            taiwan-history-${{ github.ref_name }}-
+      - name: Install research dependencies
+        run: pip install numpy pandas
+      - name: Compile and run regression tests
+        run: |
+          python -m py_compile annual_top20_shared_capital_research.py tests/test_annual_top20_shared_capital_research.py
+          python -m unittest tests.test_annual_top20_shared_capital_research -v
+      - name: Verify historical dataset and provenance
+        id: data
+        run: |
+          mkdir -p artifacts/annual_top20_2016_2026
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          p = Path("data/taiwan_history/download_manifest.json")
+          m = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+          summary = {k: m.get(k) for k in (
+              "source", "start_date", "end_date", "requested_symbols",
+              "successful_symbols", "empty_symbols", "failed_symbols",
+              "collection_complete", "corporate_actions_complete",
+              "point_in_time_universe_complete", "delisted_price_coverage_verified"
+          )}
+          ready = bool(m.get("collection_complete")) and Path("data/taiwan_history/candidate_symbols.csv").exists() and Path("data/taiwan_history/bars").is_dir()
+          summary["research_ready"] = ready
+          print(json.dumps(summary, ensure_ascii=False, indent=2))
+          Path("artifacts/annual_top20_2016_2026/data_readiness.json").write_text(
+              json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"ready={str(ready).lower()}\n")
+          PY
+      - name: Run annual top-20 universe and shared-capital strategy comparison
+        if: steps.data.outputs.ready == 'true'
+        run: |
+          python annual_top20_shared_capital_research.py \
+            --input data/taiwan_history \
+            --output artifacts/annual_top20_2016_2026
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path("artifacts/annual_top20_2016_2026/research_report.json")
+          r = json.loads(p.read_text(encoding="utf-8"))
+          print(json.dumps({
+              "research_status": r["research_status"],
+              "data_start": r["data_start"],
+              "data_end": r["data_end"],
+              "symbols_with_valid_bars": r["symbols_with_valid_bars"],
+              "annual_top20_coverage": r["annual_top20_coverage"],
+              "strategy_results": r["strategy_results"],
+              "limitations": r["limitations"],
+          }, ensure_ascii=False, indent=2))
+          PY
+      - name: Upload annual universe, trade ledger, equity curves and report
+        uses: actions/upload-artifact@v4
+        with:
+          name: annual-top20-shared-capital-${{ github.run_id }}
+          path: artifacts/annual_top20_2016_2026/
+          if-no-files-found: warn
+          retention-days: 30

@@ -1,0 +1,130 @@
+name: Top 10 Adjusted Price Research Data
+
+on:
+  push:
+    branches: [research/200cagr-blind-validation]
+    paths:
+      - collect_top10_adjusted_prices.py
+      - tests/test_collect_top10_adjusted_prices.py
+      - top10_shared_capital_research.py
+      - tests/test_top10_shared_capital_research.py
+      - swing_turning_point_research.py
+      - tests/test_swing_turning_point_research.py
+      - research_engine.py
+      - .github/workflows/top10-adjusted-price.yml
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "auto = FinMind first, Yahoo fallback; yahoo = force Yahoo; finmind = require token"
+        required: true
+        default: "auto"
+        type: choice
+        options:
+          - auto
+          - yahoo
+          - finmind
+
+permissions:
+  contents: read
+
+concurrency:
+  group: top10-adjusted-price-research
+  cancel-in-progress: false
+
+jobs:
+  collect-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/200cagr-blind-validation
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - run: pip install -r requirements.txt
+      - name: Unit tests for adjusted prices and portfolio research
+        run: |
+          python -m unittest tests.test_collect_top10_adjusted_prices -v
+          python -m unittest tests.test_top10_shared_capital_research -v
+          python -m unittest tests.test_swing_turning_point_research -v
+      - name: Collect adjusted OHLCV (FinMind first, Yahoo fallback)
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+          PRICE_PROVIDER: ${{ inputs.provider || 'auto' }}
+        run: |
+          python collect_top10_adjusted_prices.py \
+            --output data/top10_adjusted \
+            --start-date 2010-01-04 \
+            --provider "$PRICE_PROVIDER"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          m = json.loads(Path("data/top10_adjusted/manifest.json").read_text(encoding="utf-8"))
+          assert m["collection_complete"], "Adjusted price collection incomplete"
+          assert m["symbols_collected"] == 10, "Expected exactly ten stocks"
+          assert all(x["rows"] > 1000 for x in m["status_rows"]), "Unexpectedly short price history"
+          assert all(x.get("provider") for x in m["status_rows"]), "Provider provenance missing"
+          print(json.dumps({k:v for k,v in m.items() if k != "status_rows"}, ensure_ascii=False, indent=2))
+          for row in m["status_rows"]:
+              print(f'{row["symbol"]} {row["name"]}: {row["rows"]} bars; {row["first_date"]}..{row["last_date"]}; {row["provider"]}')
+          PY
+      - name: Run non-overlapping shared-capital walk-forward validation
+        run: |
+          python top10_shared_capital_research.py \
+            --input data/top10_adjusted \
+            --output artifacts/top10_shared_capital_research
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("artifacts/top10_shared_capital_research/research_report.json").read_text(encoding="utf-8"))
+          assert report["validation_selected"] is not None, "No validation strategy met minimum sample size"
+          assert report["locked_configuration_test_result"] is not None, "Locked configuration missing OOS test result"
+          assert report["equal_weight_buy_hold_benchmark"], "Benchmark metrics missing"
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          PY
+      - name: Run causal swing turning-point model and blind OOS portfolio
+        run: |
+          python swing_turning_point_research.py \
+            --input data/top10_adjusted \
+            --output artifacts/swing_turning_point
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("artifacts/swing_turning_point/swing_turning_point_report.json").read_text(encoding="utf-8"))
+          assert report["validation_selected_config"]["hold_bars"] > 0
+          assert report["test_locked_portfolio"]["trades"] >= 10
+          assert report["low_point_model"]["test_auc"] > 0.50
+          print(json.dumps({
+              "data_last_date": report["data_last_date"],
+              "validation_selected_config": report["validation_selected_config"],
+              "validation_portfolio": report["validation_portfolio"],
+              "test_locked_portfolio": report["test_locked_portfolio"],
+              "test_equal_weight_benchmark": report["test_equal_weight_benchmark"],
+              "low_point_model": report["low_point_model"],
+              "high_point_model_diagnostic_only": report["high_point_model_diagnostic_only"],
+          }, ensure_ascii=False, indent=2))
+          PY
+      - name: Upload swing turning-point research outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: swing-turning-point-walkforward
+          path: artifacts/swing_turning_point/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload adjusted price data and provenance
+        uses: actions/upload-artifact@v4
+        with:
+          name: top10-adjusted-prices
+          path: data/top10_adjusted/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload shared-capital research outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: top10-shared-capital-walkforward
+          path: artifacts/top10_shared_capital_research/
+          if-no-files-found: error
+          retention-days: 30
