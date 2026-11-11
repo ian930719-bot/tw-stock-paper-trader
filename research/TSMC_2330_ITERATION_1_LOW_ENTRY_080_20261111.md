@@ -22,7 +22,8 @@ Change only the LOW-entry daily return threshold:
 
 Recorded Run #32 neighbour-sensitivity result:
 - CAGR: 30.4402%
-- Total return: 1,586.1% (reported as 16.861148x net gain over initial capital)
+- Total return: +1,686.1%
+- Final equity from NT$100,000: approximately NT$1,786,115
 - Maximum drawdown: -45.6761%
 - Closed trades: 25
 - Win rate: 88.00%
