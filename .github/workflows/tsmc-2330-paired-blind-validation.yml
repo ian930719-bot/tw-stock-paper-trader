@@ -1,4 +1,4 @@
-name: TSMC 2330 CPCV Technical vs Institutional Ablation
+name: TSMC 2330 CPCV Foreign vs Trust Ablation
 on:
   push:
     branches: [research/200cagr-blind-validation]
@@ -82,7 +82,7 @@ jobs:
       - name: Upload reproducible blind-validation outputs
         uses: actions/upload-artifact@v4
         with:
-          name: tsmc-2330-cpcv-institutional-ablation-${{ github.run_number }}
+          name: tsmc-2330-cpcv-foreign-trust-ablation-${{ github.run_number }}
           if-no-files-found: error
           retention-days: 30
           path: |
