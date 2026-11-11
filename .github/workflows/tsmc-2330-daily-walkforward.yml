@@ -4,7 +4,9 @@ on:
     branches: [research/200cagr-blind-validation]
     paths:
       - "tsmc_2330_daily_walkforward.py"
+      - "tsmc_2330_trader_strategy_event_audit.py"
       - "tests/test_tsmc_2330_daily_walkforward.py"
+      - "tests/test_tsmc_2330_trader_strategy_event_audit.py"
       - ".github/workflows/tsmc-2330-daily-walkforward.yml"
   workflow_dispatch:
 permissions:
@@ -37,10 +39,26 @@ jobs:
           repository: ${{ github.repository }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: input
+      - name: Download frozen 500-pivot event/control artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tsmc-2330-fast-500-pivot-study-1
+          run-id: 42986851249
+          repository: ${{ github.repository }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: input_500
       - name: Compile and unit test
+        env:
+          TSMC_500_SNAPSHOTS: input_500/tsmc_2330_500_pivot_snapshots.csv
         run: |
-          python -m py_compile tsmc_2330_daily_walkforward.py tests/test_tsmc_2330_daily_walkforward.py
+          python -m py_compile tsmc_2330_daily_walkforward.py tsmc_2330_trader_strategy_event_audit.py tests/test_tsmc_2330_daily_walkforward.py tests/test_tsmc_2330_trader_strategy_event_audit.py
           PYTHONPATH=. python -m unittest discover -s tests -p "test_tsmc_2330_daily_walkforward.py" -v
+          PYTHONPATH=. python -m unittest discover -s tests -p "test_tsmc_2330_trader_strategy_event_audit.py" -v
+      - name: Run fixed Taiwan trader-rule event/control audit
+        run: |
+          python tsmc_2330_trader_strategy_event_audit.py \
+            --snapshots input_500/tsmc_2330_500_pivot_snapshots.csv \
+            --output artifacts/trader_rule_audit
       - name: Run chronological daily walk-forward and cost-aware simulation
         run: |
           python tsmc_2330_daily_walkforward.py \
@@ -52,4 +70,4 @@ jobs:
           name: tsmc-2330-daily-walkforward-${{ github.run_number }}
           if-no-files-found: error
           retention-days: 30
-          path: artifacts/daily_walkforward/
+          path: artifacts/
