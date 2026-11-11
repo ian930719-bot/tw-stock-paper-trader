@@ -168,7 +168,7 @@ def _new_low_reentry_signal(d, low_signal, high_signal, i, last_exit_i, wait_ses
     """Require a fresh low signal after the mandatory cooldown; old alerts cannot re-enter."""
     # Entry executes at open i from the signal known at close prev_i.
     # Wait N *complete* sessions after stop: eligible signal must be dated
-    # after last_exit_i + N sessions, and fill occurs on the following session.
+    # at the close of the Nth full session after exit; fill is the next open.
     signal_i = i - 1
     eligible_signal_i = last_exit_i + int(wait_sessions)
     return (signal_i >= eligible_signal_i and bool(low_signal[signal_i])
@@ -243,8 +243,8 @@ def simulate_atr_reentry(d, low_signal, high_signal, start_date,
             "net_return": float(pnl / entry_cost) if entry_cost else np.nan,
             "exit_reason": reason, "stop_multiple": float(stop_multiple),
             "stop_width_at_entry": float(entry_price - initial_stop),
-            "stop_width_at_exit": float(stop_distance) if np.isfinite(stop_distance) else np.nan,
-            "max_favorable_excursion_pct": float(max(0.0, peak_close / entry_price - 1)),
+            "stop_profit_lock_at_exit": float(stop_distance) if np.isfinite(stop_distance) else np.nan,
+            "max_favorable_excursion_pct": float(max(0.0, peak_high_since_entry / entry_price - 1)),
             "max_adverse_excursion_pct": float(min(0.0, min_low_since_entry / entry_price - 1)),
             "bars_held": int(i - entry_i),
             "reentry_count_before_trade": int(reentries),
