@@ -57,7 +57,8 @@ jobs:
       - name: Compile research code and run protocol tests
         run: |
           python -m py_compile tsmc_swing_research.py corporate_action_adjustments.py tsmc_2330_chip_data.py tsmc_2330_combinatorial_purged_cv.py tsmc_2330_false_signal_diagnostics.py tests/test_tsmc_2330_combinatorial_purged_cv.py tests/test_tsmc_2330_chip_data.py tests/test_tsmc_2330_false_signal_diagnostics.py
-          python -m unittest discover -s tests -p "test_tsmc_2330_combinatorial_purged_cv.py" -v\n          python -m unittest discover -s tests -p "test_tsmc_2330_false_signal_diagnostics.py" -v
+          python -m unittest discover -s tests -p "test_tsmc_2330_combinatorial_purged_cv.py" -v
+          python -m unittest discover -s tests -p "test_tsmc_2330_false_signal_diagnostics.py" -v
       - name: Collect TSMC three-major-institution flows (no broker-tier endpoint)
         run: |
           python tsmc_2330_chip_data.py \
