@@ -89,6 +89,8 @@ def run(features_path,events_path,output_dir,threshold_ids=None,data_audit_path=
     if x.date.duplicated().any() or not x.date.is_monotonic_increasing: raise ValueError("Dates must be unique and ascending")
     requested=threshold_ids or list(DEFAULT_THRESHOLDS)
     ev=_add_missing_pivots(x,ev,requested)
+    ev["pivot_date"]=pd.to_datetime(ev["pivot_date"],errors="coerce")
+    ev["confirmation_date"]=pd.to_datetime(ev["confirmation_date"],errors="coerce")
     present=set(ev.threshold_id.astype(str)); requested=[t for t in requested if t in present]
     cols=[c for c in x if c not in EXCLUDE and not c.startswith("raw_") and pd.api.types.is_numeric_dtype(x[c])]
     if not cols: raise ValueError("No numeric causal features")
