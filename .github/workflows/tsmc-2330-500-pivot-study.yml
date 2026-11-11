@@ -1,0 +1,59 @@
+name: TSMC 2330 Fast 500 Pivot Study
+on:
+  push:
+    branches: [research/200cagr-blind-validation]
+    paths:
+      - "tsmc_2330_500_pivot_study.py"
+      - "tests/test_tsmc_2330_500_pivot_study.py"
+      - ".github/workflows/tsmc-2330-500-pivot-study.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: tsmc-2330-fast-500-pivot-study
+  cancel-in-progress: false
+jobs:
+  fast-500-pivot-study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TZ: Asia/Taipei
+      OPENBLAS_NUM_THREADS: "1"
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+    steps:
+      - name: Checkout research branch
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install lightweight analysis dependencies
+        run: python -m pip install --upgrade pip pandas numpy
+      - name: Restore frozen Run 42 research artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tsmc-2330-cpcv-foreign-trust-ablation-42
+          run-id: 42982871652
+          repository: ${{ github.repository }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: run42_artifact
+      - name: Compile and test 500-pivot study
+        run: |
+          python -m py_compile tsmc_2330_500_pivot_study.py tests/test_tsmc_2330_500_pivot_study.py
+          python -m unittest discover -s tests -p "test_tsmc_2330_500_pivot_study.py" -v
+      - name: Run balanced 500-pivot event study
+        run: |
+          FEATURES="$(find run42_artifact -name tsmc_2330_causal_features.csv -print -quit)"
+          EVENTS="$(find run42_artifact -name tsmc_2330_pivot_events.csv -print -quit)"
+          test -s "$FEATURES"
+          test -s "$EVENTS"
+          python tsmc_2330_500_pivot_study.py --features "$FEATURES" --events "$EVENTS" --output artifacts/tsmc_2330_500_pivot_study --sample-per-side 250
+      - name: Upload 500-pivot research outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: tsmc-2330-fast-500-pivot-study-${{ github.run_number }}
+          if-no-files-found: error
+          retention-days: 30
+          path: artifacts/tsmc_2330_500_pivot_study/
