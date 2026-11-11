@@ -63,9 +63,9 @@ jobs:
             --corporate-actions historical_artifact/data/taiwan_history/corporate_actions/events.csv
       - name: Run combinatorial purged cross-validation
         run: |
-          python tsmc_2330_combinatorial_purged_cv.py \\
-            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \\
-            --events artifacts/tsmc_2330_swing/tsmc_2330_pivot_events.csv \\
+          python tsmc_2330_combinatorial_purged_cv.py \
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --events artifacts/tsmc_2330_swing/tsmc_2330_pivot_events.csv \
             --output artifacts/tsmc_2330_swing
       - name: Upload reproducible blind-validation outputs
         uses: actions/upload-artifact@v4
