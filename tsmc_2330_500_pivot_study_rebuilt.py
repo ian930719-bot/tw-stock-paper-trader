@@ -8,12 +8,26 @@ import pandas as pd
 THRESHOLD_ID="p0.020_atr1.0"
 LEADS=(1,3,5,10,20)
 SEED=23302026
-FEATURES=("relative_volume20","distance_prior_low20","obv_flow_ratio_5","return_1","close_location",
+FEATURES=("return_1","return_3","return_5","return_10","return_20",
+ "distance_sma_5","distance_sma_20","distance_sma_50","distance_sma_200",
+ "sma20_slope_5","sma50_slope_10","atr_pct14","rsi14","rsi_change_3",
+ "macd_pct","macd_hist_pct","macd_hist_change_3","bb_width20","bb_position20",
+ "relative_volume20","turnover_ratio20","realized_vol20","realized_vol60",
+ "volatility_compression","overnight_gap","intraday_range_pct","close_location",
+ "upper_wick_pct","lower_wick_pct","distance_prior_high20","distance_prior_low20",
+ "bearish_rsi_divergence20","bullish_rsi_divergence20","bearish_macd_divergence20",
+ "bullish_macd_divergence20","bearish_volume_divergence20","bullish_volume_divergence20",
+ "stoch_k14","stoch_d3","cci20","williams_r14","adx14","plus_di14","minus_di14",
+ "mfi14","chaikin_money_flow20","volume_zscore20","volume_sma5_ratio","volume_sma20_ratio",
+ "ppo_hist","donchian_position20","obv_flow_ratio_5","obv_flow_ratio_20",
+ "foreign_net_to_volume","foreign_net_5d_lots","foreign_net_20d_lots",
+ "foreign_net_positive_streak","foreign_net_negative_streak",
+ "trust_net_to_volume","trust_net_5d_lots","trust_net_20d_lots",
+ "trust_net_positive_streak","trust_net_negative_streak")
+TECHNICAL=("relative_volume20","distance_prior_low20","obv_flow_ratio_5","return_1","close_location",
  "bearish_rsi_divergence20","bearish_macd_divergence20","bearish_volume_divergence20",
  "bullish_rsi_divergence20","bullish_macd_divergence20","bullish_volume_divergence20",
- "rsi14","stoch_k14","distance_sma_20","distance_sma_50","mfi14",
- "foreign_net_5d_lots","trust_net_5d_lots")
-TECHNICAL=FEATURES[:-2]
+ "rsi14","stoch_k14","distance_sma_20","distance_sma_50","mfi14")
 
 def select_evenly(events,n):
     g=events.sort_values("pivot_index").reset_index(drop=True)
