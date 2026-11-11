@@ -78,8 +78,8 @@ def run(features_path,events_path,output_dir,threshold_ids=None):
         if extras: ev=pd.concat([ev,*extras],ignore_index=True)
     groups=make_groups(len(x)); combos=list(itertools.combinations(range(GROUPS),TEST_GROUPS))
     X=x[list(FEATURES)].replace([np.inf,-np.inf],np.nan)
-    valid=X.notna().any(axis=1).to_numpy()
-    if "corporate_action_window" in x: valid &= ~x.corporate_action_window.fillna(True).astype(bool).to_numpy()
+    valid=X.notna().any(axis=1).to_numpy(copy=True)
+    if "corporate_action_window" in x: valid = valid & ~x.corporate_action_window.fillna(True).astype(bool).to_numpy(copy=True)
     fold_rows=[]; pred_rows=[]
     for tid in requested:
       tev=ev.loc[ev.threshold_id.astype(str)==tid]
