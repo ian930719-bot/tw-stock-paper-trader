@@ -112,10 +112,10 @@ def run(features_path,events_path,output_dir,threshold_ids=None):
           model=make_pipeline(SimpleImputer(strategy="median"),StandardScaler(),
             LogisticRegression(solver="liblinear",max_iter=1000,class_weight="balanced",C=.2,random_state=0))
           model.fit(X.loc[train,cols],y[train]);p=model.predict_proba(X.loc[test,cols])[:,1]
-           weights=model.named_steps["logisticregression"].coef_[0]
-           for feature,weight in zip(cols,weights):
-             coef_rows.append({"threshold_id":tid,"horizon_sessions":h,"pivot_type":kind,
-               "fold":fid,"feature":feature,"coefficient":float(weight)})
+          weights=model.named_steps["logisticregression"].coef_[0]
+          for feature,weight in zip(cols,weights):
+            coef_rows.append({"threshold_id":tid,"horizon_sessions":h,"pivot_type":kind,
+              "fold":fid,"feature":feature,"coefficient":float(weight)})
           fold_rows.append({**base,"status":"evaluated","feature_count":len(cols),**metrics(y[test],p)})
           for i,pv in zip(np.flatnonzero(test),p):probs[i].append(float(pv))
         inds=[i for i,v in enumerate(probs) if v]
