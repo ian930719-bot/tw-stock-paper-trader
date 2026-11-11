@@ -170,7 +170,7 @@ def _new_low_reentry_signal(d, low_signal, high_signal, i, last_exit_i, wait_ses
     # Wait N *complete* sessions after stop: eligible signal must be dated
     # after last_exit_i + N sessions, and fill occurs on the following session.
     signal_i = i - 1
-    eligible_signal_i = last_exit_i + int(wait_sessions) + 1
+    eligible_signal_i = last_exit_i + int(wait_sessions)
     return (signal_i >= eligible_signal_i and bool(low_signal[signal_i])
             and not bool(high_signal[signal_i]))
 
@@ -212,6 +212,7 @@ def simulate_atr_reentry(d, low_signal, high_signal, start_date,
     initial_stop = np.nan
     stop_price = np.nan
     peak_close = np.nan
+    peak_high_since_entry = np.nan
     entry_i = None
     last_exit_i = -10**9
     stopped_out = False
@@ -223,7 +224,7 @@ def simulate_atr_reentry(d, low_signal, high_signal, start_date,
 
     def close_position(i, fill_reference, reason, stop_distance=np.nan):
         nonlocal cash, shares, entry_cost, entry_date, entry_price
-        nonlocal initial_stop, stop_price, peak_close, entry_i
+        nonlocal initial_stop, stop_price, peak_close, peak_high_since_entry, entry_i
         nonlocal stopped_out, last_exit_i, previous_stop
         row = bars.iloc[i]
         fill = float(fill_reference) * (1 - SLIPPAGE)
@@ -253,7 +254,7 @@ def simulate_atr_reentry(d, low_signal, high_signal, start_date,
         stopped_out = reason in ("atr_stop", "gap_stop", "entry_day_atr_stop", "entry_day_gap_stop")
         previous_stop = stop_price
         shares, entry_cost = 0, 0.0
-        entry_date = entry_price = initial_stop = stop_price = peak_close = np.nan
+        entry_date = entry_price = initial_stop = stop_price = peak_close = peak_high_since_entry = np.nan
         entry_i = None
 
     min_low_since_entry = np.nan
@@ -368,7 +369,7 @@ def simulate_atr_reentry(d, low_signal, high_signal, start_date,
         "average_mfe_pct": float(tr.max_favorable_excursion_pct.mean()) if len(tr) else np.nan,
         "average_mae_pct": float(tr.max_adverse_excursion_pct.mean()) if len(tr) else np.nan,
         "stops": int(tr.exit_reason.isin(["atr_stop", "gap_stop", "entry_day_atr_stop", "entry_day_gap_stop"]).sum()) if len(tr) else 0,
-        "reentries": max(0, int(len(tr) - 1)),
+        "reentries": int(reentries),
         "same_day_conflicts_ignored": int(conflicts),
         "stop_multiple": float(stop_multiple), "wait_sessions": int(wait_sessions),
     }
