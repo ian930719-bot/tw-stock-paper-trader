@@ -8,7 +8,7 @@ import pandas as pd
 FORWARD=(1,3,5,10,20,40)
 FEATURE_PREFIXES=("rsi","bb_","distance_sma","distance_ema","return_","relative_volume",
  "turnover_ratio","close_location","atr_pct","adx","macd","stoch","cci","williams",
- "volume_zscore","donchian","obv","mfi")
+ "volume_zscore","donchian","obv","mfi","foreign_","trust_")
 
 def run(features_path,events_path,predictions_path,output_dir):
     x=pd.read_csv(features_path,parse_dates=["date"]).sort_values("date").reset_index(drop=True)
