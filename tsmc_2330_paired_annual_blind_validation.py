@@ -13,6 +13,14 @@ from sklearn.preprocessing import StandardScaler
 PAIR_YEARS=tuple(range(2010,2027,2))
 HORIZONS=(1,3,5,10,20)
 DEFAULT_THRESHOLDS=("p0.030_atr2.0","p0.050_atr2.0","p0.080_atr2.0","p0.100_atr2.0")
+CORE_FEATURES=(
+ "return_1","return_3","return_5","return_10","return_20","return_40",
+ "distance_sma_20","distance_sma_50","distance_sma_200","sma20_slope_5","trend_stack",
+ "atr_pct14","rsi14","macd_pct","bb_width20","bb_position20","relative_volume20",
+ "turnover_ratio20","realized_vol20","overnight_gap","intraday_range_pct",
+ "close_location","upper_wick_pct","lower_wick_pct","distance_prior_high20",
+ "distance_prior_low20","bearish_rsi_divergence20","bullish_rsi_divergence20",
+)
 EXCLUDE={"symbol","date","open","high","low","close","volume","turnover",
          "corporate_action_window","atr14","raw_open","raw_high","raw_low","raw_close"}
 
@@ -92,8 +100,9 @@ def run(features_path,events_path,output_dir,threshold_ids=None,data_audit_path=
     ev["pivot_date"]=pd.to_datetime(ev["pivot_date"],errors="coerce")
     ev["confirmation_date"]=pd.to_datetime(ev["confirmation_date"],errors="coerce")
     present=set(ev.threshold_id.astype(str)); requested=[t for t in requested if t in present]
-    cols=[c for c in x if c not in EXCLUDE and not c.startswith("raw_") and pd.api.types.is_numeric_dtype(x[c])]
-    if not cols: raise ValueError("No numeric causal features")
+    cols=[c for c in CORE_FEATURES if c in x.columns and pd.api.types.is_numeric_dtype(x[c])]
+    missing_core=[c for c in CORE_FEATURES if c not in cols]
+    if missing_core: raise ValueError(f"Missing predeclared core features: {missing_core}")
     X=x[cols].replace([np.inf,-np.inf],np.nan)
     valid=X.notna().any(axis=1).to_numpy(copy=True)
     if "corporate_action_window" in x: valid &= ~x.corporate_action_window.fillna(True).astype(bool).to_numpy()
@@ -177,7 +186,7 @@ def run(features_path,events_path,output_dir,threshold_ids=None,data_audit_path=
     audit=json.loads(Path(data_audit_path).read_text(encoding="utf-8")) if data_audit_path and Path(data_audit_path).exists() else {}
     summary={"symbol":"2330","protocol":"even year A: chronological first 70% train, final 30% calibrate; freeze model and threshold; odd year A+1 blind test",
         "analysis_years":list(PAIR_YEARS),"horizons_sessions":list(HORIZONS),"threshold_ids":requested,
-        "feature_count":len(cols),"data_rows":len(x),"data_start":dates.min().date().isoformat(),"data_end":dates.max().date().isoformat(),
+        "feature_count":len(cols),"feature_set":"predeclared_core28","features":cols,"data_rows":len(x),"data_start":dates.min().date().isoformat(),"data_end":dates.max().date().isoformat(),
         "data_research_grade_eligible":audit.get("research_grade_eligible"),"data_research_grade_reason":audit.get("research_grade_reason"),
         "evaluated_folds":int((annual.status=="evaluated").sum()),"skipped_folds":int(annual.status.astype(str).str.startswith("skipped").sum()),
         "pending_folds":int((annual.status=="pending_validation_year_missing").sum()),"pooled_out_of_fold_results":pooled,
