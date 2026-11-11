@@ -153,7 +153,7 @@ def run(features_path,events_path,output_dir):
     d=pd.read_csv(features_path,parse_dates=["date"]).sort_values("date").reset_index(drop=True)
     required={"raw_open","raw_high","raw_low","raw_close","relative_volume20","distance_prior_low20",
       "obv_flow_ratio_5","return_1","close_location","bearish_rsi_divergence20",
-      "bearish_macd_divergence20","bearish_volume_divergence20"}
+      "bearish_macd_divergence20","bearish_volume_divergence20","stoch_k14","distance_sma_200","intraday_range_pct","macd_hist_change_3","sma50_slope_10"}
     missing=sorted(required-set(d.columns))
     if missing: raise ValueError(f"Missing required columns: {missing}")
     if d.date.duplicated().any(): raise ValueError("Duplicate dates")
