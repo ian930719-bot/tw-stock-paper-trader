@@ -24,7 +24,7 @@ def analyze(input_csv, output_dir, bootstrap=2000, seed=23302027):
         raise ValueError("Input is not a 500-pivot snapshot file")
     features=[c for c in d.columns if c not in META and not c.startswith("control_")
               and "control_"+c in d.columns]
-    if len(features)<30: raise ValueError(f"Expected at least 30 paired features; got {len(features)}")
+    if not features: raise ValueError("No paired event/control feature columns found")
     d["pivot_year"]=d.pivot_date.dt.year
     rng=np.random.default_rng(seed)
     rows=[]
