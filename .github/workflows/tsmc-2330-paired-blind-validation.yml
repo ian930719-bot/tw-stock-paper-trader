@@ -55,7 +55,7 @@ jobs:
             --input data/tsmc_2330 \
             --output artifacts/tsmc_2330_swing \
             --corporate-actions historical_artifact/data/taiwan_history/corporate_actions/events.csv
-      - name: Run 70/30 paired-year blind validation and false-signal diagnostics
+      - name: Run 70/30 paired-year blind validation
         run: |
           python tsmc_2330_paired_annual_blind_validation.py \
             --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
