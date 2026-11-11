@@ -1,0 +1,52 @@
+name: TSMC 2330 500 Pivot Year-Cluster Audit
+on:
+  push:
+    branches: [research/200cagr-blind-validation]
+    paths:
+      - "tsmc_2330_500_year_cluster_audit.py"
+      - "tests/test_tsmc_2330_500_year_cluster_audit.py"
+      - ".github/workflows/tsmc-2330-500-year-cluster-audit.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: tsmc-2330-500-year-cluster-audit
+  cancel-in-progress: false
+jobs:
+  year-cluster-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      TZ: Asia/Taipei
+      OPENBLAS_NUM_THREADS: "1"
+      OMP_NUM_THREADS: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/200cagr-blind-validation
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip pandas numpy
+      - name: Download frozen 500-pivot sample
+        uses: actions/download-artifact@v4
+        with:
+          name: tsmc-2330-fast-500-pivot-study-1
+          run-id: 42986851249
+          repository: ${{ github.repository }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: input
+      - name: Compile and test audit
+        run: |
+          python -m py_compile tsmc_2330_500_year_cluster_audit.py tests/test_tsmc_2330_500_year_cluster_audit.py
+          python -m unittest discover -s tests -p "test_tsmc_2330_500_year_cluster_audit.py" -v
+      - name: Run year-cluster robustness audit
+        run: |
+          python tsmc_2330_500_year_cluster_audit.py --input input/tsmc_2330_500_pivot_snapshots.csv --output artifacts/year_cluster --bootstrap 2000
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tsmc-2330-500-year-cluster-audit-${{ github.run_number }}
+          if-no-files-found: error
+          retention-days: 30
+          path: artifacts/year_cluster/
