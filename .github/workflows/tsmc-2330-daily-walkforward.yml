@@ -100,8 +100,8 @@ jobs:
             --output artifacts/daily_walkforward
       - name: Run frozen candidate rule robustness and execution stress audit
         run: |
-          python tsmc_2330_rule_robustness.py \\
-            --features input/artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \\
+          python tsmc_2330_rule_robustness.py \
+            --features input/artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
             --output artifacts/rule_robustness
       - uses: actions/upload-artifact@v4
         with:
