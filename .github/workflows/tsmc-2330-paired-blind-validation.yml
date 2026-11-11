@@ -11,7 +11,7 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: tsmc-2330-paired-blind-\${{ github.ref }}
+  group: tsmc-2330-paired-blind-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   paired-blind-validation:
@@ -36,8 +36,8 @@ jobs:
         with:
           name: taiwan-history-42941077075
           run-id: 42941077075
-          repository: \${{ github.repository }}
-          github-token: \${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           path: historical_artifact
       - name: Prepare the existing TSMC 2330 history
         run: |
@@ -65,7 +65,7 @@ jobs:
       - name: Upload reproducible blind-validation outputs
         uses: actions/upload-artifact@v4
         with:
-          name: tsmc-2330-paired-annual-blind-\${{ github.run_number }}
+          name: tsmc-2330-paired-annual-blind-${{ github.run_number }}
           if-no-files-found: error
           retention-days: 30
           path: |
