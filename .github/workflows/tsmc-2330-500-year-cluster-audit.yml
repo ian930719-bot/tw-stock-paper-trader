@@ -1,4 +1,4 @@
-name: TSMC 2330 500 Pivot Year-Cluster Audit
+name: TSMC 2330 500 Pivot Year-Cluster Audit v2
 on:
   push:
     branches: [research/200cagr-blind-validation]
