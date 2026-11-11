@@ -67,7 +67,7 @@ CHIP_PREFIXES=("foreign_","trust_")
 
 def build_feature_sets(frame):
     chip_cols=[c for c in frame.columns
-        if c.startswith(CHIP_PREFIXES) and c != "institutional_data_available"
+        if c.startswith(CHIP_PREFIXES) and c != "institutional_data_available" and not c.startswith("foreign_dealer_")
         and pd.api.types.is_numeric_dtype(frame[c])]
     if "institutional_data_available" in frame:
         chip_available=frame["institutional_data_available"].fillna(0).astype(bool).to_numpy()
@@ -177,7 +177,7 @@ def run(features_path,events_path,output_dir,threshold_ids=None):
       "institutional_data_available_rows":chip_rows,"institutional_feature_count":chip_feature_count,
       "institutional_minimum_rows_required":min_chip_rows,
       "institutional_ablation_status":"evaluated_same_dates" if compare_chip else "skipped_insufficient_or_missing_institutional_history",
-      "feature_group_definitions":{"foreign_only":"foreign_* excluding foreign_dealer_*","trust_only":"trust_*","foreign_only":"foreign_* excluding foreign_dealer_*","trust_only":"trust_*","foreign_and_trust":"foreign_* excluding foreign_dealer_* plus trust_*; excludes dealer_* and institutional_*"},
+      "feature_group_definitions":{"foreign_only":"foreign_* excluding foreign_dealer_*","trust_only":"trust_*","foreign_and_trust":"foreign_* excluding foreign_dealer_* plus trust_*; excludes dealer_* and institutional_*"},
       "probability_cutoff":.5,
       "evaluated_folds":int((folds.status=="evaluated").sum()) if not folds.empty else 0,
       "skipped_folds":int(folds.status.astype(str).str.startswith("skipped").sum()) if not folds.empty else 0,
