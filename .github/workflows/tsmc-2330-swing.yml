@@ -65,7 +65,7 @@ permissions:
 jobs:
   tsmc-swing:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 120
     env:
       FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
       TZ: Asia/Taipei
