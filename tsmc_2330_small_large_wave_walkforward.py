@@ -320,7 +320,10 @@ def simulate_atr_reentry(d, low_signal, high_signal, start_date,
 
         if shares:
             peak_close = max(float(peak_close), close)
-            min_low_since_entry = min(float(min_low_since_entry), lo)
+            # Exclude the entry session's full low from MAE: OHLC does not tell
+            # whether that low occurred before or after the next-open entry.
+            if i > int(entry_i):
+                min_low_since_entry = min(float(min_low_since_entry), lo)
             # Update stop using today's completed close only. It becomes active
             # from the next session, avoiding look-ahead within today's range.
             candidate = peak_close - stop_multiple * atr[i] if np.isfinite(atr[i]) else np.nan
