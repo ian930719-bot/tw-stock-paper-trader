@@ -16,7 +16,7 @@ class FalseSignalDiagnosticsTests(unittest.TestCase):
                 "corporate_action_window":[False]*60})
             events=pd.DataFrame([
                 {"threshold_id":"p0.030_atr2.0","type":"HIGH","pivot_date":dates[13]},
-                {"threshold_id":"p0.030_atr2.0","type":"LOW","pivot_date":dates[35]},
+                {"threshold_id":"p0.030_atr2.0","type":"LOW","pivot_date":dates[12]},
             ])
             predictions=pd.DataFrame([
                 {"threshold_id":"p0.030_atr2.0","analysis_year":2022,"validation_year":2023,
