@@ -68,7 +68,7 @@ def run(features_path,events_path,output_dir,threshold_ids=None):
         action=x.get("corporate_action_window",pd.Series(False,index=x.index)).fillna(True).astype(bool).to_numpy()
         extras=[]
         for tid in absent:
-            m=re.fullmatch(r"p(\\d+\\.\\d+)_atr(\\d+\\.\\d+)",tid)
+            m=re.fullmatch(r"p(\d+\.\d+)_atr(\d+\.\d+)",tid)
             if not m: continue
             e=detect_confirmed_pivots(x,float(m.group(1)),float(m.group(2)))
             if not e.empty:
