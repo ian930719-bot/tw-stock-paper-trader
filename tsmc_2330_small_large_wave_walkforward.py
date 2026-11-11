@@ -232,12 +232,15 @@ def run(features_path,events_path,output_dir):
           for wave in ("small","large"):
             part=z[(z.pivot_type==side)&(z.wave_class==wave)].set_index("date")
             pivot[(side,wave)]=part.signal.reindex(bars.date).eq(True).to_numpy()
+        action_window=d.corporate_action_window.fillna(True).astype(bool).to_numpy() if "corporate_action_window" in d else np.zeros(n,dtype=bool)
         for policy in ("small_only","large_only","all_waves"):
-          if policy=="small_only":lo=pivot[("LOW","small")];hi=pivot[("HIGH","small")]
-          elif policy=="large_only":lo=pivot[("LOW","large")];hi=pivot[("HIGH","large")]
+          if policy=="small_only":lo=pivot[("LOW","small")].copy();hi=pivot[("HIGH","small")].copy()
+          elif policy=="large_only":lo=pivot[("LOW","large")].copy();hi=pivot[("HIGH","large")].copy()
           else:
             lo=pivot[("LOW","small")]|pivot[("LOW","large")]
             hi=pivot[("HIGH","small")]|pivot[("HIGH","large")]
+          lo &= ~action_window
+          hi &= ~action_window
           m,tr,curve=simulate_all_in_all_out(bars,lo,hi,f"{START_TEST_YEAR}-01-01")
           m.update({"model":model_name,"horizon":horizon,"wave_policy":policy})
           bt_rows.append(m)
