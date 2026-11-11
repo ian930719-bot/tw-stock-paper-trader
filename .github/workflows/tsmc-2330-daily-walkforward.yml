@@ -26,7 +26,7 @@ concurrency:
 jobs:
   daily-walkforward:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     env:
       TZ: Asia/Taipei
       OPENBLAS_NUM_THREADS: "1"
@@ -84,9 +84,9 @@ jobs:
             --output artifacts/all_in_all_out
       - name: Run small and large wave chronological walk-forward
         run: |
-          python tsmc_2330_small_large_wave_walkforward.py \\
-            --features input/artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \\
-            --events input/artifacts/tsmc_2330_swing/tsmc_2330_pivot_events.csv \\
+          python tsmc_2330_small_large_wave_walkforward.py \
+            --features input/artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --events input/artifacts/tsmc_2330_swing/tsmc_2330_pivot_events.csv \
             --output artifacts/small_large_wave
       - name: Run chronological daily walk-forward and cost-aware simulation
         run: |
