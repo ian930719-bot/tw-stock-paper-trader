@@ -12,7 +12,8 @@ from sklearn.preprocessing import StandardScaler
 
 PAIR_YEARS=tuple(range(2010,2027,2))
 HORIZONS=(1,3,5,10,20)
-DEFAULT_THRESHOLDS=("p0.030_atr2.0","p0.050_atr2.0","p0.080_atr2.0","p0.100_atr2.0")
+DEFAULT_THRESHOLDS=("p0.030_atr2.0","p0.050_atr2.0","p0.080_atr2.0","p0.100_atr2.0",
+                    "p0.010_atr1.0","p0.020_atr1.0","p0.030_atr1.0","p0.040_atr1.0","p0.020_atr1.5")
 CORE_FEATURES=(
  "return_1","return_3","return_5","return_10","return_20","return_40",
  "distance_sma_20","distance_sma_50","distance_sma_200","sma20_slope_5","trend_stack",
