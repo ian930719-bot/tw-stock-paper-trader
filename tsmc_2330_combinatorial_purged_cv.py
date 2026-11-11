@@ -43,6 +43,15 @@ def purged_train_mask(n,groups,test_ids,purge):
         mask[max(0,lo-purge):min(n,hi+purge+1)]=False
     return mask
 
+def summarize_coefficients(coef):
+    if coef.empty: return pd.DataFrame()
+    return (coef.groupby(["threshold_id","horizon_sessions","pivot_type","feature"],as_index=False)
+        .agg(folds=("fold","nunique"),
+             median_coefficient=("coefficient","median"),
+             mean_coefficient=("coefficient","mean"),
+             positive_fold_share=("coefficient",lambda s:float((s>0).mean())),
+             median_abs_coefficient=("coefficient",lambda s:float(s.abs().median()))))
+
 def metrics(y,p,cut=.5):
     y=np.asarray(y,dtype=np.int8);p=np.asarray(p,dtype=float);s=p>=cut
     n=int(s.sum());e=int(y.sum());tp=int((s&(y==1)).sum())
@@ -80,7 +89,7 @@ def run(features_path,events_path,output_dir,threshold_ids=None):
     X=x[list(FEATURES)].replace([np.inf,-np.inf],np.nan)
     valid=X.notna().any(axis=1).to_numpy(copy=True)
     if "corporate_action_window" in x: valid = valid & ~x.corporate_action_window.fillna(True).astype(bool).to_numpy(copy=True)
-    fold_rows=[]; pred_rows=[]
+    fold_rows=[]; pred_rows=[]; coef_rows=[]
     for tid in requested:
       tev=ev.loc[ev.threshold_id.astype(str)==tid]
       if tev.empty:
@@ -103,6 +112,10 @@ def run(features_path,events_path,output_dir,threshold_ids=None):
           model=make_pipeline(SimpleImputer(strategy="median"),StandardScaler(),
             LogisticRegression(solver="liblinear",max_iter=1000,class_weight="balanced",C=.2,random_state=0))
           model.fit(X.loc[train,cols],y[train]);p=model.predict_proba(X.loc[test,cols])[:,1]
+           weights=model.named_steps["logisticregression"].coef_[0]
+           for feature,weight in zip(cols,weights):
+             coef_rows.append({"threshold_id":tid,"horizon_sessions":h,"pivot_type":kind,
+               "fold":fid,"feature":feature,"coefficient":float(weight)})
           fold_rows.append({**base,"status":"evaluated","feature_count":len(cols),**metrics(y[test],p)})
           for i,pv in zip(np.flatnonzero(test),p):probs[i].append(float(pv))
         inds=[i for i,v in enumerate(probs) if v]
@@ -111,8 +124,11 @@ def run(features_path,events_path,output_dir,threshold_ids=None):
             "date":x.date.iloc[i].date().isoformat(),"probability":float(np.mean(probs[i])),
             "signal":bool(np.mean(probs[i])>=.5),"event":bool(y[i]),"fold_predictions":len(probs[i])})
     out=Path(output_dir);out.mkdir(parents=True,exist_ok=True)
-    folds=pd.DataFrame(fold_rows);pred=pd.DataFrame(pred_rows)
+    folds=pd.DataFrame(fold_rows);pred=pd.DataFrame(pred_rows);coef=pd.DataFrame(coef_rows)
+    coef_summary=summarize_coefficients(coef)
     folds.to_csv(out/"tsmc_2330_combinatorial_purged_cv_folds.csv",index=False)
+    coef.to_csv(out/"tsmc_2330_combinatorial_purged_cv_coefficients.csv",index=False)
+    coef_summary.to_csv(out/"tsmc_2330_combinatorial_purged_cv_coefficient_stability.csv",index=False)
     pred.to_csv(out/"tsmc_2330_combinatorial_purged_cv_predictions.csv",index=False)
     pooled=[]
     if not pred.empty:
