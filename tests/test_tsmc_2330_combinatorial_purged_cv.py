@@ -37,32 +37,34 @@ class CombinatorialPurgedCVTests(unittest.TestCase):
         self.assertAlmostEqual(out.median_coefficient,0.25)
 
 
-    def test_institutional_ablation_uses_same_rows_and_excludes_broker_fields(self):
+    def test_foreign_and_trust_ablation_excludes_dealers_aggregates_and_brokers(self):
         frame=pd.DataFrame({
             "institutional_data_available":[1]*400,
             "foreign_net_lots":[0.1]*400,
+            "foreign_dealer_net_lots":[0.05]*400,
             "trust_net_lots":[0.2]*400,
             "dealer_net_lots":[-0.1]*400,
+            "institutional_net_lots":[0.2]*400,
             "broker_net_lots":[9.0]*400,
         })
         sets,available,count,minimum=build_feature_sets(frame)
-        self.assertIn("technical_only",sets)
-        self.assertIn("technical_plus_all_institutional",sets)
-        self.assertIn("technical_plus_foreign_only",sets)
-        self.assertIn("technical_plus_trust_only",sets)
-        self.assertIn("technical_plus_dealer_only",sets)
-        self.assertIn("technical_plus_three_major",sets)
-        self.assertIn("foreign_net_lots",sets["technical_plus_all_institutional"])
-        self.assertNotIn("broker_net_lots",sets["technical_plus_all_institutional"])
-        self.assertIn("foreign_net_lots",sets["technical_plus_foreign_only"])
-        self.assertNotIn("trust_net_lots",sets["technical_plus_foreign_only"])
-        self.assertIn("trust_net_lots",sets["technical_plus_trust_only"])
-        self.assertNotIn("foreign_net_lots",sets["technical_plus_trust_only"])
-        self.assertIn("dealer_net_lots",sets["technical_plus_dealer_only"])
-        self.assertNotIn("foreign_net_lots",sets["technical_plus_dealer_only"])
-        self.assertNotIn("institutional_net_lots",sets["technical_plus_three_major"])
+        self.assertEqual(set(sets),{
+            "technical_only","technical_plus_foreign_only",
+            "technical_plus_trust_only","technical_plus_foreign_and_trust"
+        })
+        foreign=sets["technical_plus_foreign_only"]
+        trust=sets["technical_plus_trust_only"]
+        both=sets["technical_plus_foreign_and_trust"]
+        self.assertIn("foreign_net_lots",foreign)
+        self.assertNotIn("trust_net_lots",foreign)
+        self.assertIn("trust_net_lots",trust)
+        self.assertNotIn("foreign_net_lots",trust)
+        self.assertIn("foreign_net_lots",both)
+        self.assertIn("trust_net_lots",both)
+        for columns in (foreign,trust,both):
+            self.assertFalse(any(c.startswith(("dealer_","foreign_dealer_","institutional_","broker_")) for c in columns))
         self.assertEqual(int(available.sum()),400)
-        self.assertEqual(count,3)
+        self.assertEqual(count,2)
 
     def test_institutional_ablation_is_skipped_without_sufficient_coverage(self):
         frame=pd.DataFrame({
@@ -70,11 +72,11 @@ class CombinatorialPurgedCVTests(unittest.TestCase):
             "foreign_net_lots":[0.1]*20+[np.nan]*380,
         })
         sets,available,count,minimum=build_feature_sets(frame)
-        self.assertNotIn("technical_plus_all_institutional",sets)
+        self.assertNotIn("technical_plus_foreign_and_trust",sets)
         self.assertNotIn("technical_plus_foreign_only",sets)
         self.assertNotIn("technical_plus_trust_only",sets)
-        self.assertNotIn("technical_plus_dealer_only",sets)
-        self.assertNotIn("technical_plus_three_major",sets)
+        self.assertNotIn("technical_plus_foreign_only",sets)
+        self.assertNotIn("technical_plus_trust_only",sets)
         self.assertEqual(int(available.sum()),20)
 
     def test_exact_lead_labels(self):
