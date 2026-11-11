@@ -1,10 +1,12 @@
-name: TSMC 2330 Paired Annual Blind Validation
+name: TSMC 2330 Combinatorial Purged Cross-Validation
 on:
   push:
     branches: [research/200cagr-blind-validation]
     paths:
       - "tsmc_swing_research.py"
       - "tsmc_2330_paired_annual_blind_validation.py"
+      - "tsmc_2330_combinatorial_purged_cv.py"
+      - "tests/test_tsmc_2330_combinatorial_purged_cv.py"
       - "tsmc_2330_false_signal_diagnostics.py"
       - "tests/test_tsmc_2330_paired_annual_blind_validation.py"
       - "tests/test_tsmc_2330_false_signal_diagnostics.py"
@@ -22,7 +24,7 @@ jobs:
     timeout-minutes: 30
     env:
       TZ: Asia/Taipei
-      VALIDATION_PROTOCOL_VERSION: paired-year-70-30-v8-core28-sample-grid
+      VALIDATION_PROTOCOL_VERSION: combinatorial-purged-cv-v1-6groups
       OPENBLAS_NUM_THREADS: "1"
       OMP_NUM_THREADS: "1"
       MKL_NUM_THREADS: "1"
@@ -51,28 +53,19 @@ jobs:
           cp historical_artifact/data/taiwan_history/bars/2330.csv data/tsmc_2330/bars/2330.csv
       - name: Compile research code and run protocol tests
         run: |
-          python -m py_compile tsmc_swing_research.py corporate_action_adjustments.py tsmc_2330_paired_annual_blind_validation.py tsmc_2330_false_signal_diagnostics.py tests/test_tsmc_2330_paired_annual_blind_validation.py tests/test_tsmc_2330_false_signal_diagnostics.py
-          python -m unittest discover -s tests -p "test_tsmc_2330_paired_annual_blind_validation.py" -v
-          python -m unittest discover -s tests -p "test_tsmc_2330_false_signal_diagnostics.py" -v
+          python -m py_compile tsmc_swing_research.py corporate_action_adjustments.py tsmc_2330_combinatorial_purged_cv.py tests/test_tsmc_2330_combinatorial_purged_cv.py
+          python -m unittest discover -s tests -p "test_tsmc_2330_combinatorial_purged_cv.py" -v
       - name: Build causal TSMC features and retrospective pivot outcomes
         run: |
           python tsmc_swing_research.py \
             --input data/tsmc_2330 \
             --output artifacts/tsmc_2330_swing \
             --corporate-actions historical_artifact/data/taiwan_history/corporate_actions/events.csv
-      - name: Run 70/30 paired-year blind validation
+      - name: Run combinatorial purged cross-validation
         run: |
-          python tsmc_2330_paired_annual_blind_validation.py \
-            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
-            --events artifacts/tsmc_2330_swing/tsmc_2330_pivot_events.csv \
-            --output artifacts/tsmc_2330_swing \
-            --data-audit historical_artifact/data/taiwan_history/data_audit_summary.json
-      - name: Classify OOF true and false signal outcomes
-        run: |
-          python tsmc_2330_false_signal_diagnostics.py \
-            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
-            --events artifacts/tsmc_2330_swing/tsmc_2330_pivot_events.csv \
-            --predictions artifacts/tsmc_2330_swing/tsmc_2330_paired_annual_predictions.csv \
+          python tsmc_2330_combinatorial_purged_cv.py \\
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \\
+            --events artifacts/tsmc_2330_swing/tsmc_2330_pivot_events.csv \\
             --output artifacts/tsmc_2330_swing
       - name: Upload reproducible blind-validation outputs
         uses: actions/upload-artifact@v4
@@ -85,11 +78,7 @@ jobs:
             historical_artifact/data/taiwan_history/data_audit_summary.json
             artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv
             artifacts/tsmc_2330_swing/tsmc_2330_pivot_events.csv
-            artifacts/tsmc_2330_swing/tsmc_2330_paired_annual_blind_validation.csv
-            artifacts/tsmc_2330_swing/tsmc_2330_paired_annual_blind_validation.json
-            artifacts/tsmc_2330_swing/tsmc_2330_paired_annual_calibration.csv
-            artifacts/tsmc_2330_swing/tsmc_2330_paired_annual_predictions.csv
-            artifacts/tsmc_2330_swing/tsmc_2330_paired_annual_pooled_oof.csv
-            artifacts/tsmc_2330_swing/tsmc_2330_oof_signal_outcomes.csv
-            artifacts/tsmc_2330_swing/tsmc_2330_oof_signal_outcome_summary.csv
-            artifacts/tsmc_2330_swing/tsmc_2330_oof_signal_feature_medians.csv
+            artifacts/tsmc_2330_swing/tsmc_2330_combinatorial_purged_cv_folds.csv
+            artifacts/tsmc_2330_swing/tsmc_2330_combinatorial_purged_cv_predictions.csv
+            artifacts/tsmc_2330_swing/tsmc_2330_combinatorial_purged_cv_summary.csv
+            artifacts/tsmc_2330_swing/tsmc_2330_combinatorial_purged_cv.json
