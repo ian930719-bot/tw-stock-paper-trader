@@ -303,6 +303,8 @@ def simulate_atr_reentry(d, low_signal, high_signal, start_date,
                             break
                         qty -= 1
                     if qty:
+                        if stopped_out:
+                            reentries += 1
                         trade_id += 1
                         shares = qty
                         entry_price = fill
@@ -313,7 +315,11 @@ def simulate_atr_reentry(d, low_signal, high_signal, start_date,
                         initial_stop = entry_price - stop_multiple * atr[prev_i]
                         stop_price = initial_stop
                         peak_close = close
-                        min_low_since_entry = lo
+                        # Daily OHLC cannot establish whether the entry-day high/low
+                        # occurred before or after the opening fill. Start excursions
+                        # at the fill and measure intraday extremes from the next bar.
+                        peak_high_since_entry = entry_price
+                        min_low_since_entry = entry_price
                         # Intraday OHLC does not identify whether the day's low
                         # occurred before or after the opening fill. Activate the
                         # initial stop from the next session to avoid path leakage.
@@ -321,6 +327,9 @@ def simulate_atr_reentry(d, low_signal, high_signal, start_date,
 
         if shares:
             peak_close = max(float(peak_close), close)
+            # Only complete sessions after entry contribute to MFE/MAE.
+            if i > int(entry_i):
+                peak_high_since_entry = max(float(peak_high_since_entry), hi)
             # Exclude the entry session's full low from MAE: OHLC does not tell
             # whether that low occurred before or after the next-open entry.
             if i > int(entry_i):
