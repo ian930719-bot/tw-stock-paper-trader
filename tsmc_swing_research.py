@@ -466,3 +466,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+# Research workflow includes the chronological 40% CAGR / win-rate constrained rule-family audit.
