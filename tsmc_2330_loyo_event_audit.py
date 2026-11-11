@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import roc_auc_score, balanced_accuracy_score
+from sklearn.metrics import roc_auc_score, balanced_accuracy_score, confusion_matrix
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
@@ -82,14 +82,19 @@ def run_audit(input_csv: str | Path, output_dir: str | Path) -> dict:
                                            class_weight="balanced", random_state=2330))
                     model.fit(x.loc[train], y[train])
                     probability = model.predict_proba(x.loc[test])[:, 1]
+                    prediction = (probability >= 0.5).astype(int)
+                    tn, fp, fn, tp = confusion_matrix(y[test], prediction, labels=[0, 1]).ravel()
                     rows.append({
                         "pivot_type": kind, "lead_sessions": int(lead),
                         "model": model_name, "heldout_year": int(heldout),
                         "test_events": int((model_data.pivot_year == heldout).sum()),
                         "train_events": int((model_data.pivot_year != heldout).sum()),
                         "auc": float(roc_auc_score(y[test], probability)),
-                        "balanced_accuracy": float(balanced_accuracy_score(
-                            y[test], probability >= 0.5)),
+                        "balanced_accuracy": float(balanced_accuracy_score(y[test], prediction)),
+                        "event_recall": float(tp / (tp + fn)) if tp + fn else float("nan"),
+                        "control_false_positive_rate": float(fp / (fp + tn)) if fp + tn else float("nan"),
+                        "true_positive": int(tp), "false_positive": int(fp),
+                        "true_negative": int(tn), "false_negative": int(fn),
                         "feature_count": len(features),
                     })
     detail = pd.DataFrame(rows)
@@ -99,7 +104,9 @@ def run_audit(input_csv: str | Path, output_dir: str | Path) -> dict:
         .agg(year_folds=("heldout_year", "nunique"),
              mean_auc=("auc", "mean"), median_auc=("auc", "median"),
              share_year_auc_over_055=("auc", lambda s: float((s > 0.55).mean())),
-             mean_balanced_accuracy=("balanced_accuracy", "mean"))
+             mean_balanced_accuracy=("balanced_accuracy", "mean"),
+             mean_event_recall=("event_recall", "mean"),
+             mean_control_false_positive_rate=("control_false_positive_rate", "mean"))
         .reset_index())
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -124,6 +131,12 @@ def run_audit(input_csv: str | Path, output_dir: str | Path) -> dict:
             "slippage, execution timing, and false-signal costs."
         ),
         "outputs": ["tsmc_2330_loyo_fold_metrics.csv", "tsmc_2330_loyo_summary.csv"],
+        "metrics_note": (
+            "Control false-positive rate is measured only on matched control dates; "
+            "it is not the false-alert rate over every trading day. Event recall is "
+            "recall among retrospective pivot events, not the probability of catching "
+            "a future live pivot. AUC and balanced accuracy do not represent trade P&L."
+        ),
     }
     (out / "tsmc_2330_loyo_summary.json").write_text(
         json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
