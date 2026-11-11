@@ -1,0 +1,55 @@
+name: TSMC 2330 Daily Walk-Forward and Cost-Aware Simulation
+on:
+  push:
+    branches: [research/200cagr-blind-validation]
+    paths:
+      - "tsmc_2330_daily_walkforward.py"
+      - "tests/test_tsmc_2330_daily_walkforward.py"
+      - ".github/workflows/tsmc-2330-daily-walkforward.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: tsmc-2330-daily-walkforward
+  cancel-in-progress: false
+jobs:
+  daily-walkforward:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TZ: Asia/Taipei
+      OPENBLAS_NUM_THREADS: "1"
+      OMP_NUM_THREADS: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/200cagr-blind-validation
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip pandas numpy scikit-learn
+      - name: Download frozen TSMC causal feature and pivot artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tsmc-2330-cpcv-foreign-trust-ablation-42
+          run-id: 42982871652
+          repository: ${{ github.repository }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: input
+      - name: Compile and unit test
+        run: |
+          python -m py_compile tsmc_2330_daily_walkforward.py tests/test_tsmc_2330_daily_walkforward.py
+          PYTHONPATH=. python -m unittest discover -s tests -p "test_tsmc_2330_daily_walkforward.py" -v
+      - name: Run chronological daily walk-forward and cost-aware simulation
+        run: |
+          python tsmc_2330_daily_walkforward.py \
+            --features input/artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --events input/artifacts/tsmc_2330_swing/tsmc_2330_pivot_events.csv \
+            --output artifacts/daily_walkforward
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tsmc-2330-daily-walkforward-${{ github.run_number }}
+          if-no-files-found: error
+          retention-days: 30
+          path: artifacts/daily_walkforward/
