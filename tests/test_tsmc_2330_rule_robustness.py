@@ -44,6 +44,14 @@ class RuleRobustnessTests(unittest.TestCase):
         self.assertEqual(trades.iloc[0]["exit_date"], "2024-01-05")
         self.assertEqual(int(curve.iloc[-1]["shares"]), 0)
 
+    def test_first_window_session_uses_prior_session_signal(self):
+        d = self.frame()
+        low = pd.Series([True, False, False, False])
+        high = pd.Series([False, False, False, False])
+        metrics, trades, _ = simulate(d, low, high, start="2024-01-03")
+        self.assertEqual(metrics["closed_trades"], 1)
+        self.assertEqual(trades.iloc[0]["entry_date"], "2024-01-03")
+
     def test_delay_does_not_use_future_signal(self):
         d = self.frame()
         low = pd.Series([True, False, False, False])
