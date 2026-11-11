@@ -166,9 +166,13 @@ def true_range_atr(d, period=14):
 
 def _new_low_reentry_signal(d, low_signal, high_signal, i, last_exit_i, wait_sessions):
     """Require a fresh low signal after the mandatory cooldown; old alerts cannot re-enter."""
-    eligible_i = last_exit_i + int(wait_sessions) + 1
-    return (i >= eligible_i and bool(low_signal[i])
-            and not bool(high_signal[i]))
+    # Entry executes at open i from the signal known at close prev_i.
+    # Wait N *complete* sessions after stop: eligible signal must be dated
+    # after last_exit_i + N sessions, and fill occurs on the following session.
+    signal_i = i - 1
+    eligible_signal_i = last_exit_i + int(wait_sessions) + 1
+    return (signal_i >= eligible_signal_i and bool(low_signal[signal_i])
+            and not bool(high_signal[signal_i]))
 
 
 def simulate_atr_reentry(d, low_signal, high_signal, start_date,
@@ -284,7 +288,7 @@ def simulate_atr_reentry(d, low_signal, high_signal, start_date,
                 # this signal must itself be dated after the cooldown.
                 if stopped_out:
                     can_reenter = _new_low_reentry_signal(
-                        bars, lows, highs, prev_i, last_exit_i, wait_sessions
+                        bars, lows, highs, i, last_exit_i, wait_sessions
                     )
                 else:
                     can_reenter = True
@@ -309,13 +313,9 @@ def simulate_atr_reentry(d, low_signal, high_signal, start_date,
                         stop_price = initial_stop
                         peak_close = close
                         min_low_since_entry = lo
-                        # Entry-day stop uses the opening stop only; because
-                        # signal executes at open, same-day OHLC path is unknown.
-                        if lo <= stop_price:
-                            ref = op if op <= stop_price else stop_price
-                            close_position(i, ref, "entry_day_atr_stop",
-                                           stop_price - entry_price)
-                            exited_today = True
+                        # Intraday OHLC does not identify whether the day's low
+                        # occurred before or after the opening fill. Activate the
+                        # initial stop from the next session to avoid path leakage.
                         stopped_out = False
 
         if shares:
