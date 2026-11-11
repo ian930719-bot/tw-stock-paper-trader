@@ -16,7 +16,7 @@ class LeaveOneYearOutTests(unittest.TestCase):
                     "overnight_gap", "foreign_net_to_volume", "trust_net_to_volume",
                     "trust_net_negative_streak"],
         }.items():
-            for year in range(2012, 2021):
+            for year in range(2010, 2021):
                 for event in range(6):
                     row = {"event_no": f"{kind}-{year}-{event}",
                            "pivot_type": kind, "pivot_date": f"{year}-06-20",
@@ -34,7 +34,12 @@ class LeaveOneYearOutTests(unittest.TestCase):
             result = run_audit(source, root / "out")
             self.assertEqual(result["input_rows"], len(rows))
             detail = pd.read_csv(root / "out/tsmc_2330_loyo_fold_metrics.csv")
-            self.assertEqual(detail.heldout_year.nunique(), 9)
+            technical_years = detail[detail.model == "technical"].heldout_year.nunique()
+            institutional_years = detail[
+                detail.model == "technical_plus_institutional"
+            ].heldout_year.nunique()
+            self.assertEqual(technical_years, 11)
+            self.assertEqual(institutional_years, 9)
             self.assertEqual(set(detail.model), {
                 "technical", "technical_plus_institutional"})
             self.assertTrue((detail.train_events > 0).all())
