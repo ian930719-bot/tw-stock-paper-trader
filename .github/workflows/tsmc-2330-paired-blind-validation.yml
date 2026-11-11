@@ -80,12 +80,7 @@ jobs:
             --events artifacts/tsmc_2330_swing/tsmc_2330_pivot_events.csv \
             --output artifacts/tsmc_2330_swing
       - name: Diagnose frozen CPCV signal outcomes (post-hoc only)
-        run: |
-          python tsmc_2330_false_signal_diagnostics.py \\
-            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \\
-            --events artifacts/tsmc_2330_swing/tsmc_2330_pivot_events.csv \\
-            --predictions artifacts/tsmc_2330_swing/tsmc_2330_combinatorial_purged_cv_predictions.csv \\
-            --output artifacts/tsmc_2330_swing
+        run: python tsmc_2330_false_signal_diagnostics.py --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv --events artifacts/tsmc_2330_swing/tsmc_2330_pivot_events.csv --predictions artifacts/tsmc_2330_swing/tsmc_2330_combinatorial_purged_cv_predictions.csv --output artifacts/tsmc_2330_swing
       - name: Upload reproducible blind-validation outputs
         uses: actions/upload-artifact@v4
         with:
