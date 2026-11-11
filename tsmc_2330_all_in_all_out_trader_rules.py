@@ -20,6 +20,12 @@ def build_rules(d):
     green=low&(d.return_1>0)
     bear=(d.bearish_rsi_divergence20>0)|(d.bearish_macd_divergence20>0)|(d.bearish_volume_divergence20>0)
     blow=(d.relative_volume20>=1.5)&(d.return_1<0)&(d.close_location<=.35)
+    low_cap=(d.relative_volume20>=1.2)&(d.return_1<=-.01)&(d.stoch_k14<=30)&(d.close_location<=.25)
+    low_cap_obv=low_cap&(d.obv_flow_ratio_5<=0)
+    low_hv=(d.relative_volume20>=1.2)&(d.return_1<=-.01)&(d.close_location<=.25)
+    high_climax=(d.return_1>=.01)&(d.close_location>=.7)&(d.intraday_range_pct>=.016)&(d.distance_sma_200>=.10)
+    high_ext=(d.distance_sma_200>=.10)&(d.macd_hist_change_3<=0)&(d.sma50_slope_10>0)
+    high_both=high_climax&high_ext
     return {
       "dryup_vs_bear_div":(low,bear),
       "dryup_OBV_vs_blowoff":(obv,blow),
@@ -27,6 +33,13 @@ def build_rules(d):
       "dryup_vs_bear_or_blowoff":(low,bear|blow),
       "dryup_OBV_vs_bear_div":(obv,bear),
       "dryup_green_vs_blowoff":(green,blow),
+      "capitulation_vs_climax":(low_cap,high_climax),
+      "capitulation_OBV_vs_climax":(low_cap_obv,high_climax),
+      "high_volume_selloff_vs_climax":(low_hv,high_climax),
+      "capitulation_vs_climax_extension":(low_cap,high_both),
+      "capitulation_OBV_vs_climax_extension":(low_cap_obv,high_both),
+      "high_volume_selloff_vs_climax_extension":(low_hv,high_both),
+      "capitulation_OBV_vs_extension_fade":(low_cap_obv,high_ext),
     }
 
 def commission(notional):
