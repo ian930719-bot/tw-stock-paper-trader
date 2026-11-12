@@ -8,7 +8,7 @@ class ForeignTrustEntryOOFTests(unittest.TestCase):
   d=pd.DataFrame({"institutional_data_available":[1,1,1,0],
    "foreign_net_5d_lots":[1,-1,1,1],"foreign_net_20d_lots":[1,1,-1,1],
    "trust_net_5d_lots":[1,1,-1,1],"trust_net_20d_lots":[-1,1,1,1]})
-  low=np.array([1,1,1,1],dtype=bool);high=np.zeros(4,dtype=bool);hold=np.zeros(4,dtype=bool)
+  low=np.array([1,1,1,1],dtype=bool);high=np.zeros(4,dtype=bool);hold=np.ones(4,dtype=bool)
   p=build_policies(d,low,high,hold)
   self.assertEqual(p["foreign_5d_positive"][0].tolist(),[True,False,True,True])
   self.assertEqual(p["foreign_and_trust_5d_positive"][0].tolist(),[True,False,False,True])
