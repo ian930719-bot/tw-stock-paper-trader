@@ -118,6 +118,21 @@ def run(features_path,limits_path,dividends_path,output_dir):
    static=simulate(d,policy_low,policy_high,risk,limits,dividends,slip,start_idx,end_idx,high_hold_signal=policy_hold)
    static_policy_metrics[policy_name][f"{slip}bps"]={k:v for k,v in static.items() if k not in {"trades","equity_curve"}}
    static_policy_annual_metrics[policy_name][f"{slip}bps"]=annual_metrics(static["equity_curve"],static["trades"],INITIAL_CAPITAL)
+ # Isolated high-exit confirmation diagnostic: keep entries and regime hold
+ # fixed, vary only the causal exit confirmation. This is a static full-period
+ # screen, not OOF; promote nothing without a subsequent annual OOF replay.
+ high_exit_policy_metrics={}
+ for base_name in ("baseline","baseline_high_hold"):
+  policy_low,policy_high,policy_hold=policies[base_name]
+  for exit_policy in ("handoff_or","and_sma20_rsi55","ema20_rsi55","prior5low"):
+   key=f"{base_name}__{exit_policy}"
+   high_exit_policy_metrics[key]={}
+   for slip in SLIPPAGE_BPS:
+    diagnostic=simulate(d,policy_low,policy_high,risk,limits,dividends,slip,start_idx,end_idx,
+      high_hold_signal=policy_hold,high_exit_policy=exit_policy)
+    high_exit_policy_metrics[key][f"{slip}bps"]={
+      "metrics":{k:v for k,v in diagnostic.items() if k not in {"trades","equity_curve"}},
+      "annual_metrics":annual_metrics(diagnostic["equity_curve"],diagnostic["trades"],INITIAL_CAPITAL)}
  for slip in SLIPPAGE_BPS:
   sim=simulate(d,oof_low,oof_high,risk,limits,dividends,slip,start_idx,end_idx,high_hold_signal=oof_hold)
   metrics_by_cost[f"{slip}bps"]={k:v for k,v in sim.items() if k not in {"trades","equity_curve"}}
@@ -146,6 +161,7 @@ def run(features_path,limits_path,dividends_path,output_dir):
   "annual_oof_metrics_by_cost":annual_by_cost,
   "static_policy_metrics_by_cost":static_policy_metrics,
   "static_policy_annual_metrics_by_cost":static_policy_annual_metrics,
+  "high_exit_policy_diagnostic_static_full_period":high_exit_policy_metrics,
   "target_status":"UNMET unless 10bps CAGR>=50% and completed-trade win rate>=86.9565%; MDD<=25% tracked separately.",
   "limitations":["Event-flow study is not evidence of a profitable trading strategy; this execution backtest is the required test.",
    "FinMind institutional history starts 2012-05-02; missing flow is not imputed as zero, and every flow-gated candidate falls back to an unfiltered entry when flow is unavailable.",
