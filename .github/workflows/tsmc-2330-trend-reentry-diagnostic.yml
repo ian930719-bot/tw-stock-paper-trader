@@ -1,0 +1,70 @@
+name: TSMC 2330 Trend Re-entry Diagnostic (Isolated)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - research/tsmc-2330-50cagr-trend-reentry
+    paths:
+      - ".github/workflows/tsmc-2330-trend-reentry-diagnostic.yml"
+      - "tsmc_2330_trend_reentry_diagnostic.py"
+      - "tests/test_tsmc_2330_trend_reentry_diagnostic.py"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      TZ: Asia/Taipei
+    steps:
+      - name: Checkout isolated research branch
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install research dependencies
+        run: python -m pip install --upgrade pip pandas numpy requests scikit-learn
+      - name: Restore immutable source data
+        uses: actions/download-artifact@v4
+        with:
+          name: tsmc-2330-swing-research
+          run-id: 43144543572
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          path: source
+      - name: Restore frozen baseline OOF ledger
+        uses: actions/download-artifact@v4
+        with:
+          name: tsmc-2330-annual-oof-frozen-source-43173570439
+          run-id: 43173570439
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          path: baseline_oof
+      - name: Verify inputs and compile
+        run: |
+          test -s source/artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv
+          test -s source/data/tsmc_2330/corporate_actions/price_limits_2330.csv
+          test -s source/data/tsmc_2330/corporate_actions/TaiwanStockDividendResult_2330.csv
+          test -s baseline_oof/tsmc_2330_annual_rule_oof_trades.csv
+          python -m py_compile tsmc_2330_trend_reentry_diagnostic.py
+          python -m unittest tests/test_tsmc_2330_trend_reentry_diagnostic.py -v
+      - name: Run causal trend re-entry diagnostic
+        run: |
+          python tsmc_2330_trend_reentry_diagnostic.py \
+            --features source/artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --limits source/data/tsmc_2330/corporate_actions/price_limits_2330.csv \
+            --dividends source/data/tsmc_2330/corporate_actions/TaiwanStockDividendResult_2330.csv \
+            --frozen-trades baseline_oof/tsmc_2330_annual_rule_oof_trades.csv \
+            --output artifacts/tsmc_2330_50cagr_trend_reentry
+      - name: Upload isolated diagnostic artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tsmc-2330-trend-reentry-diagnostic-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 30
+          path: artifacts/tsmc_2330_50cagr_trend_reentry/
