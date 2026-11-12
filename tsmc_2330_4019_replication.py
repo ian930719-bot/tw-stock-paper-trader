@@ -82,7 +82,10 @@ def simulate(
     start_i: int,
     end_i: int,
     initial_capital: float = INITIAL_CAPITAL,
+    risk_exit_policy: str = "per_position",
 ) -> dict:
+    if risk_exit_policy not in {"per_position", "per_regime_latched", "recovery_required"}:
+        raise ValueError(f"Unknown risk_exit_policy: {risk_exit_policy}")
     cash = float(initial_capital)
     shares = 0
     entry_date = None
@@ -101,6 +104,10 @@ def simulate(
     risk_exit_count = high_exit_count = 0
 
     for i in range(start_i, end_i + 1):
+        # Alternative interpretation: one risk exit per continuous weak regime;
+        # re-arm only when the actual risk condition has recovered.
+        if risk_exit_policy in {"per_regime_latched", "recovery_required"} and not risk[i]:
+            risk_exit_fired = False
         row = d.iloc[i]
         day = row.date.strftime("%Y-%m-%d")
 
@@ -146,7 +153,8 @@ def simulate(
                             entry_date = day
                             entry_cost = notional + fee
                             trade_dividend = 0.0
-                            risk_exit_fired = False
+                            if risk_exit_policy == "per_position":
+                                risk_exit_fired = False
                             high_wait_start = None
                             total_commission += fee
                             total_slippage += qty * (fill - op)
@@ -198,7 +206,9 @@ def simulate(
 
         if pending is None and i < end_i:
             if shares == 0:
-                if low[i] and i >= cooldown_until:
+                risk_recovered = not risk[i]
+                entry_allowed = not (risk_exit_policy == "recovery_required" and not risk_recovered)
+                if low[i] and i >= cooldown_until and entry_allowed:
                     pending = {"side": "BUY", "reason": "base_low_after_filters"}
             else:
                 # The SMA200 risk exit has priority over high-point processing.
@@ -288,15 +298,33 @@ def run(features_path: str, limits_path: str, dividends_path: str, output_dir: s
     end_i = len(d) - 1
     limit_lookup = limits
     summaries, annuals = {}, {}
+    sensitivity = {}
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
+    # Keep the literal per-position interpretation as the primary reported
+    # reproduction. Add two predeclared semantic interpretations without
+    # selecting one based on return.
     for slip in SLIPPAGE_BPS:
-        sim = simulate(d, low, high, risk, limit_lookup, dividends, slip, start_i, end_i)
+        sim = simulate(d, low, high, risk, limit_lookup, dividends, slip, start_i, end_i,
+                       risk_exit_policy="per_position")
         summaries[f"{slip}bps"] = {k:v for k,v in sim.items() if k not in {"trades","equity_curve"}}
         annuals[f"{slip}bps"] = annual_metrics(sim["equity_curve"],sim["trades"],INITIAL_CAPITAL)
         pd.DataFrame(sim["trades"]).to_csv(out/f"tsmc_2330_4019_replication_trades_{slip}bps.csv",index=False)
         pd.DataFrame(sim["equity_curve"]).to_csv(out/f"tsmc_2330_4019_replication_equity_{slip}bps.csv",index=False)
         pd.DataFrame(annuals[f"{slip}bps"]).to_csv(out/f"tsmc_2330_4019_replication_annual_{slip}bps.csv",index=False)
+
+    for policy in ("per_regime_latched", "recovery_required"):
+        sensitivity[policy] = {}
+        for slip in SLIPPAGE_BPS:
+            sim = simulate(d, low, high, risk, limit_lookup, dividends, slip, start_i, end_i,
+                           risk_exit_policy=policy)
+            sensitivity[policy][f"{slip}bps"] = {
+                **{k:v for k,v in sim.items() if k not in {"trades","equity_curve"}},
+                "annual_metrics": annual_metrics(sim["equity_curve"],sim["trades"],INITIAL_CAPITAL),
+            }
+            pd.DataFrame(sim["trades"]).to_csv(
+                out/f"tsmc_2330_4019_{policy}_trades_{slip}bps.csv",index=False
+            )
     result = {
         "symbol":"2330",
         "classification":"EXPLORATORY_REPLICATION_OF_PREVIOUSLY_INSPECTED_CANDIDATE_NOT_PRISTINE_OOF",
@@ -308,8 +336,10 @@ def run(features_path: str, limits_path: str, dividends_path: str, output_dir: s
         "account_policy":"one continuous account; no annual resets; no annual forced liquidation; final position marked to market",
         "costs":{"commission_per_side":0.001425,"minimum_commission_ntd":20,"sell_tax":0.003,"tested_one_way_slippage_bps":list(SLIPPAGE_BPS)},
         "fill_policy":"adverse slippage rounded to TWSE common-stock legal tick; official daily limit data missing or locked orders fail closed",
+        "risk_exit_policy_primary": "per_position",
         "metrics_by_cost":summaries,
         "annual_metrics_by_cost":annuals,
+        "risk_exit_semantic_sensitivity": sensitivity,
         "integrity_notes":[
             "The rule constants were supplied in the handoff from a historically inspected candidate; the entire 2010-2026 period has been inspected in prior research.",
             "This is a replication audit, not an independent blind OOF result.",
