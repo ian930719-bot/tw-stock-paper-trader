@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 from tsmc_2330_4019_replication import INITIAL_CAPITAL,SLIPPAGE_BPS,inputs,build_candidate_signals,simulate,annual_metrics
 
-POLICIES=["immediate","bullish_day_3","two_higher_closes_5","signal_high_breakout_5"]
+POLICIES=["immediate","bullish_day_3","two_higher_closes_5","signal_high_breakout_5","mfi40_reclaim_5"]
 def run(features,limits_path,dividends_path,output):
  d,limits,dividends=inputs(features,limits_path,dividends_path);d=d.sort_values("date").reset_index(drop=True)
  low,high,risk=build_candidate_signals(d);start=int((d.date.dt.year>=2015).to_numpy().argmax());end=len(d)-1
@@ -25,7 +25,8 @@ def run(features,limits_path,dividends_path,output):
    "immediate":"original next-session-open entry",
    "bullish_day_3":"after low signal, wait up to 3 sessions for close>open and close>prior close; buy following open",
    "two_higher_closes_5":"after low signal, wait up to 5 sessions for two consecutive higher closes; buy following open",
-   "signal_high_breakout_5":"after low signal, wait up to 5 sessions for close above the signal-day high; buy following open"
+   "signal_high_breakout_5":"after low signal, wait up to 5 sessions for close above the signal-day high; buy following open",
+   "mfi40_reclaim_5":"if MFI14 is below 40 on the low signal, wait up to 5 sessions for MFI14 to cross back above 40; if MFI14 is already >=40 or missing, enter next open"
   },
   "metrics_by_policy_and_cost":results,
   "warning":"Exploratory on previously inspected history. Confirmation policies are fixed, not optimized; only expanding OOF can establish generalization."}
