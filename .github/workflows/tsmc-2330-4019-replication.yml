@@ -1,0 +1,57 @@
+name: TSMC 2330 40.19 Candidate Replication Audit (Isolated)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - research/tsmc-2330-50cagr-trend-reentry
+    paths:
+      - ".github/workflows/tsmc-2330-4019-replication.yml"
+      - "tsmc_2330_4019_replication.py"
+      - "tests/test_tsmc_2330_4019_replication.py"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  replication:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      TZ: Asia/Taipei
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip pandas numpy requests scikit-learn
+      - name: Restore immutable source data
+        uses: actions/download-artifact@v4
+        with:
+          name: tsmc-2330-swing-research
+          run-id: 43144543572
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          path: source
+      - name: Verify source, compile and test
+        run: |
+          test -s source/artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv
+          test -s source/data/tsmc_2330/corporate_actions/price_limits_2330.csv
+          test -s source/data/tsmc_2330/corporate_actions/TaiwanStockDividendResult_2330.csv
+          python -m py_compile tsmc_2330_4019_replication.py
+          python -m unittest tests/test_tsmc_2330_4019_replication.py -v
+      - name: Run frozen-rule replication
+        run: |
+          python tsmc_2330_4019_replication.py \
+            --features source/artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --limits source/data/tsmc_2330/corporate_actions/price_limits_2330.csv \
+            --dividends source/data/tsmc_2330/corporate_actions/TaiwanStockDividendResult_2330.csv \
+            --output artifacts/tsmc_2330_4019_replication
+      - name: Upload replication results
+        uses: actions/upload-artifact@v4
+        with:
+          name: tsmc-2330-4019-replication-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 30
+          path: artifacts/tsmc_2330_4019_replication/
