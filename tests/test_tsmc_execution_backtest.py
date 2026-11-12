@@ -4,7 +4,7 @@ import pandas as pd
 
 from tsmc_2330_execution_backtest import (
     commission, sell_tax, is_limit_locked, buy_quantity, build_signals,
-    trailing_atr_stop_hit,
+    trailing_atr_stop_hit, trailing_drawdown_stop_hit, _simulate_period,
 )
 
 
@@ -24,6 +24,33 @@ class TSMCExecutionBacktestTests(unittest.TestCase):
         self.assertTrue(is_limit_locked("BUY", 110.0, 111.0, 109.5, 110.0, 90.0))
         self.assertTrue(is_limit_locked("SELL", 90.0, 90.0, 89.0, 110.0, 90.0))
         self.assertTrue(is_limit_locked("SELL", 90.0, 91.0, 89.0, 110.0, 90.0))
+
+    def test_fixed_trailing_drawdown_stop(self):
+        self.assertTrue(trailing_drawdown_stop_hit(94.0, 100.0, 0.05))
+        self.assertFalse(trailing_drawdown_stop_hit(96.0, 100.0, 0.05))
+        self.assertFalse(trailing_drawdown_stop_hit(90.0, 100.0, 0.0))
+        self.assertFalse(trailing_drawdown_stop_hit(90.0, 100.0, 1.0))
+
+    def test_trailing_stop_executes_next_open_and_allows_later_reentry(self):
+        dates = pd.date_range("2024-01-02", periods=5, freq="B")
+        bars = pd.DataFrame({
+            "date": dates,
+            "raw_open": [100, 100, 110, 95, 96],
+            "raw_high": [101, 111, 111, 97, 100],
+            "raw_low": [99, 99, 99, 94, 95],
+            "raw_close": [100, 110, 100, 96, 99],
+            "corporate_action_window": [False] * 5,
+        })
+        limits = {d.strftime("%Y-%m-%d"): (120.0, 80.0) for d in dates}
+        low = np.array([True, False, True, True, False])
+        high = np.zeros(5, dtype=bool)
+        result = _simulate_period(
+            bars, low, high, limits, {}, "2024-01-02", "2024-01-08", 0,
+            100000.0, True, trailing_drawdown_pct=0.05,
+        )
+        self.assertEqual(result["trades"][0]["entry_date"], "2024-01-03")
+        self.assertEqual(result["trades"][0]["exit_date"], "2024-01-05")
+        self.assertEqual(result["trades"][1]["entry_date"], "2024-01-08")
 
     def test_atr_trailing_stop_uses_peak_and_current_atr(self):
         self.assertTrue(trailing_atr_stop_hit(90.0, 100.0, 0.02, 3.0))
