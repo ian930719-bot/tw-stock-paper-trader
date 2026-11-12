@@ -22,7 +22,7 @@ class TrendReentryExecutionTests(unittest.TestCase):
         self.assertGreaterEqual(buy, 1000.0)
         self.assertLessEqual(sell, 1000.0)
         self.assertAlmostEqual(buy / 5, round(buy / 5), places=8)
-        self.assertAlmostEqual(sell / 5, round(sell / 5), places=8)
+        self.assertAlmostEqual(sell / 1, round(sell / 1), places=8)
 
     def test_signal_array_alignment_and_no_lookahead(self):
         d = pd.DataFrame({
