@@ -32,3 +32,5 @@ def main():
  p=argparse.ArgumentParser();p.add_argument("--features",required=True);p.add_argument("--limits",required=True);p.add_argument("--dividends",required=True);p.add_argument("--output",default="artifacts/tsmc_2330_mfi_low_entry_filter");a=p.parse_args()
  print(json.dumps(run(a.features,a.limits,a.dividends,a.output),ensure_ascii=False,indent=2,default=float))
 if __name__=="__main__":main()
+
+# Fixed conventional MFI threshold; no grid search.
