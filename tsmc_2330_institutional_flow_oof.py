@@ -102,7 +102,7 @@ def run(events_path,chip_path,bars_path,output):
   "protocol":"Annual expanding OOF; exact label maturity uses confirmation session + 60 trading sessions from the official historical price calendar; training labels must mature before Jan 1 of validation year; minimum 30 matured training events; fixed logistic C=.3; preprocessing fit only on training fold.",
   "overall_comparison":overall,"annual_folds":folds,
   "limitations":["This ranks pivot-event quality; it is not an executable strategy backtest and provides no CAGR, win rate or drawdown.",
-   "Only 46 OOF observations were available in the preceding combined run; small validation folds make annual metrics unstable.",
+   "Validation folds remain small because the number of confirmed ATR2 low events is limited; annual metrics are unstable.",
    "Institutional dataset starts 2012-05-02; full price history is longer.",
    "Historical research-family selection bias remains; no pristine blind test claim."]}
  (out/"tsmc_2330_institutional_flow_oof.json").write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding="utf-8")
