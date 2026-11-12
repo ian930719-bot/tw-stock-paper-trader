@@ -77,17 +77,24 @@ def tick_size(price: float) -> float:
 def adverse_fill(raw_open: float, side: str, slippage_bps: int) -> float:
     """Round adverse slippage to a valid tick, never improving the open."""
     theoretical = raw_open * (1 + slippage_bps / 10000) if side == "BUY" else raw_open * (1 - slippage_bps / 10000)
-    # TWSE tick is determined from the execution price band. Iterate once more
-    # after rounding to handle a band boundary conservatively.
-    tick = tick_size(theoretical)
+    # Resolve the legal tick from the resulting fill-price band, iterating
+    # across boundaries such as NT$1,000 -> NT$999 (tick 5 -> tick 1).
     if side == "BUY":
-        fill = math.ceil((theoretical - 1e-10) / tick) * tick
+        fill = theoretical
+        for _ in range(3):
+            tick = tick_size(fill)
+            fill = math.ceil((theoretical - 1e-10) / tick) * tick
         if fill < raw_open:
-            fill = math.ceil((raw_open - 1e-10) / tick_size(raw_open)) * tick_size(raw_open)
+            tick = tick_size(raw_open)
+            fill = math.ceil((raw_open - 1e-10) / tick) * tick
         return round(fill, 2)
-    fill = math.floor((theoretical + 1e-10) / tick) * tick
+    fill = theoretical
+    for _ in range(3):
+        tick = tick_size(fill)
+        fill = math.floor((theoretical + 1e-10) / tick) * tick
     if fill > raw_open:
-        fill = math.floor((raw_open + 1e-10) / tick_size(raw_open)) * tick_size(raw_open)
+        tick = tick_size(raw_open)
+        fill = math.floor((raw_open + 1e-10) / tick) * tick
     return round(fill, 2)
 
 
