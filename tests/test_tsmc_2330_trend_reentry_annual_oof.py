@@ -3,7 +3,7 @@ import math
 import pandas as pd
 
 from tsmc_2330_trend_reentry_annual_oof import (
-    adverse_fill, tick_size, _signals, _simulate, INITIAL_CAPITAL
+    adverse_fill, tick_size, _is_legal_tick, _signals, _simulate, INITIAL_CAPITAL
 )
 
 
@@ -21,8 +21,16 @@ class TrendReentryExecutionTests(unittest.TestCase):
         sell = adverse_fill(1000.0, "SELL", 5)
         self.assertGreaterEqual(buy, 1000.0)
         self.assertLessEqual(sell, 1000.0)
-        self.assertAlmostEqual(buy / 5, round(buy / 5), places=8)
-        self.assertAlmostEqual(sell / 1, round(sell / 1), places=8)
+        self.assertTrue(_is_legal_tick(buy))
+        self.assertTrue(_is_legal_tick(sell))
+
+
+    def test_adverse_tick_across_1000_boundary(self):
+        # Buy stays in >=1000 band; sell crosses to <1000 band.
+        self.assertEqual(adverse_fill(1000.0, "BUY", 5), 1005.0)
+        self.assertEqual(adverse_fill(1000.0, "SELL", 5), 999.0)
+        self.assertTrue(_is_legal_tick(1005.0))
+        self.assertTrue(_is_legal_tick(999.0))
 
     def test_signal_array_alignment_and_no_lookahead(self):
         d = pd.DataFrame({
