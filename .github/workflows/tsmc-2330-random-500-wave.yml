@@ -18,7 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
-      SOURCE_RUN_ID: "43166829363"
+      # Reuse the completed, verified 2010-2026 source artifact.
+      # It contains 4,130 daily feature rows through 2026-11-11 and
+      # 3,110 pivot events through 2026-11-09.
+      SOURCE_RUN_ID: "43144543572"
     steps:
       - name: Checkout isolated research code
         uses: actions/checkout@v4
@@ -40,27 +43,20 @@ jobs:
           python -m py_compile tests/test_tsmc_2330_random_500_wave_study.py
           python -m unittest discover -s tests -p "test_tsmc_2330_random_500_wave_study.py" -v
 
-      - name: Wait for the current full-history research artifact
+      - name: Verify completed source research run
         uses: actions/github-script@v7
         with:
           script: |
             const runId = Number(process.env.SOURCE_RUN_ID);
-            for (let attempt = 0; attempt < 105; attempt++) {
-              const { data } = await github.rest.actions.getWorkflowRun({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                run_id: runId,
-              });
-              core.info(`Source run ${runId}: ${data.status} / ${data.conclusion}`);
-              if (data.status === "completed") {
-                if (data.conclusion !== "success") {
-                  core.setFailed(`Source research run did not succeed: ${data.conclusion}`);
-                }
-                return;
-              }
-              await new Promise(resolve => setTimeout(resolve, 60000));
+            const { data } = await github.rest.actions.getWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: runId,
+            });
+            core.info(`Source run ${runId}: ${data.status} / ${data.conclusion}`);
+            if (data.status !== "completed" || data.conclusion !== "success") {
+              core.setFailed("The selected source run is not completed successfully.");
             }
-            core.setFailed("Timed out waiting for source research artifact.");
 
       - name: Download source wave and feature data
         uses: actions/download-artifact@v4
