@@ -247,6 +247,9 @@ def run(features_path: str, events_path: str, output_dir: str) -> dict:
     class_counts = pd.Series(actual).value_counts(normalize=True)
     validation_x["predicted_post_confirmation_direction"] = predicted
     validation_x["prediction_correct"] = (actual == predicted)
+    pivot_baseline = np.where(validation_x["start_type"].to_numpy() == "LOW", "UP", "DOWN")
+    validation_x["pivot_type_baseline_prediction"] = pivot_baseline
+    validation_x["pivot_type_baseline_correct"] = (actual == pivot_baseline)
     validation_x["validation_year"] = pd.to_datetime(validation_x["start_confirmation_date"]).dt.year
     latest_data_year = int(pd.to_datetime(features["date"]).dt.year.max())
     yearly_metrics = []
@@ -256,6 +259,7 @@ def run(features_path: str, events_path: str, output_dir: str) -> dict:
             "n": int(len(group)),
             "accuracy": float(accuracy_score(group["post_confirmation_direction"], group["predicted_post_confirmation_direction"])),
             "balanced_accuracy": float(balanced_accuracy_score(group["post_confirmation_direction"], group["predicted_post_confirmation_direction"])),
+            "pivot_type_baseline_accuracy": float(accuracy_score(group["post_confirmation_direction"], group["pivot_type_baseline_prediction"])),
             "is_latest_data_year_partial": bool(int(year) == latest_data_year),
         })
     validation_model = {
@@ -263,6 +267,10 @@ def run(features_path: str, events_path: str, output_dir: str) -> dict:
         "accuracy": float(accuracy_score(actual, predicted)),
         "balanced_accuracy": float(balanced_accuracy_score(actual, predicted)),
         "majority_class_baseline_accuracy": float(class_counts.max()),
+        "pivot_type_baseline_accuracy": float(accuracy_score(actual, pivot_baseline)),
+        "pivot_type_baseline_balanced_accuracy": float(balanced_accuracy_score(actual, pivot_baseline)),
+        "model_beats_pivot_type_baseline": bool(accuracy_score(actual, predicted) > accuracy_score(actual, pivot_baseline)),
+        "pivot_type_baseline_confusion_matrix": confusion_matrix(actual, pivot_baseline, labels=labels).tolist(),
         "labels": labels,
         "confusion_matrix": confusion_matrix(actual, predicted, labels=labels).tolist(),
         "model": "median-imputed standardized logistic regression, class_weight=balanced",
