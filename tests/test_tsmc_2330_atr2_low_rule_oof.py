@@ -1,6 +1,6 @@
 import unittest
 import pandas as pd
-from tsmc_2330_atr2_low_rule_oof import select_rule, summarize_rows, rule_mask
+from tsmc_2330_atr2_low_rule_oof import select_rule, summarize_rows, FEATURES
 
 class ATR2LowRuleOOFTests(unittest.TestCase):
     def test_rule_selection_uses_training_data_and_supported_coverage(self):
@@ -9,6 +9,9 @@ class ATR2LowRuleOOFTests(unittest.TestCase):
             x=float(i)
             rows.append({"confirm_rsi14":x,"quality_label":int(x<20)})
         d=pd.DataFrame(rows)
+        for feature in FEATURES:
+            if feature not in d:
+                d[feature]=0.0
         rule=select_rule(d)
         self.assertIsNotNone(rule)
         self.assertEqual(rule["feature"],"confirm_rsi14")
