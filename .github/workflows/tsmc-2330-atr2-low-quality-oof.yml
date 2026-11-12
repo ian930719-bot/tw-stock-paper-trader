@@ -1,0 +1,46 @@
+name: TSMC 2330 ATR2 Low Quality Expanding OOF
+on:
+  push:
+    branches:
+      - research/tsmc-2330-50cagr-trend-reentry
+    paths:
+      - "tsmc_2330_atr2_low_quality_oof.py"
+      - "tests/test_tsmc_2330_atr2_low_quality_oof.py"
+      - ".github/workflows/tsmc-2330-atr2-low-quality-oof.yml"
+permissions:
+  actions: read
+  contents: read
+jobs:
+  classifier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip pandas numpy scikit-learn
+      - name: Download causal event artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tsmc-2330-causal-low-pivot-quality-43214402460
+          run-id: 43214402460
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          path: source
+      - name: Compile and test
+        run: |
+          python -m py_compile tsmc_2330_atr2_low_quality_oof.py
+          python -m unittest tests/test_tsmc_2330_atr2_low_quality_oof.py -v
+      - name: Run expanding OOF event classifier
+        run: |
+          python tsmc_2330_atr2_low_quality_oof.py \
+            --events source/causal_low_pivot_quality_events.csv \
+            --output artifacts/tsmc_2330_atr2_low_quality_oof
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tsmc-2330-atr2-low-quality-oof-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 30
+          path: artifacts/tsmc_2330_atr2_low_quality_oof/
