@@ -88,6 +88,8 @@ def run(features,limits_path,dividends_path,output):
    "validation_event_count":len(valid),"accepted_event_count":accepted,
    "model_used":use_model,"feature_names":FEATURES if use_model else [],
    "label_horizon_sessions":LABEL_HORIZON,"training_labels_matured_before_validation":True})
+ dedup_low=np.zeros(len(d),dtype=bool)
+ for e in events:dedup_low[e["idx"]]=True
  # OOF classification diagnostics only on events with realized labels.
  realized=[p for p in predictions if p["actual_20s_positive_label"] is not None and p["predicted_positive_probability"] is not None]
  cls={}
@@ -101,13 +103,16 @@ def run(features,limits_path,dividends_path,output):
  idx=np.flatnonzero((d.date.dt.year>=2015).to_numpy());start=int(idx[0]);end=int(idx[-1])
  out=Path(output);out.mkdir(parents=True,exist_ok=True)
  metrics={};annual={}
- for slip in SLIPPAGE_BPS:
-  sim=simulate(d,filtered_low,high,risk,limits,dividends,slip,start,end)
-  metrics[f"{slip}bps"]={k:v for k,v in sim.items() if k not in {"trades","equity_curve"}}
-  annual[f"{slip}bps"]=annual_metrics(sim["equity_curve"],sim["trades"],INITIAL_CAPITAL)
-  pd.DataFrame(sim["trades"]).to_csv(out/f"trades_{slip}bps.csv",index=False)
-  pd.DataFrame(sim["equity_curve"]).to_csv(out/f"equity_{slip}bps.csv",index=False)
-  pd.DataFrame(annual[f"{slip}bps"]).to_csv(out/f"annual_{slip}bps.csv",index=False)
+ low_streams={"original_full_low_signal":low,"deduplicated_low_signal":dedup_low,"model_filtered_low_signal":filtered_low}
+ for stream_name,low_stream in low_streams.items():
+  metrics[stream_name]={};annual[stream_name]={}
+  for slip in SLIPPAGE_BPS:
+   sim=simulate(d,low_stream,high,risk,limits,dividends,slip,start,end)
+   metrics[stream_name][f"{slip}bps"]={k:v for k,v in sim.items() if k not in {"trades","equity_curve"}}
+   annual[stream_name][f"{slip}bps"]=annual_metrics(sim["equity_curve"],sim["trades"],INITIAL_CAPITAL)
+   pd.DataFrame(sim["trades"]).to_csv(out/f"{stream_name}_trades_{slip}bps.csv",index=False)
+   pd.DataFrame(sim["equity_curve"]).to_csv(out/f"{stream_name}_equity_{slip}bps.csv",index=False)
+   pd.DataFrame(annual[stream_name][f"{slip}bps"]).to_csv(out/f"{stream_name}_annual_{slip}bps.csv",index=False)
  pd.DataFrame(predictions).to_csv(out/"annual_oof_low_signal_predictions.csv",index=False)
  summary={"symbol":"2330","classification":"EXPANDING_ANNUAL_OOF_LOW_SIGNAL_LOGISTIC_FILTER_NOT_PRISTINE_BLIND_OOS",
   "data_period":[d.date.min().date().isoformat(),d.date.max().date().isoformat()],
