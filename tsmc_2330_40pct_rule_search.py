@@ -96,10 +96,38 @@ def run(features_path, limits_path, dividends_path, outdir):
             for slip in SLIPPAGE_BPS:
                 m=_simulate_period(d,lo,hi,limits,dividends,a,b,slip,INITIAL_CAPITAL,True)
                 stress[period][f"{slip}bps"]=compact(m)
+    # Export trade-level diagnostics for the candidate selected on research data only.
+    # Validation and historical-test ledgers are descriptive; they never affect selection.
+    selected_trade_diagnostics = {}
+    selected_trade_rows = []
+    selected_equity_rows = []
+    if selected:
+        p = selected["params"]
+        selected_low, selected_high = make_signals(
+            d, p["low_return"], p["low_relative_volume"],
+            p["high_close_location"], p["high_distance_sma200"],
+        )
+        for period_name, (period_start, period_end) in (
+            ("research", RESEARCH),
+            ("validation", VALIDATION),
+            ("test", (TEST[0], test_end)),
+        ):
+            metrics = _simulate_period(
+                d, selected_low, selected_high, limits, dividends,
+                period_start, period_end, 10, INITIAL_CAPITAL, True,
+            )
+            selected_trade_diagnostics[period_name] = compact(metrics)
+            for trade_number, trade in enumerate(metrics["trades"], start=1):
+                selected_trade_rows.append({
+                    "period": period_name, "slippage_bps_per_side": 10,
+                    "trade_number": trade_number, **trade,
+                })
+            for point in metrics["equity_curve"]:
+                selected_equity_rows.append({"period": period_name, **point})
     result={"symbol":"2330","candidate_count":len(candidates),"selection_period":list(RESEARCH),
         "validation_period":list(VALIDATION),"historical_test_period":[TEST[0],test_end],
         "selection_rule":"maximize research-period CAGR subject to >=5 trades and win rate >=86.9565%; no validation/test selection",
-        "win_rate_floor":WIN_FLOOR,"selected_candidate":selected,"selected_cost_stress":stress,
+        "win_rate_floor":WIN_FLOOR,"selected_candidate":selected,"selected_cost_stress":stress,\n        "selected_trade_diagnostics":selected_trade_diagnostics,
         "all_candidates":rows,"selection_passed":selected is not None,
         "target_status":"NOT_ESTABLISHED; inspect validation/test metrics and cost stress",
         "execution":"close signal t; next-session open; long-only all-in/all-out; integer shares; price-limit locked orders; fees/tax/slippage; cash dividends",
@@ -115,8 +143,7 @@ def run(features_path, limits_path, dividends_path, outdir):
           "research_trades":r["research"].get("trade_count"),"research_eligible":r["research_eligible"],
           "validation_cagr":r["validation_10bps"].get("cagr"),"validation_win_rate":r["validation_10bps"].get("win_rate"),
           "test_cagr":r["test_10bps"].get("cagr"),"test_win_rate":r["test_10bps"].get("win_rate")})
-    pd.DataFrame(flat).to_csv(out/"tsmc_2330_40pct_rule_search.csv",index=False)
-    return result
+    pd.DataFrame(flat).to_csv(out/"tsmc_2330_40pct_rule_search.csv",index=False)\n    pd.DataFrame(selected_trade_rows).to_csv(out/"tsmc_2330_40pct_selected_trade_ledger.csv",index=False)\n    pd.DataFrame(selected_equity_rows).to_csv(out/"tsmc_2330_40pct_selected_equity.csv",index=False)\n    return result
 
 if __name__=="__main__":
     ap=argparse.ArgumentParser()
