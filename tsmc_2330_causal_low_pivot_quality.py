@@ -16,6 +16,9 @@ from tsmc_2330_causal_zigzag_wave_oof import ATR_MULTIPLIERS, causal_atr_zigzag
 HORIZONS = (20, 40, 60, 120)
 MULTIPLIERS = ATR_MULTIPLIERS
 
+def forward_window_complete(observed_sessions, horizon):
+    return int(observed_sessions) >= int(horizon)
+
 def safe_num(row, key):
     v = row.get(key, np.nan)
     try:
@@ -97,7 +100,7 @@ def build_events(d):
                 rec[f"observed_sessions_{h}d"] = observed
                 # Right-censor incomplete forward windows. Never aggregate a
                 # partial 120-session path as if it were a complete 120-session label.
-                if observed < h:
+                if not forward_window_complete(observed, h):
                     rec[f"mfe_{h}d"] = None
                     rec[f"mae_{h}d"] = None
                     rec[f"close_return_{h}d"] = None
