@@ -1,5 +1,8 @@
+import tempfile
 import unittest
-from tsmc_2330_institutional_flow_oof import score, TECH, FOREIGN, TRUST, GROUPS
+from pathlib import Path
+import pandas as pd
+from tsmc_2330_institutional_flow_oof import score, TECH, FOREIGN, TRUST, GROUPS, maturity_dates
 
 class InstitutionalFlowOOFTests(unittest.TestCase):
  def test_only_foreign_and_trust_are_used(self):
@@ -14,4 +17,11 @@ class InstitutionalFlowOOFTests(unittest.TestCase):
   self.assertEqual(r["top_decile_precision"],1.0);self.assertAlmostEqual(r["positive_rate"],.2)
  def test_single_class_fold_is_not_scored(self):
   self.assertIn("error",score([0,0,0],[.1,.2,.3]))
+ def test_maturity_uses_60_actual_trading_sessions(self):
+  with tempfile.TemporaryDirectory() as td:
+   bars=pd.DataFrame({"date":pd.bdate_range("2024-01-01",periods=70)})
+   path=Path(td)/"bars.csv";bars.to_csv(path,index=False)
+   events=pd.DataFrame({"confirmation_date":[bars.date.iloc[0]]})
+   got=maturity_dates(events,str(path)).iloc[0]
+   self.assertEqual(got,bars.date.iloc[60])
 if __name__=="__main__":unittest.main()
