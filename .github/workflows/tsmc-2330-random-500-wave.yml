@@ -1,0 +1,90 @@
+name: TSMC 2330 Random 500-Wave Study
+
+on:
+  push:
+    branches:
+      - research/200cagr-blind-validation
+    paths:
+      - "tsmc_2330_random_500_wave_study.py"
+      - "tests/test_tsmc_2330_random_500_wave_study.py"
+      - ".github/workflows/tsmc-2330-random-500-wave.yml"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  random-500-wave-study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      SOURCE_RUN_ID: "43166829363"
+    steps:
+      - name: Checkout isolated research code
+        uses: actions/checkout@v4
+        with:
+          ref: research/200cagr-blind-validation
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install isolated study dependencies
+        run: python -m pip install --upgrade pip pandas numpy scikit-learn
+
+      - name: Compile and test isolated study
+        run: |
+          python -m py_compile tsmc_2330_annual_swing_scale_research.py
+          python -m py_compile tsmc_2330_random_500_wave_study.py
+          python -m py_compile tests/test_tsmc_2330_random_500_wave_study.py
+          python -m unittest tests.test_tsmc_2330_random_500_wave_study -v
+
+      - name: Wait for the current full-history research artifact
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runId = Number(process.env.SOURCE_RUN_ID);
+            for (let attempt = 0; attempt < 105; attempt++) {
+              const { data } = await github.rest.actions.getWorkflowRun({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: runId,
+              });
+              core.info(`Source run ${runId}: ${data.status} / ${data.conclusion}`);
+              if (data.status === "completed") {
+                if (data.conclusion !== "success") {
+                  core.setFailed(`Source research run did not succeed: ${data.conclusion}`);
+                }
+                return;
+              }
+              await new Promise(resolve => setTimeout(resolve, 60000));
+            }
+            core.setFailed("Timed out waiting for source research artifact.");
+
+      - name: Download source wave and feature data
+        uses: actions/download-artifact@v4
+        with:
+          name: tsmc-2330-swing-research
+          run-id: ${{ env.SOURCE_RUN_ID }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: input
+
+      - name: Run deterministic 500-wave research and validation
+        run: |
+          FEATURES="$(find input -type f -name 'tsmc_2330_causal_features.csv' -print -quit)"
+          EVENTS="$(find input -type f -name 'tsmc_2330_pivot_events.csv' -print -quit)"
+          test -n "$FEATURES"
+          test -n "$EVENTS"
+          python tsmc_2330_random_500_wave_study.py \
+            --features "$FEATURES" \
+            --events "$EVENTS" \
+            --output artifacts/tsmc_2330_random_500_wave
+
+      - name: Upload isolated 500-wave results
+        uses: actions/upload-artifact@v4
+        with:
+          name: tsmc-2330-random-500-wave-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 30
+          path: artifacts/tsmc_2330_random_500_wave/
