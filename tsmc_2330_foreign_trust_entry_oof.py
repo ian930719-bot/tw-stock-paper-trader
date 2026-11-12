@@ -96,7 +96,13 @@ def run(features_path,limits_path,dividends_path,output_dir):
   oof_low[i]=low[i];oof_high[i]=high_signal[i];oof_hold[i]=hold_signal[i]
  start_idx=int(np.flatnonzero((d.date.dt.year>=VALIDATION_START_YEAR).to_numpy())[0]);end_idx=len(d)-1
  out=Path(output_dir);out.mkdir(parents=True,exist_ok=True)
- metrics_by_cost={};annual_by_cost={}
+ metrics_by_cost={};annual_by_cost={};static_policy_metrics={}
+ zero=np.zeros(len(d),dtype=bool)
+ for policy_name,(policy_low,policy_high,policy_hold) in policies.items():
+  static_policy_metrics[policy_name]={}
+  for slip in SLIPPAGE_BPS:
+   static=simulate(d,policy_low,policy_high,risk,limits,dividends,slip,start_idx,end_idx,high_hold_signal=policy_hold)
+   static_policy_metrics[policy_name][f"{slip}bps"]={k:v for k,v in static.items() if k not in {"trades","equity_curve"}}
  for slip in SLIPPAGE_BPS:
   sim=simulate(d,oof_low,oof_high,risk,limits,dividends,slip,start_idx,end_idx,high_hold_signal=oof_hold)
   metrics_by_cost[f"{slip}bps"]={k:v for k,v in sim.items() if k not in {"trades","equity_curve"}}
@@ -123,6 +129,7 @@ def run(features_path,limits_path,dividends_path,output_dir):
   "selected_policy_by_year":{str(k):v for k,v in selections.items()},
   "annual_frozen_selections":folds,"continuous_oof_metrics_by_cost":metrics_by_cost,
   "annual_oof_metrics_by_cost":annual_by_cost,
+  "static_policy_metrics_by_cost":static_policy_metrics,
   "target_status":"UNMET unless 10bps CAGR>=50% and completed-trade win rate>=86.9565%; MDD<=25% tracked separately.",
   "limitations":["Event-flow study is not evidence of a profitable trading strategy; this execution backtest is the required test.",
    "FinMind institutional history starts 2012-05-02; missing flow is not imputed as zero, and every flow-gated candidate falls back to an unfiltered entry when flow is unavailable.",
