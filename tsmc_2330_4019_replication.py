@@ -86,9 +86,12 @@ def simulate(
     reentry_signal: np.ndarray | None = None,
     reentry_cooldown: int = 0,
     high_hold_signal: np.ndarray | None = None,
+    high_exit_policy: str = "handoff_or",
 ) -> dict:
     if risk_exit_policy not in {"per_position", "per_regime_latched", "recovery_required"}:
         raise ValueError(f"Unknown risk_exit_policy: {risk_exit_policy}")
+    if high_exit_policy not in {"handoff_or", "and_sma20_rsi55", "ema20_rsi55", "prior5low"}:
+        raise ValueError(f"Unknown high_exit_policy: {high_exit_policy}")
     if reentry_cooldown < 0:
         raise ValueError("reentry_cooldown must be non-negative")
     if reentry_signal is None:
@@ -113,6 +116,7 @@ def simulate(
     trend_reentry_count = 0
     suppressed_high_signal_count = 0
     high_wait_start = None
+    prior5_low = d.raw_low.shift(1).rolling(5, min_periods=5).min().to_numpy()
     trades = []
     curve = []
     total_commission = total_tax = total_dividend = 0
@@ -248,10 +252,17 @@ def simulate(
                     if high_hold_signal[i]:
                         suppressed_high_signal_count += 1
                     else:
-                        immediate = (
-                            float(row.distance_sma_20) < RULES["high_immediate_exit_if_distance_sma20_below"]
-                            or float(row.rsi14) < RULES["high_immediate_exit_if_rsi_below"]
-                        )
+                        dist_sma20 = float(row.distance_sma_20)
+                        dist_ema20 = float(row.distance_ema_20)
+                        rsi = float(row.rsi14)
+                        if high_exit_policy == "handoff_or":
+                            immediate = (dist_sma20 < 0.0 or rsi < 58.0)
+                        elif high_exit_policy == "and_sma20_rsi55":
+                            immediate = (dist_sma20 < 0.0 and rsi < 55.0)
+                        elif high_exit_policy == "ema20_rsi55":
+                            immediate = (dist_ema20 < 0.0 and rsi < 55.0)
+                        else:
+                            immediate = False
                         if immediate:
                             pending = {"side": "SELL", "reason": "high_confirm_immediate"}
                         else:
@@ -261,10 +272,20 @@ def simulate(
                     high_wait_start = None
                 elif high_wait_start is not None:
                     waited = i - high_wait_start
-                    if (
-                        float(row.rsi14) < RULES["high_wait_exit_if_rsi_below"]
-                        or waited >= RULES["high_wait_max_sessions"]
-                    ):
+                    rsi = float(row.rsi14)
+                    if high_exit_policy in {"handoff_or", "and_sma20_rsi55"}:
+                        confirm_exit = (rsi < 48.0 or waited >= 14)
+                    elif high_exit_policy == "ema20_rsi55":
+                        confirm_exit = (
+                            (float(row.distance_ema_20) < 0.0 and rsi < 55.0)
+                            or rsi < 48.0 or waited >= 14
+                        )
+                    else:
+                        confirm_exit = (
+                            (np.isfinite(prior5_low[i]) and float(row.raw_close) < prior5_low[i])
+                            or rsi < 48.0 or waited >= 14
+                        )
+                    if confirm_exit:
                         pending = {"side": "SELL", "reason": "high_confirm_rsi_or_timeout"}
 
     c = pd.DataFrame(curve)
@@ -288,6 +309,7 @@ def simulate(
         "trend_reentry_count": trend_reentry_count,
         "trend_reentry_cooldown_sessions": reentry_cooldown,
         "suppressed_high_signal_count": suppressed_high_signal_count,
+        "high_exit_policy": high_exit_policy,
         "total_commission": total_commission,
         "total_sell_tax": total_tax,
         "estimated_slippage_cost": total_slippage,
