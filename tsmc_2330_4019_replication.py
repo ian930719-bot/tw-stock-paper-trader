@@ -85,6 +85,7 @@ def simulate(
     risk_exit_policy: str = "per_position",
     reentry_signal: np.ndarray | None = None,
     reentry_cooldown: int = 0,
+    high_hold_signal: np.ndarray | None = None,
 ) -> dict:
     if risk_exit_policy not in {"per_position", "per_regime_latched", "recovery_required"}:
         raise ValueError(f"Unknown risk_exit_policy: {risk_exit_policy}")
@@ -94,6 +95,10 @@ def simulate(
         reentry_signal = np.zeros(len(d), dtype=bool)
     if len(reentry_signal) != len(d):
         raise ValueError("reentry_signal length must match data")
+    if high_hold_signal is None:
+        high_hold_signal = np.zeros(len(d), dtype=bool)
+    if len(high_hold_signal) != len(d):
+        raise ValueError("high_hold_signal length must match data")
     cash = float(initial_capital)
     shares = 0
     entry_date = None
@@ -106,6 +111,7 @@ def simulate(
     trend_reentry_allowed = False
     entry_reason = None
     trend_reentry_count = 0
+    suppressed_high_signal_count = 0
     high_wait_start = None
     trades = []
     curve = []
@@ -239,14 +245,25 @@ def simulate(
                     high_wait_start = None
                     pending = {"side": "SELL", "reason": "sma200_risk_exit"}
                 elif high_wait_start is None and high[i]:
-                    immediate = (
+                    if high_hold_signal[i]:
+                        suppressed_high_signal_count += 1
+                        continue_high = True
+                    else:
+                        continue_high = False
+                    if continue_high:
+                        pass
+                    else:
+                        immediate = (
                         float(row.distance_sma_20) < RULES["high_immediate_exit_if_distance_sma20_below"]
                         or float(row.rsi14) < RULES["high_immediate_exit_if_rsi_below"]
                     )
-                    if immediate:
-                        pending = {"side": "SELL", "reason": "high_confirm_immediate"}
-                    else:
-                        high_wait_start = i
+                        if immediate:
+                            pending = {"side": "SELL", "reason": "high_confirm_immediate"}
+                        else:
+                            high_wait_start = i
+                elif high_wait_start is not None and high_hold_signal[i]:
+                    suppressed_high_signal_count += 1
+                    high_wait_start = None
                 elif high_wait_start is not None:
                     waited = i - high_wait_start
                     if (
@@ -275,6 +292,7 @@ def simulate(
         "high_confirm_exit_count": high_exit_count,
         "trend_reentry_count": trend_reentry_count,
         "trend_reentry_cooldown_sessions": reentry_cooldown,
+        "suppressed_high_signal_count": suppressed_high_signal_count,
         "total_commission": total_commission,
         "total_sell_tax": total_tax,
         "estimated_slippage_cost": total_slippage,
