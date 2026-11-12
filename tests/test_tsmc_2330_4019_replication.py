@@ -43,7 +43,7 @@ class CandidateReplicationTests(unittest.TestCase):
     def test_no_future_feature_in_risk_window(self):
         d=self._frame(100)
         d.loc[:79,"distance_sma_200"]=0.01
-        d.loc[80:,"distance_sma_200"]=-0.01
+        d.loc[20:,"distance_sma_200"]=-0.01
         _,_,risk=build_candidate_signals(d)
         self.assertFalse(bool(risk[79]))
         self.assertTrue(bool(risk[99]))
