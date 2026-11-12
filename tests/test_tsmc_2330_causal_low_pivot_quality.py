@@ -1,9 +1,13 @@
 import unittest
 import numpy as np
 import pandas as pd
-from tsmc_2330_causal_low_pivot_quality import build_events
+from tsmc_2330_causal_low_pivot_quality import build_events, forward_window_complete
 
 class CausalLowPivotQualityTests(unittest.TestCase):
+    def test_right_censored_forward_windows_are_not_complete(self):
+        self.assertTrue(forward_window_complete(60, 60))
+        self.assertFalse(forward_window_complete(59, 60))
+        self.assertFalse(forward_window_complete(0, 20))
     def test_empty_when_no_pivots_possible(self):
         n=80
         close=np.linspace(100,101,n)
