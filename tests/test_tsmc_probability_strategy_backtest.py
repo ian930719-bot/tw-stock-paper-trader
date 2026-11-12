@@ -1,12 +1,11 @@
 import unittest
-
 import numpy as np
-
+import pandas as pd
 from tsmc_2330_probability_strategy_backtest import (
-    probability_signal, rolling_probability_signal, rolling_probability_threshold, score,
+    probability_signal, rolling_probability_signal, rolling_probability_threshold,
+    score, summarize_years_continuous,
 )
 from tsmc_2330_selected_threshold_signal_diagnostics import build_target
-import pandas as pd
 
 
 class ProbabilityStrategyTests(unittest.TestCase):
@@ -55,6 +54,25 @@ class ProbabilityStrategyTests(unittest.TestCase):
         self.assertEqual(signal.shape, p.shape)
         self.assertEqual(signal.dtype, np.bool_)
         self.assertEqual(int(signal.sum()), 5)
+
+    def test_continuous_summary_carries_high_water_mark_across_years(self):
+        equity = [
+            {"date": "2024-12-30", "equity": 120.0},
+            {"date": "2024-12-31", "equity": 110.0},
+            {"date": "2025-01-02", "equity": 90.0},
+            {"date": "2025-01-03", "equity": 105.0},
+        ]
+        trades = [
+            {"exit_date": "2024-12-31", "net_pnl": 10.0, "net_return": 0.1},
+            {"exit_date": "2025-01-03", "net_pnl": -5.0, "net_return": -0.05},
+        ]
+        rows = summarize_years_continuous(equity, trades, 100.0)
+        self.assertEqual(len(rows), 2)
+        self.assertAlmostEqual(rows[1]["start_equity"], 110.0)
+        self.assertAlmostEqual(rows[1]["annual_return"], 105.0 / 110.0 - 1.0)
+        self.assertAlmostEqual(rows[1]["global_high_water_mark_drawdown"], -0.25)
+        self.assertEqual(rows[1]["trade_count_exited"], 1)
+        self.assertEqual(rows[1]["win_rate_exited"], 0.0)
 
 
 if __name__ == "__main__":
