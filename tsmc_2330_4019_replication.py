@@ -247,16 +247,11 @@ def simulate(
                 elif high_wait_start is None and high[i]:
                     if high_hold_signal[i]:
                         suppressed_high_signal_count += 1
-                        continue_high = True
-                    else:
-                        continue_high = False
-                    if continue_high:
-                        pass
                     else:
                         immediate = (
-                        float(row.distance_sma_20) < RULES["high_immediate_exit_if_distance_sma20_below"]
-                        or float(row.rsi14) < RULES["high_immediate_exit_if_rsi_below"]
-                    )
+                            float(row.distance_sma_20) < RULES["high_immediate_exit_if_distance_sma20_below"]
+                            or float(row.rsi14) < RULES["high_immediate_exit_if_rsi_below"]
+                        )
                         if immediate:
                             pending = {"side": "SELL", "reason": "high_confirm_immediate"}
                         else:
