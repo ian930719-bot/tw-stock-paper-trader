@@ -53,6 +53,15 @@ def is_limit_locked(side: str, open_price: float, high: float, low: float,
     raise ValueError(f"Unknown side: {side}")
 
 
+def trailing_drawdown_stop_hit(close: float, peak_close: float, drawdown_pct: float) -> bool:
+    """Causal close-based trailing stop; execution is scheduled for next session open."""
+    if not all(np.isfinite(v) for v in (close, peak_close, drawdown_pct)):
+        return False
+    if close <= 0 or peak_close <= 0 or not 0 < drawdown_pct < 1:
+        return False
+    return close <= peak_close * (1.0 - drawdown_pct)
+
+
 def trailing_atr_stop_hit(close: float, peak_close: float, atr_pct: float,
                           multiple: float) -> bool:
     if not all(np.isfinite(v) for v in (close, peak_close, atr_pct, multiple)):
@@ -144,7 +153,8 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
                      start_date: str, end_date: str, slippage_bps: int,
                      initial_capital: float, strategy: bool,
                      atr_stop_multiple: float | None = None,
-                     atr_stop_mask: np.ndarray | None = None) -> dict:
+                     atr_stop_mask: np.ndarray | None = None,
+                     trailing_drawdown_pct: float | None = None) -> dict:
     dates = bars["date"].dt.normalize()
     period_idx = np.flatnonzero(
         (dates >= pd.Timestamp(start_date)).to_numpy()
@@ -162,6 +172,8 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
     )
     if len(period_atr_stop_mask) != len(period_bars):
         raise ValueError("ATR stop mask must align with the full bars frame")
+    if trailing_drawdown_pct is not None and not 0 < trailing_drawdown_pct < 1:
+        raise ValueError("trailing_drawdown_pct must be between 0 and 1")
     slip = slippage_bps / 10_000.0
     cash = float(initial_capital)
     shares = 0
@@ -286,6 +298,10 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
         if shares > 0:
             exposure_days += 1
             peak_close = close if peak_close is None else max(peak_close, close)
+            if trailing_drawdown_pct is not None and trailing_drawdown_stop_hit(
+                close, peak_close, float(trailing_drawdown_pct)
+            ):
+                pending_sell = True
             if atr_stop_multiple is not None and period_atr_stop_mask[i]:
                 atr_pct = pd.to_numeric(pd.Series([row.get("atr_pct14", np.nan)]), errors="coerce").iloc[0]
                 if np.isfinite(atr_pct) and atr_pct > 0:
