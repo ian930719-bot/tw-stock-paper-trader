@@ -38,3 +38,5 @@ def main():
 if __name__=="__main__":main()
 
 # Frozen entry confirmation hypotheses; no parameter grid.
+
+# MFI reclaim condition added as a fixed, causal low-entry confirmation hypothesis.
