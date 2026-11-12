@@ -19,17 +19,17 @@ from tsmc_2330_40pct_rule_search import inputs
 
 REENTRY_RULES = (
     {"name": "break_prev_high", "cooldown": 0, "condition": "raw_close > prev_raw_high"},
-    {"name": "ema20_reclaim", "cooldown": 0, "condition": "raw_close > ema20"},
+    {"name": "ema20_reclaim", "cooldown": 0, "condition": "raw_close > ema_20"},
     {"name": "rsi_recovery", "cooldown": 0, "condition": "rsi14 >= 50 and rsi14 > rsi14_prev"},
-    {"name": "macd_momentum", "cooldown": 0, "condition": "macd_hist > macd_hist_prev"},
-    {"name": "ema20_rsi_macd", "cooldown": 0, "condition": "raw_close > ema20 and rsi14 >= 50 and macd_hist > macd_hist_prev"},
-    {"name": "ema20_rsi_macd_cd10", "cooldown": 10, "condition": "raw_close > ema20 and rsi14 >= 50 and macd_hist > macd_hist_prev"},
-    {"name": "ema20_rsi_macd_cd20", "cooldown": 20, "condition": "raw_close > ema20 and rsi14 >= 50 and macd_hist > macd_hist_prev"},
+    {"name": "macd_momentum", "cooldown": 0, "condition": "macd_hist_pct > macd_hist_pct_prev"},
+    {"name": "ema_20_rsi_macd", "cooldown": 0, "condition": "raw_close > ema20 and rsi14 >= 50 and macd_hist > macd_hist_prev"},
+    {"name": "ema_20_rsi_macd_cd10", "cooldown": 10, "condition": "raw_close > ema20 and rsi14 >= 50 and macd_hist > macd_hist_prev"},
+    {"name": "ema_20_rsi_macd_cd20", "cooldown": 20, "condition": "raw_close > ema20 and rsi14 >= 50 and macd_hist > macd_hist_prev"},
 )
 
 REQUIRED = {
-    "raw_open", "raw_high", "raw_low", "raw_close", "ema20",
-    "rsi14", "macd_hist", "relative_volume20", "atr_pct14",
+    "raw_open", "raw_high", "raw_low", "raw_close", "ema_20",
+    "rsi14", "macd_hist_pct", "relative_volume20", "atr_pct14",
     "sma20_slope_5", "sma50_slope_10", "obv_flow_ratio_5",
     "close_location", "intraday_range_pct",
 }
@@ -38,11 +38,11 @@ REQUIRED = {
 def _signals(bars: pd.DataFrame) -> dict[str, pd.Series]:
     prev_high = bars["raw_high"].shift(1)
     rsi_prev = bars["rsi14"].shift(1)
-    macd_prev = bars["macd_hist"].shift(1)
+    macd_prev = bars["macd_hist_pct"].shift(1)
     common = bars["raw_close"].notna() & bars["raw_open"].notna()
     return {
         "break_prev_high": common & (bars["raw_close"] > prev_high),
-        "ema20_reclaim": common & (bars["raw_close"] > bars["ema20"]),
+        "ema20_reclaim": common & (bars["raw_close"] > bars["ema_20"]),
         "rsi_recovery": common & (bars["rsi14"] >= 50) & (bars["rsi14"] > rsi_prev),
         "macd_momentum": common & (bars["macd_hist"] > macd_prev),
         "ema20_rsi_macd": common & (bars["raw_close"] > bars["ema20"]) &
