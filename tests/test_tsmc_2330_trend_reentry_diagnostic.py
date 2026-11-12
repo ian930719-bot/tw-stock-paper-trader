@@ -13,9 +13,9 @@ class TrendReentryDiagnosticTests(unittest.TestCase):
             "raw_high": [11, 11, 12, 13, 14],
             "raw_low": [9, 9, 10, 11, 12],
             "raw_close": [10, 10, 12, 13, 14],
-            "ema20": [10, 10, 10, 11, 12],
+            "ema_20": [10, 10, 10, 11, 12],
             "rsi14": [45, 49, 51, 53, 54],
-            "macd_hist": [-1, -0.5, 0.1, 0.2, 0.3],
+            "macd_hist_pct": [-1, -0.5, 0.1, 0.2, 0.3],
             "relative_volume20": [1, 1, 1, 1, 1],
             "atr_pct14": [.02] * 5,
             "sma20_slope_5": [0] * 5,
@@ -27,9 +27,9 @@ class TrendReentryDiagnosticTests(unittest.TestCase):
 
     def test_signal_uses_current_and_prior_close_data(self):
         s = _signals(self.bars)
-        self.assertTrue(bool(s["ema20_rsi_macd"].iloc[2]))
+        self.assertTrue(bool(s["ema_20_rsi_macd"].iloc[2]))
         self.assertTrue(bool(s["break_prev_high"].iloc[2]))
-        self.assertFalse(bool(s["ema20_rsi_macd"].iloc[0]))
+        self.assertFalse(bool(s["ema_20_rsi_macd"].iloc[0]))
 
     def test_outcome_diagnostic_is_separate(self):
         x = _future_diagnostic(self.bars, 1, 90)
