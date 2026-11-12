@@ -93,7 +93,7 @@ def simulate(
         raise ValueError(f"Unknown risk_exit_policy: {risk_exit_policy}")
     if high_exit_policy not in {"handoff_or", "and_sma20_rsi55", "ema20_rsi55", "prior5low"}:
         raise ValueError(f"Unknown high_exit_policy: {high_exit_policy}")
-    if low_entry_policy not in {"immediate", "bullish_day_3", "two_higher_closes_5", "signal_high_breakout_5"}:
+    if low_entry_policy not in {"immediate", "bullish_day_3", "two_higher_closes_5", "signal_high_breakout_5", "mfi40_reclaim_5"}:
         raise ValueError(f"Unknown low_entry_policy: {low_entry_policy}")
     if reentry_cooldown < 0:
         raise ValueError("reentry_cooldown must be non-negative")
@@ -124,7 +124,8 @@ def simulate(
     prev2_close = d.raw_close.shift(2).to_numpy(float)
     bullish_day = ((d.raw_close > d.raw_open) & (d.raw_close > d.raw_close.shift(1))).fillna(False).to_numpy(bool)
     two_higher_closes = ((d.raw_close > d.raw_close.shift(1)) & (d.raw_close.shift(1) > d.raw_close.shift(2))).fillna(False).to_numpy(bool)
-    low_entry_timeout = {"immediate": 0, "bullish_day_3": 3, "two_higher_closes_5": 5, "signal_high_breakout_5": 5}[low_entry_policy]
+    mfi_reclaim = ((d.mfi14 > 40) & (d.mfi14.shift(1) <= 40)).fillna(False).to_numpy(bool) if "mfi14" in d.columns else np.zeros(len(d),dtype=bool)
+    low_entry_timeout = {"immediate": 0, "bullish_day_3": 3, "two_higher_closes_5": 5, "signal_high_breakout_5": 5, "mfi40_reclaim_5": 5}[low_entry_policy]
     low_alert_start = None
     low_alert_high = None
     trades = []
@@ -255,6 +256,17 @@ def simulate(
                     if low_entry_policy == "immediate":
                         if low[i]:
                             pending = {"side": "BUY", "reason": "base_low_after_filters"}
+                    elif low_entry_policy == "mfi40_reclaim_5":
+                        if low[i] and low_alert_start is None:
+                            mfi_now = float(row.mfi14) if pd.notna(row.get("mfi14", np.nan)) else np.nan
+                            if not np.isfinite(mfi_now) or mfi_now >= 40:
+                                pending = {"side": "BUY", "reason": "base_low_mfi_not_oversold"}
+                            else:
+                                low_alert_start = i
+                                low_alert_high = float(row.raw_high)
+                        if low_alert_start is not None:
+                            age = i - low_alert_start
+                            confirmed = age > 0 and age <= 5 and mfi_reclaim[i]
                     else:
                         if low[i] and low_alert_start is None:
                             low_alert_start = i
