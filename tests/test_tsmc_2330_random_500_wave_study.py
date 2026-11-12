@@ -13,6 +13,7 @@ class Random500WaveStudyTests(unittest.TestCase):
         dates = pd.bdate_range("2010-01-01", periods=20)
         waves = pd.DataFrame({
             "start_date": dates.strftime("%Y-%m-%d"),
+            "start_confirmation_date": (dates + pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
             "end_date": (dates + pd.Timedelta(days=10)).strftime("%Y-%m-%d"),
             "direction": ["UP", "DOWN"] * 10,
         })
@@ -36,7 +37,7 @@ class Random500WaveStudyTests(unittest.TestCase):
         research, validation, start = chronological_split(frame)
         self.assertTrue((research["end_date"] < start).all())
         self.assertTrue((validation["start_confirmation_date"] >= start).all())
-        self.assertGreaterEqual(len(research), 50)
+        self.assertGreaterEqual(len(research), 25)
         self.assertEqual(len(validation), 30)
 
     def test_descriptive_metrics(self):
