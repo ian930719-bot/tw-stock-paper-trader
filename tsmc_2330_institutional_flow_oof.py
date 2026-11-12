@@ -44,7 +44,17 @@ def make_model():
  return make_pipeline(SimpleImputer(strategy="median"),StandardScaler(),
   LogisticRegression(C=.3,class_weight="balanced",max_iter=3000,random_state=2330))
 
-def run(events_path,chip_path,output):
+def maturity_dates(events, bars_path):
+ bars=pd.read_csv(bars_path,parse_dates=['date']).sort_values('date').reset_index(drop=True)
+ date_to_index={pd.Timestamp(d):i for i,d in enumerate(bars.date)}
+ indices=events.confirmation_date.map(lambda d:date_to_index.get(pd.Timestamp(d),-1)).to_numpy()
+ maturity=[]
+ for i in indices:
+  j=int(i)+60
+  maturity.append(bars.date.iloc[j] if i>=0 and j<len(bars) else pd.NaT)
+ return pd.to_datetime(pd.Series(maturity,index=events.index))
+
+def run(events_path,chip_path,bars_path,output):
  e=pd.read_csv(events_path,parse_dates=["confirmation_date"])
  e=e[np.isclose(pd.to_numeric(e.atr_multiplier,errors="coerce"),2.0)].copy()
  e["corporate_action_window_at_confirmation"]=e.corporate_action_window_at_confirmation.astype(str).str.lower().isin(["true","1","yes"])
@@ -59,13 +69,15 @@ def run(events_path,chip_path,output):
  e=e.merge(chip[chip_cols],left_on="confirmation_date",right_on="date",how="left",validate="many_to_one")
  e=e[e.institutional_data_available.fillna(0).eq(1)].sort_values("confirmation_date").reset_index(drop=True)
  e["year"]=e.confirmation_date.dt.year
+ e["label_maturity_date"]=maturity_dates(e,bars_path)
+ e=e.dropna(subset=["label_maturity_date"]).copy()
  predictions={k:[] for k in GROUPS};folds=[]
  for year in sorted(e.year.unique()):
-  cutoff=pd.Timestamp(year=int(year)-2,month=12,day=31)
-  train=e[e.confirmation_date<=cutoff];test=e[e.year==year]
+  cutoff=pd.Timestamp(year=int(year),month=1,day=1)
+  train=e[e.label_maturity_date<cutoff];test=e[e.year==year]
   if len(train)<40 or train.quality_label.nunique()<2 or test.empty:
    folds.append({"year":int(year),"train_n":int(len(train)),"test_n":int(len(test)),"status":"insufficient_matured_training"});continue
-  fold={"year":int(year),"training_cutoff":cutoff.date().isoformat(),"train_n":int(len(train)),"test_n":int(len(test))}
+  fold={"year":int(year),"training_labels_matured_before":cutoff.date().isoformat(),"train_n":int(len(train)),"test_n":int(len(test))}
   for name,cols in GROUPS.items():
    xtr=train[cols].replace([np.inf,-np.inf],np.nan);xte=test[cols].replace([np.inf,-np.inf],np.nan)
    use=[c for c in cols if xtr[c].notna().any()]
@@ -87,7 +99,7 @@ def run(events_path,chip_path,output):
   "timing":"Flow data joined on confirmation date, after close; cannot be used for same-day earlier fills.",
   "features":{"technical":TECH,"foreign_only":FOREIGN,"trust_only":TRUST},
   "excluded":["dealer","foreign dealer proprietary","broker branch","three-institution aggregate"],
-  "protocol":"Annual expanding OOF; train labels confirmed no later than Dec 31 two years before validation year; minimum 40 matured training events; fixed logistic C=.3; preprocessing fit only on training fold.",
+  "protocol":"Annual expanding OOF; exact label maturity uses confirmation session + 60 trading sessions from the official historical price calendar; training labels must mature before Jan 1 of validation year; minimum 30 matured training events; fixed logistic C=.3; preprocessing fit only on training fold.",
   "overall_comparison":overall,"annual_folds":folds,
   "limitations":["This ranks pivot-event quality; it is not an executable strategy backtest and provides no CAGR, win rate or drawdown.",
    "Only 46 OOF observations were available in the preceding combined run; small validation folds make annual metrics unstable.",
@@ -97,5 +109,5 @@ def run(events_path,chip_path,output):
  return result
 
 if __name__=="__main__":
- p=argparse.ArgumentParser();p.add_argument("--events",required=True);p.add_argument("--chip",required=True);p.add_argument("--output",default="artifacts/tsmc_2330_institutional_flow_oof")
- a=p.parse_args();print(json.dumps(run(a.events,a.chip,a.output),ensure_ascii=False,indent=2))
+ p=argparse.ArgumentParser();p.add_argument("--events",required=True);p.add_argument("--chip",required=True);p.add_argument("--bars",required=True);p.add_argument("--output",default="artifacts/tsmc_2330_institutional_flow_oof")
+ a=p.parse_args();print(json.dumps(run(a.events,a.chip,a.bars,a.output),ensure_ascii=False,indent=2))
