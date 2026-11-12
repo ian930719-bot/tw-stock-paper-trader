@@ -63,6 +63,20 @@ def build_policies(d,base_low,base_high,hold):
   # Require confirmed net selling before acting on the original high-exit signal.
   # Missing institutional data falls back to the original high-exit signal.
   policies["exit_"+name]=(base_low,base_high&gate,zero)
+ # Price-volume distribution/continuation confirmation family. All features are
+ # observed at the signal close; execution remains next-session open.
+ if {"obv_flow_ratio_5","macd_hist_change_3","relative_volume20","close_location"}.issubset(d.columns):
+  obv=pd.to_numeric(d.obv_flow_ratio_5,errors="coerce")
+  macd=pd.to_numeric(d.macd_hist_change_3,errors="coerce")
+  relvol=pd.to_numeric(d.relative_volume20,errors="coerce")
+  close_loc=pd.to_numeric(d.close_location,errors="coerce")
+  policies["high_hold_obv_positive"]=(base_low,base_high,hold&obv.gt(0).fillna(False).to_numpy(bool))
+  policies["high_hold_macd_positive"]=(base_low,base_high,hold&macd.gt(0).fillna(False).to_numpy(bool))
+  policies["high_hold_volume_confirmed"]=(base_low,base_high,hold&(relvol.ge(1.0)&close_loc.ge(.5)).fillna(False).to_numpy(bool))
+  policies["high_hold_obv_and_volume_confirmed"]=(base_low,base_high,hold&(obv.gt(0)&relvol.ge(1.0)&close_loc.ge(.5)).fillna(False).to_numpy(bool))
+  distribution=(obv.lt(0)&close_loc.lt(.4)&relvol.ge(1.2)).fillna(False).to_numpy(bool)
+  policies["exit_distribution_confirmed"]=(base_low,base_high&distribution,zero)
+  policies["exit_obv_negative"]=(base_low,base_high&obv.lt(0).fillna(False).to_numpy(bool),zero)
  return policies
 
 def run(features_path,limits_path,dividends_path,output_dir):
