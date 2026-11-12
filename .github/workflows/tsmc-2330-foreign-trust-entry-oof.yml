@@ -41,7 +41,6 @@ jobs:
             --features source/artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
             --limits source/data/tsmc_2330/corporate_actions/price_limits_2330.csv \
             --dividends source/data/tsmc_2330/corporate_actions/TaiwanStockDividendResult_2330.csv \
-            --chip source/data/tsmc_2330/chip/2330_chip_features.csv \
             --output artifacts/tsmc_2330_foreign_trust_entry_oof
       - uses: actions/upload-artifact@v4
         with:
