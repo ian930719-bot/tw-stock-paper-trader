@@ -1,7 +1,7 @@
 """Exploratory fixed-rule trend re-entry study on the frozen TSMC 2330 dataset.
 
 All re-entry conditions are close-known at t and execute no earlier than t+1 open.
-This is a diagnostic experiment on historically inspected data, not OOF.
+This is a diagnostic experiment on historically inspected data, not OOF.\nRe-entry rule list is fixed before the diagnostic run and must not be optimized on this output.
 No candidate is promoted based on this run; annual expanding OOF is required next.
 """
 from __future__ import annotations
