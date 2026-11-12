@@ -22,9 +22,9 @@ REENTRY_RULES = (
     {"name": "ema20_reclaim", "cooldown": 0, "condition": "distance_ema_20 crosses from <= 0 to > 0"},
     {"name": "rsi_recovery", "cooldown": 0, "condition": "rsi14 >= 50 and rsi14 > rsi14_prev"},
     {"name": "macd_momentum", "cooldown": 0, "condition": "macd_hist_pct > macd_hist_pct_prev"},
-    {"name": "ema_20_rsi_macd", "cooldown": 0, "condition": "raw_close > ema_20 and rsi14 >= 50 and macd_hist_pct > macd_hist_pct_prev"},
-    {"name": "ema_20_rsi_macd_cd10", "cooldown": 10, "condition": "raw_close > ema_20 and rsi14 >= 50 and macd_hist_pct > macd_hist_pct_prev"},
-    {"name": "ema_20_rsi_macd_cd20", "cooldown": 20, "condition": "raw_close > ema_20 and rsi14 >= 50 and macd_hist_pct > macd_hist_pct_prev"},
+    {"name": "ema_20_rsi_macd", "cooldown": 0, "condition": "distance_ema_20 > 0 and rsi14 >= 50 and macd_hist_pct > macd_hist_pct_prev"},
+    {"name": "ema_20_rsi_macd_cd10", "cooldown": 10, "condition": "distance_ema_20 > 0 and rsi14 >= 50 and macd_hist_pct > macd_hist_pct_prev"},
+    {"name": "ema_20_rsi_macd_cd20", "cooldown": 20, "condition": "distance_ema_20 > 0 and rsi14 >= 50 and macd_hist_pct > macd_hist_pct_prev"},
 )
 
 REQUIRED = {
