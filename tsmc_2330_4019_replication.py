@@ -87,11 +87,14 @@ def simulate(
     reentry_cooldown: int = 0,
     high_hold_signal: np.ndarray | None = None,
     high_exit_policy: str = "handoff_or",
+    low_entry_policy: str = "immediate",
 ) -> dict:
     if risk_exit_policy not in {"per_position", "per_regime_latched", "recovery_required"}:
         raise ValueError(f"Unknown risk_exit_policy: {risk_exit_policy}")
     if high_exit_policy not in {"handoff_or", "and_sma20_rsi55", "ema20_rsi55", "prior5low"}:
         raise ValueError(f"Unknown high_exit_policy: {high_exit_policy}")
+    if low_entry_policy not in {"immediate", "bullish_day_3", "two_higher_closes_5", "signal_high_breakout_5"}:
+        raise ValueError(f"Unknown low_entry_policy: {low_entry_policy}")
     if reentry_cooldown < 0:
         raise ValueError("reentry_cooldown must be non-negative")
     if reentry_signal is None:
@@ -117,6 +120,13 @@ def simulate(
     suppressed_high_signal_count = 0
     high_wait_start = None
     prior5_low = d.raw_low.shift(1).rolling(5, min_periods=5).min().to_numpy()
+    prev_close = d.raw_close.shift(1).to_numpy(float)
+    prev2_close = d.raw_close.shift(2).to_numpy(float)
+    bullish_day = ((d.raw_close > d.raw_open) & (d.raw_close > d.raw_close.shift(1))).fillna(False).to_numpy(bool)
+    two_higher_closes = ((d.raw_close > d.raw_close.shift(1)) & (d.raw_close.shift(1) > d.raw_close.shift(2))).fillna(False).to_numpy(bool)
+    low_entry_timeout = {"immediate": 0, "bullish_day_3": 3, "two_higher_closes_5": 5, "signal_high_breakout_5": 5}[low_entry_policy]
+    low_alert_start = None
+    low_alert_high = None
     trades = []
     curve = []
     total_commission = total_tax = total_dividend = 0
@@ -182,6 +192,8 @@ def simulate(
                             if risk_exit_policy == "per_position":
                                 risk_exit_fired = False
                             high_wait_start = None
+                            low_alert_start = None
+                            low_alert_high = None
                             total_commission += fee
                             total_slippage += qty * (fill - op)
                         pending = None
@@ -220,6 +232,8 @@ def simulate(
                         entry_cost = 0.0
                         trade_dividend = 0.0
                         high_wait_start = None
+                        low_alert_start = None
+                        low_alert_high = None
                         pending = None
 
         close = float(row.raw_close)
@@ -238,9 +252,29 @@ def simulate(
                 risk_recovered = not risk[i]
                 entry_allowed = not (risk_exit_policy == "recovery_required" and not risk_recovered)
                 if i >= cooldown_until and entry_allowed:
-                    if low[i]:
-                        pending = {"side": "BUY", "reason": "base_low_after_filters"}
-                    elif trend_reentry_allowed and i >= trend_cooldown_until and reentry_signal[i]:
+                    if low_entry_policy == "immediate":
+                        if low[i]:
+                            pending = {"side": "BUY", "reason": "base_low_after_filters"}
+                    else:
+                        if low[i] and low_alert_start is None:
+                            low_alert_start = i
+                            low_alert_high = float(row.raw_high)
+                        if low_alert_start is not None:
+                            age = i - low_alert_start
+                            if low_entry_policy == "bullish_day_3":
+                                confirmed = age > 0 and age <= 3 and bullish_day[i]
+                            elif low_entry_policy == "two_higher_closes_5":
+                                confirmed = age > 0 and age <= 5 and two_higher_closes[i]
+                            else:
+                                confirmed = age > 0 and age <= 5 and close > float(low_alert_high)
+                            if confirmed:
+                                pending = {"side": "BUY", "reason": f"confirmed_{low_entry_policy}"}
+                                low_alert_start = None
+                                low_alert_high = None
+                            elif age >= low_entry_timeout:
+                                low_alert_start = None
+                                low_alert_high = None
+                    if pending is None and trend_reentry_allowed and i >= trend_cooldown_until and reentry_signal[i]:
                         pending = {"side": "BUY", "reason": "trend_reentry"}
             else:
                 # The SMA200 risk exit has priority over high-point processing.
@@ -310,6 +344,7 @@ def simulate(
         "trend_reentry_cooldown_sessions": reentry_cooldown,
         "suppressed_high_signal_count": suppressed_high_signal_count,
         "high_exit_policy": high_exit_policy,
+        "low_entry_policy": low_entry_policy,
         "total_commission": total_commission,
         "total_sell_tax": total_tax,
         "estimated_slippage_cost": total_slippage,
