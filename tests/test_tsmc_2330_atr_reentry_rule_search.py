@@ -39,5 +39,5 @@ class TestTsmcAtrReentryRuleSearch(unittest.TestCase):
         self.assertFalse(trailing_atr_stop_hit(90.0, 100.0, -0.02, 3.0))
 
 
-if __tests__ == "__main__":
+if __name__ == "__main__":
     unittest.main()
