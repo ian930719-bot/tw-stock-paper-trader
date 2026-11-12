@@ -31,7 +31,7 @@ VALIDATION_START_YEAR = 2015
 def build_wave_failure_signals(d: pd.DataFrame) -> dict[str, np.ndarray]:
     required = {
         "raw_close", "raw_low", "corporate_action_window",
-        "distance_prior_low20", "distance_sma_50", "distance_ema_50",
+        "distance_prior_low20", "distance_sma_50", "distance_ema_20", "distance_ema_50",
         "ema50_slope_10", "ema20_slope_5", "rsi14",
         "atr_pct14", "close_location",
     }
