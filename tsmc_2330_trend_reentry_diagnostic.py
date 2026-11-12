@@ -1,6 +1,6 @@
 """Causal post-exit trend re-entry and false-high diagnostic research.
 
-This module does not tune or replace the frozen historical OOF strategy. It
+This version supersedes the initial scale-mismatched diagnostic. It does not tune or replace the frozen historical OOF strategy. It
 replays the existing 2015-2026 OOF trade exits as event anchors and evaluates
 predeclared, close-known re-entry rules on a separate diagnostic ledger.
 Because the exit anchors were learned from previously inspected history, this
@@ -19,7 +19,7 @@ from tsmc_2330_40pct_rule_search import inputs
 
 REENTRY_RULES = (
     {"name": "break_prev_high", "cooldown": 0, "condition": "raw_close > prev_raw_high"},
-    {"name": "ema20_reclaim", "cooldown": 0, "condition": "raw_close > ema_20"},
+    {"name": "ema20_reclaim", "cooldown": 0, "condition": "distance_ema_20 crosses from <= 0 to > 0"},
     {"name": "rsi_recovery", "cooldown": 0, "condition": "rsi14 >= 50 and rsi14 > rsi14_prev"},
     {"name": "macd_momentum", "cooldown": 0, "condition": "macd_hist_pct > macd_hist_pct_prev"},
     {"name": "ema_20_rsi_macd", "cooldown": 0, "condition": "raw_close > ema_20 and rsi14 >= 50 and macd_hist_pct > macd_hist_pct_prev"},
@@ -28,7 +28,7 @@ REENTRY_RULES = (
 )
 
 REQUIRED = {
-    "raw_open", "raw_high", "raw_low", "raw_close", "ema_20",
+    "raw_open", "raw_high", "raw_low", "raw_close", "distance_ema_20",
     "rsi14", "macd_hist_pct", "relative_volume20", "atr_pct14",
     "sma20_slope_5", "sma50_slope_10", "obv_flow_ratio_5",
     "close_location", "intraday_range_pct",
@@ -42,14 +42,14 @@ def _signals(bars: pd.DataFrame) -> dict[str, pd.Series]:
     common = bars["raw_close"].notna() & bars["raw_open"].notna()
     return {
         "break_prev_high": common & (bars["raw_close"] > prev_high),
-        "ema20_reclaim": common & (bars["raw_close"] > bars["ema_20"]),
+        "ema20_reclaim": common & (bars["distance_ema_20"].shift(1) <= 0) & (bars["distance_ema_20"] > 0),
         "rsi_recovery": common & (bars["rsi14"] >= 50) & (bars["rsi14"] > rsi_prev),
         "macd_momentum": common & (bars["macd_hist_pct"] > macd_prev),
-        "ema_20_rsi_macd": common & (bars["raw_close"] > bars["ema_20"]) &
+        "ema_20_rsi_macd": common & (bars["distance_ema_20"] > 0) &
                           (bars["rsi14"] >= 50) & (bars["macd_hist_pct"] > macd_prev),
-        "ema_20_rsi_macd_cd10": common & (bars["raw_close"] > bars["ema_20"]) &
+        "ema_20_rsi_macd_cd10": common & (bars["distance_ema_20"] > 0) &
                                (bars["rsi14"] >= 50) & (bars["macd_hist_pct"] > macd_prev),
-        "ema_20_rsi_macd_cd20": common & (bars["raw_close"] > bars["ema_20"]) &
+        "ema_20_rsi_macd_cd20": common & (bars["distance_ema_20"] > 0) &
                                (bars["rsi14"] >= 50) & (bars["macd_hist_pct"] > macd_prev),
     }
 
@@ -143,6 +143,7 @@ def run(features_path: str, limits_path: str, dividends_path: str,
         "trigger_timing": "condition calculated only from data available at close t; earliest order executes at t+1 open",
         "future_data_policy": "90-session future max/min returns are outcome-only audit fields, never used by trigger generation or rule selection",
         "candidate_status": "EXPLORATORY_DIAGNOSTIC_NOT_OOF",
+        "corrected_price_scale_policy": "Raw OHLC is compared only with raw OHLC; EMA20 state uses the scale-neutral adjusted distance_ema_20 feature. Never compare raw_close directly with adjusted ema_20.",
         "base_exit_count": len(base),
         "rule_count": len(REENTRY_RULES),
         "event_rows": rows,
