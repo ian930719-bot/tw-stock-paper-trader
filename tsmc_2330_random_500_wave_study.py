@@ -34,19 +34,6 @@ def make_wave_population(events: pd.DataFrame, features: pd.DataFrame) -> pd.Dat
     legs = build_wave_legs(events, features)
     if legs.empty:
         raise ValueError("No completed alternating pivot-to-pivot waves found")
-    starts = events[[
-        "threshold_id", "pivot_index", "confirmation_index", "confirmation_date",
-        "confirmation_lag",
-    ]].copy()
-    starts = starts.rename(columns={
-        "pivot_index": "start_index",
-        "confirmation_index": "start_confirmation_index",
-        "confirmation_date": "start_confirmation_date",
-        "confirmation_lag": "start_confirmation_lag",
-    })
-    waves = legs.merge(
-        starts, left_on=["threshold_id"], right_on=["threshold_id"], how="left"
-    )
     # Resolve the start pivot index explicitly; never use the endpoint's future data.
     pivot_map = events[[
         "threshold_id", "pivot_index", "confirmation_index", "confirmation_date",
@@ -220,8 +207,12 @@ def run(features_path: str, events_path: str, output_dir: str) -> dict:
     }
 
     sample_out = sample.copy()
-    sample_out["sample_role"] = "research"
-    sample_out.loc[sample_out.index >= len(research), "sample_role"] = "validation_candidate"
+    research_keys = set(zip(research["start_date"], research["end_date"], research["direction"]))
+    sample_out["sample_role"] = [
+        "research" if (r.start_date, r.end_date, r.direction) in research_keys
+        else "validation"
+        for r in sample_out.itertuples(index=False)
+    ]
     research_x["sample_role"] = "research"
     validation_x["sample_role"] = "validation"
     out = Path(output_dir)
