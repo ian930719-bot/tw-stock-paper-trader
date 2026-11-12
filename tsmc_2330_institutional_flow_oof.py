@@ -75,7 +75,7 @@ def run(events_path,chip_path,bars_path,output):
  for year in sorted(e.year.unique()):
   cutoff=pd.Timestamp(year=int(year),month=1,day=1)
   train=e[e.label_maturity_date<cutoff];test=e[e.year==year]
-  if len(train)<40 or train.quality_label.nunique()<2 or test.empty:
+  if len(train)<30 or train.quality_label.nunique()<2 or test.empty:
    folds.append({"year":int(year),"train_n":int(len(train)),"test_n":int(len(test)),"status":"insufficient_matured_training"});continue
   fold={"year":int(year),"training_labels_matured_before":cutoff.date().isoformat(),"train_n":int(len(train)),"test_n":int(len(test))}
   for name,cols in GROUPS.items():
