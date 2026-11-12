@@ -93,12 +93,20 @@ def build_events(d):
                     rec[f"mae_{h}d"] = None
                     rec[f"close_return_{h}d"] = None
                     continue
+                observed = int(end-(c+1))
+                rec[f"observed_sessions_{h}d"] = observed
+                # Right-censor incomplete forward windows. Never aggregate a
+                # partial 120-session path as if it were a complete 120-session label.
+                if observed < h:
+                    rec[f"mfe_{h}d"] = None
+                    rec[f"mae_{h}d"] = None
+                    rec[f"close_return_{h}d"] = None
+                    continue
                 future_high = high[c+1:end]
                 future_low = low[c+1:end]
                 rec[f"mfe_{h}d"] = float(np.max(future_high)/start_price-1)
                 rec[f"mae_{h}d"] = float(np.min(future_low)/start_price-1)
                 rec[f"close_return_{h}d"] = float(close[end-1]/start_price-1)
-                rec[f"observed_sessions_{h}d"] = int(end-(c+1))
             records.append(rec)
     return pd.DataFrame(records)
 
