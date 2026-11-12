@@ -50,13 +50,13 @@ def build_policies(d,base_low,base_high,hold):
   policies[name+"_high_hold"]=(base_low&gate,hold)
  return policies
 
-def run(features_path,limits_path,dividends_path,chip_path,output_dir):
+def run(features_path,limits_path,dividends_path,output_dir):
  d,limits,dividends=inputs(features_path,limits_path,dividends_path)
  d=d.sort_values("date").reset_index(drop=True)
- chip=pd.read_csv(chip_path,parse_dates=["date"]).sort_values("date").drop_duplicates("date",keep="last")
- missing=[c for c in FLOW_COLS if c not in chip.columns]
- if missing:raise ValueError(f"Chip file missing required fields: {missing}")
- d=d.merge(chip[["date"]+FLOW_COLS],on="date",how="left",validate="one_to_one")
+ missing=[c for c in FLOW_COLS if c not in d.columns]
+ if missing:raise ValueError(f"Feature dataset missing required foreign/trust fields: {missing}")
+ # The preserved causal feature artifact already contains same-day flow features.
+ # Do not merge a second copy: this would create ambiguous *_x/*_y columns.
  base_low,base_high,risk=build_candidate_signals(d)
  action=d.corporate_action_window.fillna(True).astype(bool)
  hold=((d.distance_sma_200>=.25)&(d.distance_ema_20>0)&d.rsi14.between(50,65)&
@@ -117,5 +117,5 @@ def run(features_path,limits_path,dividends_path,chip_path,output_dir):
  return result
 
 if __name__=="__main__":
- p=argparse.ArgumentParser();p.add_argument("--features",required=True);p.add_argument("--limits",required=True);p.add_argument("--dividends",required=True);p.add_argument("--chip",required=True);p.add_argument("--output",default="artifacts/tsmc_2330_foreign_trust_entry_oof")
- a=p.parse_args();print(json.dumps(run(a.features,a.limits,a.dividends,a.chip,a.output),ensure_ascii=False,indent=2,default=float))
+ p=argparse.ArgumentParser();p.add_argument("--features",required=True);p.add_argument("--limits",required=True);p.add_argument("--dividends",required=True);p.add_argument("--output",default="artifacts/tsmc_2330_foreign_trust_entry_oof")
+ a=p.parse_args();print(json.dumps(run(a.features,a.limits,a.dividends,a.output),ensure_ascii=False,indent=2,default=float))
