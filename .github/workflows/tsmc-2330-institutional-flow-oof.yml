@@ -46,6 +46,7 @@ jobs:
           python tsmc_2330_institutional_flow_oof.py \
             --events event_source/tsmc_2330_causal_low_pivot_quality/causal_low_pivot_quality_events.csv \
             --chip source/data/tsmc_2330/chip/2330_chip_features.csv \
+            --bars source/data/tsmc_2330/bars/2330.csv \
             --output artifacts/tsmc_2330_institutional_flow_oof
       - uses: actions/upload-artifact@v4
         with:
