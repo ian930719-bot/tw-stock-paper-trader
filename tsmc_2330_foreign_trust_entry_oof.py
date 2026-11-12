@@ -36,12 +36,12 @@ def build_policies(d,base_low,base_high,hold):
  t20=d.trust_net_20d_lots.gt(0).fillna(False).to_numpy(bool)
  gates={
   "baseline":np.ones(len(d),dtype=bool),
-  "foreign_5d_positive":available&f5,
-  "foreign_20d_positive":available&f20,
-  "trust_5d_positive":available&t5,
-  "trust_20d_positive":available&t20,
-  "foreign_and_trust_5d_positive":available&f5&t5,
-  "foreign_or_trust_5d_positive":available&(f5|t5),
+  "foreign_5d_positive":(~available)|f5,
+  "foreign_20d_positive":(~available)|f20,
+  "trust_5d_positive":(~available)|t5,
+  "trust_20d_positive":(~available)|t20,
+  "foreign_and_trust_5d_positive":(~available)|(f5&t5),
+  "foreign_or_trust_5d_positive":(~available)|(f5|t5),
  }
  policies={}
  zero=np.zeros(len(d),dtype=bool)
@@ -109,7 +109,7 @@ def run(features_path,limits_path,dividends_path,chip_path,output_dir):
   "annual_oof_metrics_by_cost":annual_by_cost,
   "target_status":"UNMET unless 10bps CAGR>=50% and completed-trade win rate>=86.9565%; MDD<=25% tracked separately.",
   "limitations":["Event-flow study is not evidence of a profitable trading strategy; this execution backtest is the required test.",
-   "FinMind institutional history starts 2012-05-02; missing flow is not imputed as zero and baseline fallback remains available.",
+   "FinMind institutional history starts 2012-05-02; missing flow is not imputed as zero, and every flow-gated candidate falls back to an unfiltered entry when flow is unavailable.",
    "Annual OOF controls temporal selection but research-family selection bias remains; 2010-2026 was previously inspected.",
    "2026 is partial year; daily OHLC cannot reproduce queue priority or intraday fills."]}
  (out/"tsmc_2330_foreign_trust_entry_oof.json").write_text(json.dumps(result,ensure_ascii=False,indent=2,default=float),encoding="utf-8")
