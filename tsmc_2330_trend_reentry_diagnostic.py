@@ -22,9 +22,9 @@ REENTRY_RULES = (
     {"name": "ema20_reclaim", "cooldown": 0, "condition": "raw_close > ema_20"},
     {"name": "rsi_recovery", "cooldown": 0, "condition": "rsi14 >= 50 and rsi14 > rsi14_prev"},
     {"name": "macd_momentum", "cooldown": 0, "condition": "macd_hist_pct > macd_hist_pct_prev"},
-    {"name": "ema_20_rsi_macd", "cooldown": 0, "condition": "raw_close > ema20 and rsi14 >= 50 and macd_hist > macd_hist_prev"},
-    {"name": "ema_20_rsi_macd_cd10", "cooldown": 10, "condition": "raw_close > ema20 and rsi14 >= 50 and macd_hist > macd_hist_prev"},
-    {"name": "ema_20_rsi_macd_cd20", "cooldown": 20, "condition": "raw_close > ema20 and rsi14 >= 50 and macd_hist > macd_hist_prev"},
+    {"name": "ema_20_rsi_macd", "cooldown": 0, "condition": "raw_close > ema_20 and rsi14 >= 50 and macd_hist_pct > macd_hist_pct_prev"},
+    {"name": "ema_20_rsi_macd_cd10", "cooldown": 10, "condition": "raw_close > ema_20 and rsi14 >= 50 and macd_hist_pct > macd_hist_pct_prev"},
+    {"name": "ema_20_rsi_macd_cd20", "cooldown": 20, "condition": "raw_close > ema_20 and rsi14 >= 50 and macd_hist_pct > macd_hist_pct_prev"},
 )
 
 REQUIRED = {
@@ -44,13 +44,13 @@ def _signals(bars: pd.DataFrame) -> dict[str, pd.Series]:
         "break_prev_high": common & (bars["raw_close"] > prev_high),
         "ema20_reclaim": common & (bars["raw_close"] > bars["ema_20"]),
         "rsi_recovery": common & (bars["rsi14"] >= 50) & (bars["rsi14"] > rsi_prev),
-        "macd_momentum": common & (bars["macd_hist"] > macd_prev),
-        "ema20_rsi_macd": common & (bars["raw_close"] > bars["ema20"]) &
-                          (bars["rsi14"] >= 50) & (bars["macd_hist"] > macd_prev),
-        "ema20_rsi_macd_cd10": common & (bars["raw_close"] > bars["ema20"]) &
-                               (bars["rsi14"] >= 50) & (bars["macd_hist"] > macd_prev),
-        "ema20_rsi_macd_cd20": common & (bars["raw_close"] > bars["ema20"]) &
-                               (bars["rsi14"] >= 50) & (bars["macd_hist"] > macd_prev),
+        "macd_momentum": common & (bars["macd_hist_pct"] > macd_prev),
+        "ema_20_rsi_macd": common & (bars["raw_close"] > bars["ema_20"]) &
+                          (bars["rsi14"] >= 50) & (bars["macd_hist_pct"] > macd_prev),
+        "ema_20_rsi_macd_cd10": common & (bars["raw_close"] > bars["ema_20"]) &
+                               (bars["rsi14"] >= 50) & (bars["macd_hist_pct"] > macd_prev),
+        "ema_20_rsi_macd_cd20": common & (bars["raw_close"] > bars["ema_20"]) &
+                               (bars["rsi14"] >= 50) & (bars["macd_hist_pct"] > macd_prev),
     }
 
 
