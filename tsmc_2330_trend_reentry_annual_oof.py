@@ -61,6 +61,7 @@ def sell_tax(notional: float) -> int:
 
 
 def tick_size(price: float) -> float:
+    """TWSE common-stock tick schedule; price band is checked per legal quote."""
     if price < 10:
         return 0.01
     if price < 50:
@@ -74,29 +75,40 @@ def tick_size(price: float) -> float:
     return 5.00
 
 
-def adverse_fill(raw_open: float, side: str, slippage_bps: int) -> float:
-    """Round adverse slippage to a valid tick, never improving the open."""
-    theoretical = raw_open * (1 + slippage_bps / 10000) if side == "BUY" else raw_open * (1 - slippage_bps / 10000)
-    # Resolve the legal tick from the resulting fill-price band, iterating
-    # across boundaries such as NT$1,000 -> NT$999 (tick 5 -> tick 1).
-    if side == "BUY":
-        fill = theoretical
-        for _ in range(3):
-            tick = tick_size(fill)
-            fill = math.ceil((theoretical - 1e-10) / tick) * tick
-        if fill < raw_open:
-            tick = tick_size(raw_open)
-            fill = math.ceil((raw_open - 1e-10) / tick) * tick
-        return round(fill, 2)
-    fill = theoretical
-    for _ in range(3):
-        tick = tick_size(fill)
-        fill = math.floor((theoretical + 1e-10) / tick) * tick
-    if fill > raw_open:
-        tick = tick_size(raw_open)
-        fill = math.floor((raw_open + 1e-10) / tick) * tick
-    return round(fill, 2)
+def _is_legal_tick(price: float) -> bool:
+    if not np.isfinite(price) or price <= 0:
+        return False
+    # A quote exactly on a boundary belongs to the higher price band, but the
+    # legal grid must also satisfy the price band's increment.
+    return abs(price / tick_size(price) - round(price / tick_size(price))) < 1e-8
 
+
+def adverse_fill(raw_open: float, side: str, slippage_bps: int) -> float:
+    """Find the nearest legal quote no better than adverse percentage slippage."""
+    target = raw_open * (1 + slippage_bps / 10000) if side == "BUY" else raw_open * (1 - slippage_bps / 10000)
+    if side not in {"BUY", "SELL"}:
+        raise ValueError(f"Unknown side: {side}")
+    # Search legal quotes around target; the tick can change at a band boundary.
+    # Iterate adjacent price grids until a quote satisfies both the band and tick.
+    if side == "BUY":
+        candidate = target
+        for _ in range(100):
+            tick = tick_size(candidate)
+            candidate = math.ceil((candidate - 1e-10) / tick) * tick
+            candidate = round(candidate, 2)
+            if _is_legal_tick(candidate) and candidate + 1e-8 >= target:
+                return candidate
+            candidate = round(candidate + 0.01, 2)
+        raise RuntimeError(f"Could not find legal BUY fill for {raw_open}")
+    candidate = target
+    for _ in range(100):
+        tick = tick_size(candidate)
+        candidate = math.floor((candidate + 1e-10) / tick) * tick
+        candidate = round(candidate, 2)
+        if _is_legal_tick(candidate) and candidate <= target + 1e-8:
+            return candidate
+        candidate = round(candidate - 0.01, 2)
+    raise RuntimeError(f"Could not find legal SELL fill for {raw_open}")
 
 def _signals(d: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, dict[str, np.ndarray]]:
     action = d["corporate_action_window"].fillna(True).astype(bool).to_numpy()
