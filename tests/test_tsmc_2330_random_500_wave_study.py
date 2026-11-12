@@ -78,7 +78,7 @@ class Random500WaveStudyTests(unittest.TestCase):
         })
         result = descriptive_metrics(frame)
         self.assertEqual(result["n"], 2)
-        self.assertAlmostEqual(result["up_wave_share"], .5)
+        self.assertAlmostEqual(result["pivot_to_pivot_up_share"], .5)
 
 
 if __name__ == "__main__":
