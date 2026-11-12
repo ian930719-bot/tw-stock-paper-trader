@@ -1,0 +1,96 @@
+name: TSMC 2330 Annual OOF Replay (Frozen Source Data)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - research/200cagr-blind-validation
+    paths:
+      - ".github/workflows/tsmc-2330-annual-oof-replay.yml"
+      - "tsmc_2330_annual_rule_oof_backtest.py"
+      - "tsmc_2330_40pct_rule_search.py"
+      - "tsmc_2330_execution_backtest.py"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  annual-oof-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      TZ: Asia/Taipei
+    steps:
+      - name: Checkout research branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install isolated replay dependencies
+        run: python -m pip install --upgrade pip pandas numpy requests scikit-learn
+
+      - name: Restore immutable source research artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tsmc-2330-swing-research
+          run-id: 43144543572
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          path: source
+
+      - name: Verify frozen source data and manifest
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import pandas as pd
+
+          root = Path("source")
+          features = root / "artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv"
+          limits = root / "data/tsmc_2330/corporate_actions/price_limits_2330.csv"
+          dividends = root / "data/tsmc_2330/corporate_actions/TaiwanStockDividendResult_2330.csv"
+          required = [features, limits, dividends]
+          missing = [str(p) for p in required if not p.is_file()]
+          if missing:
+              raise RuntimeError(f"Frozen source artifact missing required files: {missing}")
+          f = pd.read_csv(features, usecols=["date"])
+          l = pd.read_csv(limits)
+          d = pd.read_csv(dividends)
+          print(json.dumps({
+              "source_run_id": 43144543572,
+              "source_artifact": "tsmc-2330-swing-research",
+              "features_rows": len(f),
+              "features_period": [str(f.date.min()), str(f.date.max())],
+              "price_limit_rows": len(l),
+              "dividend_rows": len(d),
+              "data_reused_without_refetch": True,
+              "new_market_data_downloaded": False
+          }, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Compile and test annual OOF modules
+        run: |
+          python -m py_compile tsmc_2330_annual_rule_oof_backtest.py
+          python -m py_compile tsmc_2330_40pct_rule_search.py
+          python -m py_compile tsmc_2330_execution_backtest.py
+          python -m unittest discover -s tests -p "test_tsmc_*.py" -v
+
+      - name: Run annual expanding executable OOF on frozen data
+        run: |
+          python tsmc_2330_annual_rule_oof_backtest.py \
+            --features source/artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --limits source/data/tsmc_2330/corporate_actions/price_limits_2330.csv \
+            --dividends source/data/tsmc_2330/corporate_actions/TaiwanStockDividendResult_2330.csv \
+            --output artifacts/tsmc_2330_annual_oof_replay
+
+      - name: Upload isolated annual OOF replay
+        uses: actions/upload-artifact@v4
+        with:
+          name: tsmc-2330-annual-oof-frozen-source-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 30
+          path: artifacts/tsmc_2330_annual_oof_replay/
