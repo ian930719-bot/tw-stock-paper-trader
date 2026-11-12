@@ -30,7 +30,7 @@ def roc_date(value: str) -> str:
 
 def number(value):
     s=str(value).strip().replace(",","")
-    if s in {"","--","-","X","nan","None"}: return None
+    if s in {"","--","-","X","nan","None"} or s.startswith("X"): return None
     return float(s)
 
 def fetch_month(session, symbol, month, retries=6):
