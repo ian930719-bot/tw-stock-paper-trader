@@ -38,7 +38,7 @@ jobs:
           python -m py_compile tsmc_2330_annual_swing_scale_research.py
           python -m py_compile tsmc_2330_random_500_wave_study.py
           python -m py_compile tests/test_tsmc_2330_random_500_wave_study.py
-          python -m unittest tests.test_tsmc_2330_random_500_wave_study -v
+          python -m unittest discover -s tests -p "test_tsmc_2330_random_500_wave_study.py" -v
 
       - name: Wait for the current full-history research artifact
         uses: actions/github-script@v7
