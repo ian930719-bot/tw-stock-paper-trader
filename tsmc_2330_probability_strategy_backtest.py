@@ -181,7 +181,9 @@ def run(features_path, oracle_path, limits_path, dividends_path, output_dir,
     idx = np.flatnonzero(eligible)
     if not len(idx):
         raise RuntimeError("No rows have both causal OOF probabilities")
-    first_date, last_date = dates.iloc[idx[0]].date().isoformat(), dates.iloc[idx[-1]].date().isoformat()
+    first_date = dates.iloc[idx[0]].date().isoformat()
+    # Keep the following session so a signal on the last OOF date can execute next open.
+    last_date = dates.iloc[-1].date().isoformat()
     limit_lookup = {r.date.strftime("%Y-%m-%d"): (float(r.limit_up), float(r.limit_down))
         for r in limits.itertuples(index=False) if np.isfinite(r.limit_up) and np.isfinite(r.limit_down)}
 
