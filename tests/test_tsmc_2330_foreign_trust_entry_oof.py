@@ -16,7 +16,9 @@ class ForeignTrustEntryOOFTests(unittest.TestCase):
   self.assertEqual(p["baseline"][0].tolist(),[True,True,True,True])
   self.assertIn("foreign_20d_positive_high_hold",p)
   self.assertEqual(p["high_hold_foreign_5d_positive"][0].tolist(),[True,True,True,True])
-  self.assertEqual(p["high_hold_foreign_5d_positive"][1].tolist(),[True,False,True,True])
+  self.assertEqual(p["high_hold_foreign_5d_positive"][2].tolist(),[True,False,True,True])
+  self.assertEqual(p["exit_foreign_5d_negative"][1].tolist(),[False,True,False,False])
+  self.assertEqual(p["exit_foreign_5d_negative"][0].tolist(),[True,True,True,True])
   self.assertEqual(p["trust_20d_positive"][0][3],True)
  def test_win_floor_and_trade_count_are_both_required(self):
   self.assertFalse(eligible({"completed_trades":4,"win_rate_completed_only":1.0,"cagr_mark_to_market":.5}))
