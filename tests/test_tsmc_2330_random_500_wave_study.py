@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 from tsmc_2330_random_500_wave_study import (
-    deterministic_sample, chronological_split, descriptive_metrics,
+    deterministic_sample, chronological_split, descriptive_metrics, attach_causal_features,
 )
 
 
@@ -39,6 +39,35 @@ class Random500WaveStudyTests(unittest.TestCase):
         self.assertTrue((validation["start_confirmation_date"] >= start).all())
         self.assertGreaterEqual(len(research), 25)
         self.assertEqual(len(validation), 30)
+
+
+    def test_forward_label_uses_confirmation_close_and_rejects_late_confirmation(self):
+        features = pd.DataFrame({
+            "date": pd.to_datetime(["2020-01-01", "2020-01-02", "2020-01-03"]),
+            "close": [100.0, 101.0, 102.0],
+            "raw_close": [100.0, 101.0, 102.0],
+            "corporate_action_window": [False, False, False],
+        })
+        waves = pd.DataFrame([
+            {
+                "start_confirmation_index": 0,
+                "start_confirmation_date": "2020-01-01",
+                "end_date": "2020-01-03",
+                "end_price": 110.0,
+                "direction": "UP",
+            },
+            {
+                "start_confirmation_index": 2,
+                "start_confirmation_date": "2020-01-03",
+                "end_date": "2020-01-02",
+                "end_price": 90.0,
+                "direction": "DOWN",
+            },
+        ])
+        result, _ = attach_causal_features(waves, features)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result.iloc[0]["post_confirmation_direction"], "UP")
+        self.assertAlmostEqual(result.iloc[0]["post_confirmation_return_pct"], 0.10)
 
     def test_descriptive_metrics(self):
         frame = pd.DataFrame({
