@@ -83,9 +83,17 @@ def simulate(
     end_i: int,
     initial_capital: float = INITIAL_CAPITAL,
     risk_exit_policy: str = "per_position",
+    reentry_signal: np.ndarray | None = None,
+    reentry_cooldown: int = 0,
 ) -> dict:
     if risk_exit_policy not in {"per_position", "per_regime_latched", "recovery_required"}:
         raise ValueError(f"Unknown risk_exit_policy: {risk_exit_policy}")
+    if reentry_cooldown < 0:
+        raise ValueError("reentry_cooldown must be non-negative")
+    if reentry_signal is None:
+        reentry_signal = np.zeros(len(d), dtype=bool)
+    if len(reentry_signal) != len(d):
+        raise ValueError("reentry_signal length must match data")
     cash = float(initial_capital)
     shares = 0
     entry_date = None
@@ -94,6 +102,10 @@ def simulate(
     pending = None
     risk_exit_fired = False
     cooldown_until = -1
+    trend_cooldown_until = -1
+    trend_reentry_allowed = False
+    entry_reason = None
+    trend_reentry_count = 0
     high_wait_start = None
     trades = []
     curve = []
@@ -151,6 +163,10 @@ def simulate(
                             cash -= notional + fee
                             shares = qty
                             entry_date = day
+                            entry_reason = reason
+                            if reason == "trend_reentry":
+                                trend_reentry_count += 1
+                            trend_reentry_allowed = False
                             entry_cost = notional + fee
                             trade_dividend = 0.0
                             if risk_exit_policy == "per_position":
@@ -168,6 +184,7 @@ def simulate(
                         pnl = proceeds + trade_dividend - entry_cost
                         trades.append({
                             "entry_date": entry_date,
+                            "entry_reason": entry_reason,
                             "exit_date": day,
                             "exit_reason": reason,
                             "shares": shares,
@@ -186,6 +203,8 @@ def simulate(
                             cooldown_until = i + RULES["risk_exit_cooldown_sessions"]
                         else:
                             high_exit_count += 1
+                            trend_reentry_allowed = True
+                            trend_cooldown_until = i + reentry_cooldown
                         shares = 0
                         entry_date = None
                         entry_cost = 0.0
@@ -208,8 +227,11 @@ def simulate(
             if shares == 0:
                 risk_recovered = not risk[i]
                 entry_allowed = not (risk_exit_policy == "recovery_required" and not risk_recovered)
-                if low[i] and i >= cooldown_until and entry_allowed:
-                    pending = {"side": "BUY", "reason": "base_low_after_filters"}
+                if i >= cooldown_until and entry_allowed:
+                    if low[i]:
+                        pending = {"side": "BUY", "reason": "base_low_after_filters"}
+                    elif trend_reentry_allowed and i >= trend_cooldown_until and reentry_signal[i]:
+                        pending = {"side": "BUY", "reason": "trend_reentry"}
             else:
                 # The SMA200 risk exit has priority over high-point processing.
                 if risk[i] and not risk_exit_fired:
@@ -251,6 +273,8 @@ def simulate(
         "exposure_ratio": exposure_days / len(c),
         "risk_exit_count": risk_exit_count,
         "high_confirm_exit_count": high_exit_count,
+        "trend_reentry_count": trend_reentry_count,
+        "trend_reentry_cooldown_sessions": reentry_cooldown,
         "total_commission": total_commission,
         "total_sell_tax": total_tax,
         "estimated_slippage_cost": total_slippage,
