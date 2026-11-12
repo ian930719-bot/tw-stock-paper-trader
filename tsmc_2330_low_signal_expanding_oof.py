@@ -133,3 +133,5 @@ def main():
 if __name__=="__main__":main()
 
 # Frozen annual OOF model specification; no full-period tuning.
+
+# Includes full-signal and deduplicated control arms for fair attribution.
