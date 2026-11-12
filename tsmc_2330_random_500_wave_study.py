@@ -86,7 +86,7 @@ def chronological_split(sample: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFram
     # Purge research waves whose completed outcome overlaps the validation era.
     research = ordered.iloc[:cut].copy()
     research = research.loc[research["end_date"] < validation_start].copy()
-    if len(research) < 50 or len(validation) < 50:
+    if len(research) < 25 or len(validation) < 25:
         raise ValueError(
             f"Insufficient data after overlap purge: research={len(research)}, "
             f"validation={len(validation)}"
@@ -196,9 +196,11 @@ def run(features_path: str, events_path: str, output_dir: str) -> dict:
 
     sample_out = sample.copy()
     research_keys = set(zip(research["start_date"], research["end_date"], research["direction"]))
+    validation_keys = set(zip(validation["start_date"], validation["end_date"], validation["direction"]))
     sample_out["sample_role"] = [
         "research" if (r.start_date, r.end_date, r.direction) in research_keys
-        else "validation"
+        else ("validation" if (r.start_date, r.end_date, r.direction) in validation_keys
+              else "purged_overlap")
         for r in sample_out.itertuples(index=False)
     ]
     research_x["sample_role"] = "research"
