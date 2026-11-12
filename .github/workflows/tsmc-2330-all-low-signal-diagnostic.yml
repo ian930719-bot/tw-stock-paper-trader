@@ -1,0 +1,48 @@
+name: TSMC 2330 All Low Signal Event Diagnostic
+on:
+  push:
+    branches: [research/tsmc-2330-50cagr-trend-reentry]
+    paths:
+      - "tsmc_2330_all_low_signal_diagnostic.py"
+      - "tests/test_tsmc_2330_all_low_signal_diagnostic.py"
+      - ".github/workflows/tsmc-2330-all-low-signal-diagnostic.yml"
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: read
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      TZ: Asia/Taipei
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip pandas numpy requests scikit-learn
+      - uses: actions/download-artifact@v4
+        with:
+          name: tsmc-2330-swing-research
+          run-id: 43144543572
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          path: source
+      - name: Compile and test
+        run: |
+          python -m py_compile tsmc_2330_4019_replication.py tsmc_2330_all_low_signal_diagnostic.py
+          python -m unittest tests/test_tsmc_2330_all_low_signal_diagnostic.py -v
+      - name: Run all low-signal event diagnostic
+        run: |
+          python tsmc_2330_all_low_signal_diagnostic.py \
+            --features source/artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --limits source/data/tsmc_2330/corporate_actions/price_limits_2330.csv \
+            --dividends source/data/tsmc_2330/corporate_actions/TaiwanStockDividendResult_2330.csv \
+            --output artifacts/tsmc_2330_all_low_signal_diagnostic
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tsmc-2330-all-low-signal-diagnostic-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 30
+          path: artifacts/tsmc_2330_all_low_signal_diagnostic/
