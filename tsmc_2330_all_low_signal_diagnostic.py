@@ -49,3 +49,5 @@ def main():
  p=argparse.ArgumentParser();p.add_argument("--features",required=True);p.add_argument("--limits",required=True);p.add_argument("--dividends",required=True);p.add_argument("--output",default="artifacts/tsmc_2330_all_low_signal_diagnostic");a=p.parse_args()
  print(json.dumps(run(a.features,a.limits,a.dividends,a.output),indent=2,ensure_ascii=False))
 if __name__=="__main__":main()
+
+# Frozen entry-event diagnostic; no rule optimization.
