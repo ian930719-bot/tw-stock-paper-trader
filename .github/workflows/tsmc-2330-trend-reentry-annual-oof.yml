@@ -1,0 +1,60 @@
+name: TSMC 2330 50% CAGR Trend Re-entry Annual OOF (Isolated)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - research/tsmc-2330-50cagr-trend-reentry
+    paths:
+      - ".github/workflows/tsmc-2330-trend-reentry-annual-oof.yml"
+      - "tsmc_2330_trend_reentry_annual_oof.py"
+      - "tests/test_tsmc_2330_trend_reentry_annual_oof.py"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  annual-oof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      TZ: Asia/Taipei
+    steps:
+      - name: Checkout isolated research branch
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install research dependencies
+        run: python -m pip install --upgrade pip pandas numpy requests scikit-learn
+      - name: Restore immutable source data
+        uses: actions/download-artifact@v4
+        with:
+          name: tsmc-2330-swing-research
+          run-id: 43144543572
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          path: source
+      - name: Verify frozen source inputs and execute tests
+        run: |
+          test -s source/artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv
+          test -s source/data/tsmc_2330/corporate_actions/price_limits_2330.csv
+          test -s source/data/tsmc_2330/corporate_actions/TaiwanStockDividendResult_2330.csv
+          python -m py_compile tsmc_2330_trend_reentry_annual_oof.py
+          python -m unittest tests/test_tsmc_2330_trend_reentry_annual_oof.py -v
+      - name: Run annual expanding OOF and cost stress
+        run: |
+          python tsmc_2330_trend_reentry_annual_oof.py \
+            --features source/artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --limits source/data/tsmc_2330/corporate_actions/price_limits_2330.csv \
+            --dividends source/data/tsmc_2330/corporate_actions/TaiwanStockDividendResult_2330.csv \
+            --output artifacts/tsmc_2330_50cagr_trend_reentry_oof
+      - name: Upload isolated full OOF results
+        uses: actions/upload-artifact@v4
+        with:
+          name: tsmc-2330-trend-reentry-annual-oof-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 30
+          path: artifacts/tsmc_2330_50cagr_trend_reentry_oof/
