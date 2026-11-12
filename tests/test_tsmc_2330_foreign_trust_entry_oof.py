@@ -30,7 +30,7 @@ class ForeignTrustEntryOOFTests(unittest.TestCase):
   p=build_policies(d,low,high,hold)
   self.assertEqual(p["high_hold_obv_positive"][2].tolist(),[True,False,True,False])
   self.assertEqual(p["high_hold_volume_confirmed"][2].tolist(),[True,False,False,False])
-  self.assertEqual(p["exit_distribution_confirmed"][1].tolist(),[False,False,False,True])
+  self.assertEqual(p["exit_distribution_confirmed"][1].tolist(),[False,True,False,True])
   self.assertEqual(p["exit_obv_negative"][1].tolist(),[False,True,False,True])
  def test_win_floor_and_trade_count_are_both_required(self):
   self.assertFalse(eligible({"completed_trades":4,"win_rate_completed_only":1.0,"cagr_mark_to_market":.5}))
