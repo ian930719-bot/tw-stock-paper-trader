@@ -47,6 +47,8 @@ on:
       - "tests/test_tsmc_2330_probability_policy.py"
       - "tsmc_2330_execution_backtest.py"
       - "tsmc_2330_40pct_rule_search.py"
+      - "tsmc_2330_annual_rule_oof_backtest.py"
+      - "tests/test_tsmc_annual_rule_oof_backtest.py"
       - "tsmc_2330_atr_reentry_rule_search.py"
       - "tsmc_2330_trailing_reentry_search.py"
       - "tests/test_tsmc_2330_atr_reentry_rule_search.py"
@@ -95,6 +97,8 @@ jobs:
           python -m py_compile tsmc_2330_probability_strategy_backtest.py
           python -m py_compile tests/test_tsmc_probability_strategy_backtest.py
           python -m py_compile tsmc_2330_frozen_rule_research.py
+          python -m py_compile tsmc_2330_annual_rule_oof_backtest.py
+          python -m py_compile tests/test_tsmc_annual_rule_oof_backtest.py
           python -m py_compile tsmc_2330_walk_forward.py
           python -m py_compile tsmc_2330_oos_signal_diagnostics.py
           python -m py_compile tsmc_2330_chip_pivot_rules.py
@@ -324,6 +328,13 @@ jobs:
             --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
             --limits data/tsmc_2330/corporate_actions/price_limits_2330.csv \
             --dividends data/tsmc_2330/corporate_actions/TaiwanStockDividendResult_2330.csv \
+            --output artifacts/tsmc_2330_swing
+      - name: Run 2010-2026 annual expanding executable rule validation
+        run: |
+          python tsmc_2330_annual_rule_oof_backtest.py \\
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \\
+            --limits data/tsmc_2330/corporate_actions/price_limits_2330.csv \\
+            --dividends data/tsmc_2330/corporate_actions/TaiwanStockDividendResult_2330.csv \\
             --output artifacts/tsmc_2330_swing
       - name: Search ATR stop and causal re-entry variants with win-rate floor
         run: |
