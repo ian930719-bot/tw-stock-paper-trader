@@ -243,3 +243,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+# Research refresh trigger: 2026-11-12; data collection only, no strategy parameters changed.
