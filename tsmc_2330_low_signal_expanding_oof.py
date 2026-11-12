@@ -126,3 +126,5 @@ def main():
  x=run(a.features,a.limits,a.dividends,a.output)
  print(json.dumps({k:v for k,v in x.items() if k not in {"annual_folds"}},ensure_ascii=False,indent=2,default=float))
 if __name__=="__main__":main()
+
+# Frozen annual OOF model specification; no full-period tuning.
