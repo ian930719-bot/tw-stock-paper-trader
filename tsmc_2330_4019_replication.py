@@ -256,29 +256,28 @@ def simulate(
                     if low_entry_policy == "immediate":
                         if low[i]:
                             pending = {"side": "BUY", "reason": "base_low_after_filters"}
-                    elif low_entry_policy == "mfi40_reclaim_5":
+                    else:
                         if low[i] and low_alert_start is None:
-                            mfi_now = float(row.mfi14) if pd.notna(row.get("mfi14", np.nan)) else np.nan
-                            if not np.isfinite(mfi_now) or mfi_now >= 40:
-                                pending = {"side": "BUY", "reason": "base_low_mfi_not_oversold"}
+                            if low_entry_policy == "mfi40_reclaim_5":
+                                mfi_now = float(row.mfi14) if pd.notna(row.get("mfi14", np.nan)) else np.nan
+                                if not np.isfinite(mfi_now) or mfi_now >= 40:
+                                    pending = {"side": "BUY", "reason": "base_low_mfi_not_oversold"}
+                                else:
+                                    low_alert_start = i
+                                    low_alert_high = float(row.raw_high)
                             else:
                                 low_alert_start = i
                                 low_alert_high = float(row.raw_high)
-                        if low_alert_start is not None:
-                            age = i - low_alert_start
-                            confirmed = age > 0 and age <= 5 and mfi_reclaim[i]
-                    else:
-                        if low[i] and low_alert_start is None:
-                            low_alert_start = i
-                            low_alert_high = float(row.raw_high)
                         if low_alert_start is not None:
                             age = i - low_alert_start
                             if low_entry_policy == "bullish_day_3":
                                 confirmed = age > 0 and age <= 3 and bullish_day[i]
                             elif low_entry_policy == "two_higher_closes_5":
                                 confirmed = age > 0 and age <= 5 and two_higher_closes[i]
-                            else:
+                            elif low_entry_policy == "signal_high_breakout_5":
                                 confirmed = age > 0 and age <= 5 and close > float(low_alert_high)
+                            else:
+                                confirmed = age > 0 and age <= 5 and mfi_reclaim[i]
                             if confirmed:
                                 pending = {"side": "BUY", "reason": f"confirmed_{low_entry_policy}"}
                                 low_alert_start = None
