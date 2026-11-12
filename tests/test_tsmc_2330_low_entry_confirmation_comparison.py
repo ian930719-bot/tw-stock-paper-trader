@@ -40,4 +40,5 @@ class LowEntryConfirmationTests(unittest.TestCase):
   c=pd.DataFrame(r["equity_curve"])
   self.assertEqual(int(c.shares.iloc[2]),0)
   self.assertGreater(int(c.shares.iloc[3]),0)
-\nif __name__=="__main__":unittest.main()
+
+if __name__=="__main__":unittest.main()
