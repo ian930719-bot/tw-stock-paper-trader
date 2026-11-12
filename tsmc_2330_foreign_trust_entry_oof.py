@@ -48,6 +48,9 @@ def build_policies(d,base_low,base_high,hold):
  for name,gate in gates.items():
   policies[name]=(base_low&gate,zero)
   policies[name+"_high_hold"]=(base_low&gate,hold)
+  if name!="baseline":
+   # Separate test: flow gates only the high-exit suppression, not the entry.
+   policies["high_hold_"+name]=(base_low,hold&gate)
  return policies
 
 def run(features_path,limits_path,dividends_path,output_dir):
