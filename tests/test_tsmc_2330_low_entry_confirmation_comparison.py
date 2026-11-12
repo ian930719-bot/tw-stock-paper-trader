@@ -32,4 +32,12 @@ class LowEntryConfirmationTests(unittest.TestCase):
   r=self.run_sim(d,"bullish_day_3",[True,False,False,False,False,False,False])
   c=pd.DataFrame(r["equity_curve"])
   self.assertEqual(int(c.shares.sum()),0)
-if __name__=="__main__":unittest.main()
+
+ def test_mfi40_reclaim_waits_for_cross_and_buys_next_open(self):
+  d=self.frame([100,99,100,102,103,104],[105,100,99,100,102,103])
+  d["mfi14"]=[30.,35.,41.,42.,43.,44.]
+  r=self.run_sim(d,"mfi40_reclaim_5",[True,False,False,False,False,False])
+  c=pd.DataFrame(r["equity_curve"])
+  self.assertEqual(int(c.shares.iloc[2]),0)
+  self.assertGreater(int(c.shares.iloc[3]),0)
+\nif __name__=="__main__":unittest.main()
