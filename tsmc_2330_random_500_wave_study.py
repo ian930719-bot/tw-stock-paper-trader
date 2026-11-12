@@ -35,18 +35,6 @@ def make_wave_population(events: pd.DataFrame, features: pd.DataFrame) -> pd.Dat
     if legs.empty:
         raise ValueError("No completed alternating pivot-to-pivot waves found")
     # Resolve the start pivot index explicitly; never use the endpoint's future data.
-    pivot_map = events[[
-        "threshold_id", "pivot_index", "confirmation_index", "confirmation_date",
-        "confirmation_lag",
-    ]].rename(columns={
-        "pivot_index": "start_index",
-        "confirmation_index": "start_confirmation_index",
-        "confirmation_date": "start_confirmation_date",
-        "confirmation_lag": "start_confirmation_lag",
-    })
-    waves = legs.merge(
-        pivot_map, on=["threshold_id"], how="left", suffixes=("", "_event")
-    )
     # A threshold can have many pivots. Match the leg's exact start date to its pivot.
     events_dates = pd.to_datetime(events["pivot_date"]).dt.date.astype(str)
     event_lookup = events.assign(_pivot_date=events_dates).drop_duplicates(
