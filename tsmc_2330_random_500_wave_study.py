@@ -96,13 +96,14 @@ def chronological_split(sample: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFram
 
 def attach_causal_features(waves: pd.DataFrame, features: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     numeric = [
-        c for c in features.columns
-        if c not in EXCLUDED and pd.api.types.is_numeric_dtype(features[c])
-        and not c.startswith(("future_", "label_", "pivot_", "confirm_", "lead"))
+        col for col in features.columns
+        if col not in EXCLUDED and pd.api.types.is_numeric_dtype(features[col])
+        and not col.startswith(("future_", "label_", "pivot_", "confirm_", "lead"))
     ]
-    if not numeric:
-        raise ValueError("No causal numeric feature columns available")
+    if "close" not in features.columns:
+        raise ValueError("Feature file must contain adjusted close for forward target calculation")
     matrix = features[numeric].reset_index(drop=True)
+    adjusted_close = pd.to_numeric(features["close"], errors="coerce").reset_index(drop=True)
     action = features.get(
         "corporate_action_window", pd.Series(False, index=features.index)
     ).fillna(True).astype(bool).to_numpy()
@@ -111,32 +112,78 @@ def attach_causal_features(waves: pd.DataFrame, features: pd.DataFrame) -> tuple
         idx = int(wave["start_confirmation_index"])
         if idx < 0 or idx >= len(matrix) or action[idx]:
             continue
+        if pd.Timestamp(wave["start_confirmation_date"]) >= pd.Timestamp(wave["end_date"]):
+            continue
+        close_at_confirmation = adjusted_close.iloc[idx]
+        if pd.isna(close_at_confirmation) or close_at_confirmation <= 0:
+            continue
+        future_return = float(wave["end_price"] / close_at_confirmation - 1.0)
+        future_direction = "UP" if future_return > 0 else ("DOWN" if future_return < 0 else "FLAT")
         values = matrix.iloc[idx].to_dict()
         if not any(pd.notna(v) for v in values.values()):
             continue
-        rows.append({**wave, **{f"feature__{k}": v for k, v in values.items()}})
+        rows.append({
+            **wave,
+            "confirmation_close": float(close_at_confirmation),
+            "post_confirmation_return_pct": future_return,
+            "post_confirmation_direction": future_direction,
+            **{f"feature__{k}": v for k, v in values.items()},
+        })
     out = pd.DataFrame(rows)
-    feature_cols = [c for c in out.columns if c.startswith("feature__")]
+    feature_cols = [col for col in out.columns if col.startswith("feature__")]
     return out, feature_cols
-
 
 def descriptive_metrics(frame: pd.DataFrame) -> dict:
     if frame.empty:
         return {"n": 0}
-    return {
+    result = {
         "n": int(len(frame)),
-        "up_wave_share": float((frame["direction"] == "UP").mean()),
-        "median_amplitude_pct": float(frame["amplitude_pct"].median()),
+        "pivot_to_pivot_up_share": float((frame["direction"] == "UP").mean()),
+        "median_pivot_to_pivot_amplitude_pct": float(frame["amplitude_pct"].median()),
         "median_duration_sessions": float(frame["duration_sessions"].median()),
         "scale_counts": {
             str(k): int(v) for k, v in frame["scale"].value_counts().sort_index().items()
         },
-        "direction_scale": {
+        "pivot_direction_scale": {
             f"{direction}_{scale}": int(len(g))
             for (direction, scale), g in frame.groupby(["direction", "scale"])
         },
     }
+    if "post_confirmation_direction" in frame:
+        result["post_confirmation_direction_counts"] = {
+            str(k): int(v) for k, v in frame["post_confirmation_direction"].value_counts().sort_index().items()
+        }
+        result["median_post_confirmation_return_pct"] = float(frame["post_confirmation_return_pct"].median())
+        result["mean_post_confirmation_return_pct"] = float(frame["post_confirmation_return_pct"].mean())
+    return result
 
+
+def overlap_diagnostics(frame: pd.DataFrame) -> dict:
+    if frame.empty:
+        return {"n": 0, "overlap_clusters": 0, "largest_cluster": 0}
+    ordered = frame.assign(
+        _start=pd.to_datetime(frame["start_confirmation_date"]),
+        _end=pd.to_datetime(frame["end_date"]),
+    ).sort_values(["_start", "_end"])
+    clusters, current, current_end = [], [], None
+    for idx, row in ordered.iterrows():
+        if current and row["_start"] > current_end:
+            clusters.append(current)
+            current, current_end = [], None
+        current.append(idx)
+        current_end = row["_end"] if current_end is None else max(current_end, row["_end"])
+    if current:
+        clusters.append(current)
+    sizes = [len(x) for x in clusters]
+    return {
+        "n": int(len(frame)),
+        "unique_confirmation_dates": int(frame["start_confirmation_date"].nunique()),
+        "unique_endpoint_dates": int(frame["end_date"].nunique()),
+        "overlap_clusters": int(len(clusters)),
+        "largest_cluster": int(max(sizes)),
+        "rows_in_multiwave_clusters": int(sum(x for x in sizes if x > 1)),
+        "interpretation": "Overlapping waves are dependent observations; row-level metrics are not independent-trial estimates.",
+    }
 
 def run(features_path: str, events_path: str, output_dir: str) -> dict:
     features = pd.read_csv(features_path)
@@ -161,40 +208,49 @@ def run(features_path: str, events_path: str, output_dir: str) -> dict:
     if events["confirmation_index"].max() >= len(features):
         raise ValueError("Pivot event indices do not align with causal feature rows")
 
-    population = make_wave_population(events, features)
+    population_all = make_wave_population(events, features)
+    causal_mask = pd.to_datetime(population_all["start_confirmation_date"]) < pd.to_datetime(population_all["end_date"])
+    population = population_all.loc[causal_mask].copy().reset_index(drop=True)
+    excluded_noncausal = int(len(population_all) - len(population))
     sample = deterministic_sample(population)
     research, validation, validation_start = chronological_split(sample)
     research_x, feature_cols = attach_causal_features(research, features)
     validation_x, _ = attach_causal_features(validation, features)
     # Keep a common, predeclared feature set; no feature selection on validation.
-    feature_cols = [c for c in feature_cols if c in validation_x.columns]
-    research_x = research_x.dropna(subset=["direction"])
-    validation_x = validation_x.dropna(subset=["direction"])
-    if research_x["direction"].nunique() < 2 or validation_x.empty:
-        raise ValueError("Insufficient directional classes for independent validation")
+    feature_cols = [
+        c for c in feature_cols
+        if c in validation_x.columns and research_x[c].notna().any()
+    ]
+    research_x = research_x.dropna(subset=["post_confirmation_direction"])
+    validation_x = validation_x.dropna(subset=["post_confirmation_direction"])
+    if research_x["post_confirmation_direction"].nunique() < 2 or validation_x.empty:
+        raise ValueError("Insufficient forward directional classes for independent validation")
 
     model = make_pipeline(
         SimpleImputer(strategy="median", add_indicator=True),
         StandardScaler(),
         LogisticRegression(max_iter=2000, class_weight="balanced", random_state=SEED),
     )
-    model.fit(research_x[feature_cols], research_x["direction"])
+    model.fit(research_x[feature_cols], research_x["post_confirmation_direction"])
     predicted = model.predict(validation_x[feature_cols])
-    actual = validation_x["direction"].to_numpy()
+    actual = validation_x["post_confirmation_direction"].to_numpy()
     labels = sorted(set(actual) | set(predicted))
+    class_counts = pd.Series(actual).value_counts(normalize=True)
     validation_model = {
         "n": int(len(actual)),
         "accuracy": float(accuracy_score(actual, predicted)),
         "balanced_accuracy": float(balanced_accuracy_score(actual, predicted)),
+        "majority_class_baseline_accuracy": float(class_counts.max()),
         "labels": labels,
         "confusion_matrix": confusion_matrix(actual, predicted, labels=labels).tolist(),
         "model": "median-imputed standardized logistic regression, class_weight=balanced",
         "features": feature_cols,
         "feature_count": len(feature_cols),
-        "predictor_timing": "start-pivot confirmation close; no pivot endpoint or future-leg features",
+        "predictor_timing": "start-pivot confirmation close; target is strictly after the confirmation date",
+        "target": "sign(end_pivot_adjusted_price / adjusted_close_at_start_confirmation - 1)",
     }
 
-    sample_out = sample.copy()
+    sample_out, _ = attach_causal_features(sample, features)
     research_keys = set(zip(research["start_date"], research["end_date"], research["direction"]))
     validation_keys = set(zip(validation["start_date"], validation["end_date"], validation["direction"]))
     sample_out["sample_role"] = [
@@ -217,10 +273,12 @@ def run(features_path: str, events_path: str, output_dir: str) -> dict:
             str(pd.to_datetime(features["date"]).min().date()),
             str(pd.to_datetime(features["date"]).max().date()),
         ],
-        "population_unique_waves": int(len(population)),
-        "sample_size": int(len(sample)),
+        "population_unique_waves_before_causal_filter": int(len(population_all)),
+        "excluded_noncausal_waves": excluded_noncausal,
+        "causally_eligible_population": int(len(population)),
+        "sample_size": int(len(sample_out)),
         "random_seed": SEED,
-        "sampling": "uniform random sample without replacement from unique completed pivot-to-pivot legs, deduplicated across threshold definitions",
+        "sampling": "uniform random sample without replacement from waves whose start-pivot confirmation precedes the endpoint",
         "split": {
             "method": "chronological 70/30 after deterministic random sampling",
             "validation_start_confirmation_date": validation_start,
@@ -230,14 +288,16 @@ def run(features_path: str, events_path: str, output_dir: str) -> dict:
         },
         "research_descriptive": descriptive_metrics(research_x),
         "validation_descriptive": descriptive_metrics(validation_x),
+        "validation_overlap_diagnostics": overlap_diagnostics(validation_x),
         "validation_direction_model": validation_model,
         "limitations": [
             "Completed wave endpoints are retrospective labels, not tradable entry/exit signals.",
-            "Predictors are frozen at the start-pivot confirmation close; the pivot is not assumed known at its extreme date.",
-            "The 500-wave sample is a research subsample, not a complete-population performance estimate.",
-            "This study describes and predicts wave direction; it does not establish executable CAGR or win rate.",
+            "Waves whose start-pivot confirmation is on or after the endpoint are excluded before sampling.",
+            "Predictors are frozen at the start-pivot confirmation close; the target is strictly after that date.",
+            "Overlapping waves are dependent observations; validation row counts are not independent-trial counts.",
+            "This study predicts movement to a retrospective endpoint; it does not establish executable CAGR or win rate.",
         ],
-        "target_status": "NOT_APPLICABLE: this 500-wave diagnostic does not replace the executable strategy CAGR/win-rate validation.",
+        "target_status": "NOT_APPLICABLE: this forward-direction diagnostic does not replace executable strategy CAGR/win-rate validation.",
     }
     (out / "tsmc_2330_random_500_wave_study.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2, default=float), encoding="utf-8"
