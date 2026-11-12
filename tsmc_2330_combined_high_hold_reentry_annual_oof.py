@@ -89,3 +89,5 @@ def main():
  p=argparse.ArgumentParser();p.add_argument("--features",required=True);p.add_argument("--limits",required=True);p.add_argument("--dividends",required=True);p.add_argument("--output",default="artifacts/tsmc_2330_combined_high_hold_reentry_oof");a=p.parse_args()
  x=run(a.features,a.limits,a.dividends,a.output);print(json.dumps({k:v for k,v in x.items() if k!="annual_frozen_selections"},ensure_ascii=False,indent=2,default=float))
 if __name__=="__main__":main()
+
+# Frozen annual policy selection; no parameter grid.
