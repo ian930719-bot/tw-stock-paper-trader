@@ -127,7 +127,8 @@ def run(features_path, limits_path, dividends_path, outdir):
     result={"symbol":"2330","candidate_count":len(candidates),"selection_period":list(RESEARCH),
         "validation_period":list(VALIDATION),"historical_test_period":[TEST[0],test_end],
         "selection_rule":"maximize research-period CAGR subject to >=5 trades and win rate >=86.9565%; no validation/test selection",
-        "win_rate_floor":WIN_FLOOR,"selected_candidate":selected,"selected_cost_stress":stress,\n        "selected_trade_diagnostics":selected_trade_diagnostics,
+        "win_rate_floor":WIN_FLOOR,"selected_candidate":selected,"selected_cost_stress":stress,
+        "selected_trade_diagnostics":selected_trade_diagnostics,
         "all_candidates":rows,"selection_passed":selected is not None,
         "target_status":"NOT_ESTABLISHED; inspect validation/test metrics and cost stress",
         "execution":"close signal t; next-session open; long-only all-in/all-out; integer shares; price-limit locked orders; fees/tax/slippage; cash dividends",
@@ -143,7 +144,10 @@ def run(features_path, limits_path, dividends_path, outdir):
           "research_trades":r["research"].get("trade_count"),"research_eligible":r["research_eligible"],
           "validation_cagr":r["validation_10bps"].get("cagr"),"validation_win_rate":r["validation_10bps"].get("win_rate"),
           "test_cagr":r["test_10bps"].get("cagr"),"test_win_rate":r["test_10bps"].get("win_rate")})
-    pd.DataFrame(flat).to_csv(out/"tsmc_2330_40pct_rule_search.csv",index=False)\n    pd.DataFrame(selected_trade_rows).to_csv(out/"tsmc_2330_40pct_selected_trade_ledger.csv",index=False)\n    pd.DataFrame(selected_equity_rows).to_csv(out/"tsmc_2330_40pct_selected_equity.csv",index=False)\n    return result
+    pd.DataFrame(flat).to_csv(out/"tsmc_2330_40pct_rule_search.csv",index=False)
+    pd.DataFrame(selected_trade_rows).to_csv(out/"tsmc_2330_40pct_selected_trade_ledger.csv",index=False)
+    pd.DataFrame(selected_equity_rows).to_csv(out/"tsmc_2330_40pct_selected_equity.csv",index=False)
+    return result
 
 if __name__=="__main__":
     ap=argparse.ArgumentParser()
