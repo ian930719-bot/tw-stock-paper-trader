@@ -13,7 +13,7 @@ class TrendReentryDiagnosticTests(unittest.TestCase):
             "raw_high": [11, 11, 12, 13, 14],
             "raw_low": [9, 9, 10, 11, 12],
             "raw_close": [10, 10, 12, 13, 14],
-            "ema_20": [10, 10, 10, 11, 12],
+            "distance_ema_20": [-0.02, -0.01, 0.02, 0.03, 0.04],
             "rsi14": [45, 49, 51, 53, 54],
             "macd_hist_pct": [-1, -0.5, 0.1, 0.2, 0.3],
             "relative_volume20": [1, 1, 1, 1, 1],
