@@ -385,7 +385,8 @@ def main():
    "cagr_50pct_pass":bool(shared_portfolio.get("cagr_mark_to_market") is not None and shared_portfolio["cagr_mark_to_market"]>=.50),
    "win_rate_86_9565pct_pass":bool(shared_portfolio.get("win_rate_completed_only") is not None and shared_portfolio["win_rate_completed_only"]>=.8695652173913043),
    "max_drawdown_25pct_pass":bool(shared_portfolio.get("max_drawdown") is not None and shared_portfolio["max_drawdown"]>=-.25),
-   "universe_coverage_99pct_pass":bool(shared_portfolio.get("complete_universe_day_ratio",0)>=.99)}
+   "universe_coverage_99pct_pass":bool(shared_portfolio.get("complete_universe_day_ratio",0)>=.99),
+   "tsmc_baseline_reproduction_pass":bool(tsmc_reproduction and tsmc_reproduction.get("matches_benchmark_within_tolerance"))}
   target_assessment["all_targets_and_coverage_pass"]=all(target_assessment.values())
  data_provenance={}
  if universe_path.exists():
