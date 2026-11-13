@@ -146,10 +146,10 @@ def run_shared_capital_portfolio(prepared, universe, slippage_bps=10, initial_ca
  index_maps={}
  for sym,x in prepared.items():
   index_maps[sym]={pd.Timestamp(dt).strftime("%Y-%m-%d"):i for i,dt in enumerate(x["d"].date)}
- total_top10_rows=sum(len(v) for v in top10_by_date.values())
- eligible_top10_rows=sum(1 for v in top10_by_date.values() for sym,_ in v if sym in prepared)
- complete_days=sum(1 for v in top10_by_date.values() if all(sym in prepared for sym,_ in v))
- coverage=complete_days/len(top10_by_date) if top10_by_date else 0.0
+ total_top10_rows=sum(len(top10_by_date[d]) for d in dates)
+ eligible_top10_rows=sum(1 for d in dates for sym,_ in top10_by_date[d] if sym in prepared)
+ complete_days=sum(1 for d in dates if all(sym in prepared for sym,_ in top10_by_date[d]))
+ coverage=complete_days/len(dates) if dates else 0.0
 
  cash=float(initial_capital);position=None;shares=0;entry_date=None;entry_reason=None
  entry_cost=0.0;trade_dividend=0.0;pending=None;high_wait_start=None
