@@ -90,9 +90,9 @@ def build_limits(bars,ref_prices,event_limits,symbol):
   elif prev_close is not None:
    ref=prev_close;band=.07 if day<"2015-06-01" else .10
    up=limit_price(ref,band,"UP");down=limit_price(ref,band,"DOWN");src="TWSE official band/tick rules from prior traded close"
-  elif not seen:
+  elif not seen or day<"2015-01-01":
    seen=True
-   if float(r.volume)>0:prev_close=float(r.close)
+   prev_close=float(r.close)
    continue
   else:
    if day>="2015-01-01":missing.append(day)
