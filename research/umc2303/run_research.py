@@ -103,16 +103,17 @@ def build_signals(rows):
     for threshold in (1.0,1.2,1.5,2.0):
         active=False; state=[]
         for i in range(len(rows)):
-            if i>=20 and ma5[i] is not None and ma5[i-1] is not None and vol20[i] and vol20[i]>0:
-                entry=(c[i]>ma5[i] and c[i-1]<=ma5[i-1] and vol[i]>=vol20[i]*threshold)
+            if i>=20 and ma5[i] is not None and ma5[i-1] is not None and vol20[i-1] and vol20[i-1]>0:
+                # Compare today's volume with the PRIOR 20 completed sessions.
+                entry=(c[i]>ma5[i] and c[i-1]<=ma5[i-1] and vol[i]>=vol20[i-1]*threshold)
                 if entry: active=True
                 elif c[i]<ma5[i]: active=False
             state.append(active)
         sigs[f"ma5_cross_volume_{threshold:.1f}x"]=state
     active=False; state=[]
     for i in range(len(rows)):
-        if i>=20 and ma5[i] is not None and ma5[i-1] is not None and vol20[i] and vol20[i]>0:
-            if c[i]>ma5[i] and ma5[i]>ma5[i-1] and vol[i]>=vol20[i]*1.5:
+        if i>=20 and ma5[i] is not None and ma5[i-1] is not None and vol20[i-1] and vol20[i-1]>0:
+            if c[i]>ma5[i] and ma5[i]>ma5[i-1] and vol[i]>=vol20[i-1]*1.5:
                 active=True
             elif c[i]<ma5[i]:
                 active=False
@@ -129,7 +130,9 @@ def run_backtest(rows, signal, start_idx, end_idx, stop_atr=None):
         if qty and not prior_signal:
             px=r["open"]*(1-SLIPPAGE); gross=qty*px
             cash+=gross-gross*(FEE_RATE+SELL_TAX)
-            trades[-1].update({"exit_date":r["date"],"exit_price":px,"return_pct":(px/entry-1)*100})
+            net_pnl=(gross-gross*(FEE_RATE+SELL_TAX))-trades[-1]["total_cost"]
+            trades[-1].update({"exit_date":r["date"],"exit_price":px,"net_pnl":net_pnl,
+                               "net_return_pct":net_pnl/trades[-1]["total_cost"]*100})
             qty=0; entry=0.0; stop=None; highwater=0.0
         if qty==0 and prior_signal:
             px=r["open"]*(1+SLIPPAGE)
@@ -139,12 +142,14 @@ def run_backtest(rows, signal, start_idx, end_idx, stop_atr=None):
                 cash-=gross+fee; qty=buy_qty; entry=px; highwater=px
                 prev_atr=atr_values[i-1] if i>0 and atr_values is not None else None
                 stop=px-stop_atr*prev_atr if stop_atr is not None and prev_atr else None
-                trades.append({"entry_date":r["date"],"entry_price":px,"qty":qty})
+                trades.append({"entry_date":r["date"],"entry_price":px,"qty":qty,"total_cost":gross+fee})
         # Stop known before today's session; gap-through fills at open, otherwise at stop.
         if stop_atr is not None and qty and stop is not None and r["low"]<=stop:
             fill=min(r["open"],stop)*(1-SLIPPAGE)
             gross=qty*fill; cash+=gross-gross*(FEE_RATE+SELL_TAX)
-            trades[-1].update({"exit_date":r["date"],"exit_price":fill,"return_pct":(fill/entry-1)*100,"stop_exit":True})
+            net_pnl=(gross-gross*(FEE_RATE+SELL_TAX))-trades[-1]["total_cost"]
+            trades[-1].update({"exit_date":r["date"],"exit_price":fill,"net_pnl":net_pnl,
+                               "net_return_pct":net_pnl/trades[-1]["total_cost"]*100,"stop_exit":True})
             qty=0; entry=0.0; stop=None; highwater=0.0
         elif stop_atr is not None and qty:
             highwater=max(highwater,r["high"])
@@ -155,26 +160,43 @@ def run_backtest(rows, signal, start_idx, end_idx, stop_atr=None):
     if qty:
         r=rows[end_idx-1]; fill=r["close"]*(1-SLIPPAGE); gross=qty*fill
         cash+=gross-gross*(FEE_RATE+SELL_TAX)
-        trades[-1].update({"exit_date":r["date"],"exit_price":fill,"return_pct":(fill/entry-1)*100,"forced_end":True})
+        net_pnl=(gross-gross*(FEE_RATE+SELL_TAX))-trades[-1]["total_cost"]
+        trades[-1].update({"exit_date":r["date"],"exit_price":fill,"net_pnl":net_pnl,
+                           "net_return_pct":net_pnl/trades[-1]["total_cost"]*100,"forced_end":True})
         if equity: equity[-1]=(equity[-1][0],cash)
     return equity,trades,cash
 
 def metrics(equity,trades):
     vals=[x[1] for x in equity]
     if not vals: return {}
-    peak=vals[0]; mdd=0.0
+    peak=INITIAL_CASH; mdd=0.0
     for v in vals:
         peak=max(peak,v); mdd=min(mdd,v/peak-1)
-    years=max(len(vals)/252,1/252)
+    first_date=datetime.strptime(equity[0][0],"%Y-%m-%d").date()
+    last_date=datetime.strptime(equity[-1][0],"%Y-%m-%d").date()
+    years=max((last_date-first_date).days/365.25,1/365.25)
     total=vals[-1]/INITIAL_CASH-1
     cagr=(vals[-1]/INITIAL_CASH)**(1/years)-1 if vals[-1]>0 else -1
     daily=[vals[i]/vals[i-1]-1 for i in range(1,len(vals)) if vals[i-1]>0]
     mu=sum(daily)/len(daily) if daily else 0
     sd=(sum((x-mu)**2 for x in daily)/max(len(daily)-1,1))**0.5 if daily else 0
-    wins=[t for t in trades if t.get("return_pct",0)>0]
+    wins=[t for t in trades if t.get("net_pnl",0)>0]
+    losses=[t for t in trades if t.get("net_pnl",0)<0]
+    gross_profit=sum(t["net_pnl"] for t in wins)
+    gross_loss=-sum(t["net_pnl"] for t in losses)
+    holds=[]
+    for t in trades:
+        if t.get("exit_date"):
+            d0=datetime.strptime(t["entry_date"],"%Y-%m-%d").date()
+            d1=datetime.strptime(t["exit_date"],"%Y-%m-%d").date()
+            holds.append((d1-d0).days)
     return {"total_return_pct":round(total*100,2),"cagr_pct":round(cagr*100,2),
             "max_drawdown_pct":round(mdd*100,2),"sharpe":round((mu/sd*math.sqrt(252)) if sd else 0,3),
             "trades":len(trades),"win_rate_pct":round(100*len(wins)/len(trades),2) if trades else 0,
+            "profit_factor":round(gross_profit/gross_loss,3) if gross_loss else None,
+            "avg_win_pct":round(sum(t["net_return_pct"] for t in wins)/len(wins),2) if wins else 0,
+            "avg_loss_pct":round(sum(t["net_return_pct"] for t in losses)/len(losses),2) if losses else 0,
+            "avg_holding_days":round(sum(holds)/len(holds),2) if holds else 0,
             "ending_equity":round(vals[-1],2)}
 
 def main():
@@ -198,8 +220,8 @@ def main():
             "rows":len(rows),"test_start":rows[first]["date"],"initial_cash":INITIAL_CASH,"fee_rate_each_side":FEE_RATE,
             "sell_tax":SELL_TAX,"slippage_each_side":SLIPPAGE,
             "corporate_action_adjustment":"NOT IMPLEMENTED; raw prices only; dividend/split distortions can affect indicators and returns",
-            "method":"pure MA5 + volume rules only; entry confirmed at close and executed next open; exit after close below MA5 and execute next open; volume thresholds compare with 20-session average; one continuous account from 2013; whole-share sizing; estimated fee, sell tax and slippage. No ATR stop in core results.",
-            "limitations":["No official corporate-action adjustment / dividends; do not interpret as total-return performance","No queue, partial fills, limit-up/down or market-impact model","Parameter candidates are fixed, not optimized on this test interval","Daily-bar approximation; close-confirmed exits execute at next session open"],
+            "method":"pure MA5 + volume rules only; entry confirmed at close and executed next open; exit after close below MA5 and execute next open; today's volume is compared with the prior 20 completed sessions' average; one continuous account from 2013; whole-share sizing; estimated fee, sell tax and slippage. Trade win rate and profit factor use net P&L after entry/exit costs. No ATR stop in core results.",
+            "limitations":["No official corporate-action adjustment / dividends; do not interpret as total-return performance","No queue, partial fills, limit-up/down or market-impact model","Parameter candidates are fixed, not optimized on this test interval","Daily-bar approximation; close-confirmed exits execute at next session open","Raw prices are not corporate-action adjusted; long-run CAGR and signals remain provisional until adjusted data is integrated"],
             "results":results}
     (OUT/"umc2303_research_report.json").write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding="utf-8")
     with (OUT/"umc2303_strategy_summary.csv").open("w",newline="",encoding="utf-8-sig") as f:
