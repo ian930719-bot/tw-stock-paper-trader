@@ -1,0 +1,2 @@
+symbol,first_no_limit_date,last_no_limit_date,source,source_note
+4147,2015-11-23,2015-11-27,TPEx official historical dailyQuotes and first trading session,Official TPEx dailyQuotes for source dates 2015-11-23 through 2015-11-26 publish next-day sentinel limits 9995/0.01; 2015-11-27 publishes normal next-day limits 221.5/181.5. First trading session 2015-11-23 is confirmed by the official 4147 daily quote row. No formula-derived limits.
