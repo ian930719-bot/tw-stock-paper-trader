@@ -49,8 +49,8 @@ def load_data():
     if cache.exists():
         with cache.open(encoding="utf-8") as f:
             rows = list(csv.DictReader(f))
-        if rows and rows[-1]["date"] >= f"{END_YEAR}-01-01":
-            return [{k: (v if k == "date" else float(v)) for k,v in r.items()} for r in rows]
+        # Always refresh official monthly data on each workflow run.
+        # The previous year-only cache check could leave 2026 data stale for months.
     all_rows = {}
     errors = []
     for y in range(START_YEAR, END_YEAR + 1):
