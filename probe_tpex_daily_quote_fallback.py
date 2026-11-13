@@ -32,7 +32,7 @@ def extract(payload,code):
         if isinstance(row,dict):
             codev=str(row.get("代號",row.get("Code",row.get("stock_id","")))).strip()
             if codev==code:out.append(row)
-        elif isinstance(row,(list,tuple)) and len(row)>=19 and str(row[0]).strip()==code:
+        elif isinstance(row,(list,tuple)) and len(row)>=17 and str(row[0]).strip()==code:
             out.append(row)
     return out
 
@@ -70,7 +70,14 @@ def main():
               ref=getv("次日 參考價","次日參考價","next_day_reference_price")
               up=getv("次日 漲停價","次日漲停價","next_day_limit_up")
               down=getv("次日 跌停價","次日跌停價","next_day_limit_down")
-            else:ref,up,down=row[16],row[17],row[18]
+            else:
+              norm=[str(v).replace(" ","").strip() for v in fields]
+              if all(k in norm for k in ["次日參考價","次日漲停價","次日跌停價"]):
+                ref,up,down=[row[norm.index(k)] for k in ["次日參考價","次日漲停價","次日跌停價"]]
+              elif len(row)>=19:
+                ref,up,down=row[16],row[17],row[18]
+              else:
+                ref,up,down=row[14],row[15],row[16]
             def num(v):
               return float(str(v).replace(",","").strip()) if v not in (None,"","--","-") else None
             ref,up,down=map(num,(ref,up,down))
