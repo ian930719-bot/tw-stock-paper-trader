@@ -1,0 +1,42 @@
+name: Point-in-Time Top 10 Turnover Universe
+
+on:
+  push:
+    branches: [research/top10-official-ohlcv-baseline-audit]
+    paths:
+      - collect_twse_historical_daily_top10.py
+      - .github/workflows/top10-point-in-time-universe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+concurrency:
+  group: top10-point-in-time-universe
+  cancel-in-progress: false
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/top10-official-ohlcv-baseline-audit
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pandas numpy requests
+      - name: Collect official raw prices for ten seed symbols
+        run: |
+          python top10_official_raw_collector.py --output data/top10_official_raw --start-date 2010-01-04 --end-date 2026-11-12 --pause-seconds 0.2
+      - name: Build daily top ten from the full TWSE turnover universe
+        run: |
+          python -m py_compile collect_twse_historical_daily_top10.py
+          python collect_twse_historical_daily_top10.py --raw-bars data/top10_official_raw/bars --output data/twse_marketwide_turnover --pause 0.2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: twse-point-in-time-daily-top10
+          path: |
+            data/top10_official_raw/manifest.json
+            data/twse_marketwide_turnover/
+          if-no-files-found: error
+          retention-days: 30
