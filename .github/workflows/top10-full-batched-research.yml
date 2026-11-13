@@ -54,11 +54,42 @@ jobs:
       - name: Download official TWT49U and special-event checkpoint
         uses: actions/download-artifact@v4
         with:
-          name: top10-fixed-basket-corporate-actions
+          name: top10-official-corporate-actions-with-terms
           repository: ian930719-bot/tw-stock-paper-trader
-          run-id: 43376383063
+          run-id: 43394241266
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: data/top10_actions_twt49u
+      - name: Download TPEx official next-day price-limit checkpoint
+        uses: actions/download-artifact@v4
+        with:
+          name: tpex-official-next-day-limits
+          repository: ian930719-bot/tw-stock-paper-trader
+          run-id: 43393298034
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: data/tpex_next_day_limits
+      - name: Download TWSE official TWT84U daily price-limit checkpoint
+        uses: actions/download-artifact@v4
+        with:
+          name: twse-official-daily-price-limits
+          repository: ian930719-bot/tw-stock-paper-trader
+          run-id: 43394940710
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: data/twse_official_limits
+      - name: Download official MOPS dividend component reconciliation
+        uses: actions/download-artifact@v4
+        with:
+          name: mops-official-dividend-component-overrides
+          repository: ian930719-bot/tw-stock-paper-trader
+          run-id: 43397039579
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: data/mops_dividend_refresh
+      - name: Install MOPS official dividend components and raw source tables
+        run: |
+          set -euo pipefail
+          test -s data/mops_dividend_refresh/official_dividend_component_overrides.csv
+          cp data/mops_dividend_refresh/official_dividend_component_overrides.csv data/official_dividend_component_overrides.csv
+          rm -rf data/mops_dividend_reconciliation
+          cp -a data/mops_dividend_refresh/mops_dividend_reconciliation data/mops_dividend_reconciliation
       - name: Download all yearly universe checkpoints
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -130,6 +161,54 @@ jobs:
           (root/"manifest.json").write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding="utf-8")
           print(json.dumps(manifest,ensure_ascii=False,indent=2))
           PY
+      - name: Merge official TWSE and TPEx daily price limits into every symbol history
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import pandas as pd
+          bars=Path("data/twse_marketwide_turnover/symbol_bars")
+          tpex=pd.read_csv("data/tpex_next_day_limits/tpex_next_day_limits.csv",dtype={"stock_id":str})
+          twse=pd.read_csv("data/twse_official_limits/twse_twt84u_limits.csv",dtype={"stock_id":str})
+          for frame,label in ((tpex,"TPEx"),(twse,"TWSE")):
+              if frame.duplicated(["date","stock_id"]).any():
+                  raise RuntimeError(f"Duplicate {label} official price-limit date/symbol rows")
+          summary={"tpex_limit_rows":len(tpex),"tpex_missing_rows":int(tpex.next_day_limit_up.isna().sum()+tpex.next_day_limit_down.isna().sum()),
+                   "twse_limit_rows":len(twse),"twse_missing_rows":int(twse.official_limit_up.isna().sum()+twse.official_reference_price.isna().sum()+twse.official_limit_down.isna().sum()),
+                   "tpex_symbols":int(tpex.stock_id.nunique()),"twse_symbols":int(twse.stock_id.nunique())}
+          for path in sorted(bars.glob("TPEX_*.csv")):
+              d=pd.read_csv(path,dtype={"stock_id":str})
+              before=len(d);sid=path.stem.split("_",1)[1]
+              lim=tpex[tpex.stock_id.astype(str)==sid][["date","stock_id","next_day_limit_up","next_day_limit_down"]]
+              d=d.merge(lim,on=["date","stock_id"],how="left",validate="one_to_one")
+              if len(d)!=before:raise RuntimeError(f"TPEx merge changed row count for {sid}")
+              d.to_csv(path,index=False)
+          for path in sorted(bars.glob("TWSE_*.csv")):
+              d=pd.read_csv(path,dtype={"stock_id":str})
+              before=len(d);sid=path.stem.split("_",1)[1]
+              lim=twse[twse.stock_id.astype(str)==sid][["date","stock_id","official_limit_up","official_reference_price","official_limit_down","last_trading_day"]]
+              d=d.merge(lim,on=["date","stock_id"],how="left",validate="one_to_one")
+              if len(d)!=before:raise RuntimeError(f"TWSE merge changed row count for {sid}")
+              d.to_csv(path,index=False)
+          # Regression anchors: the 1727 missing-OHLC day still has official limits,
+          # and TPEx publishes next-session limits on the source date.
+          t=pd.read_csv(bars/"TWSE_1727.csv",dtype={"stock_id":str})
+          x=t[t.date.astype(str)=="2016-05-04"]
+          assert len(x)==1
+          x=x.iloc[0]
+          assert abs(float(x.official_limit_up)-15.15)<1e-8
+          assert abs(float(x.official_reference_price)-13.80)<1e-8
+          assert abs(float(x.official_limit_down)-12.45)<1e-8
+          p=pd.read_csv(bars/"TPEX_5314.csv",dtype={"stock_id":str})
+          q=p[p.date.astype(str)=="2018-10-24"]
+          assert len(q)==1
+          q=q.iloc[0]
+          assert abs(float(q.next_day_limit_up)-5.23)<1e-8
+          assert abs(float(q.next_day_limit_down)-4.29)<1e-8
+          Path("data/twse_marketwide_turnover/official_limit_merge_manifest.json").write_text(json.dumps(summary,ensure_ascii=False,indent=2),encoding="utf-8")
+          print(json.dumps(summary,ensure_ascii=False,indent=2))
+          PY
       - name: Run full point-in-time universe transfer audit and shared-capital simulation
         run: |
           set -euo pipefail
@@ -150,9 +229,25 @@ jobs:
           PY
       - name: Analyze pooled causal false-signal features with chronological holdout
         run: |
-          python analyze_top10_false_signals.py \
-            --trades artifacts/top10_full_official_audit/trade_feature_diagnostics_10bps.csv \
-            --output artifacts/top10_full_official_audit/false_signal_analysis
+          python - <<'PY'
+          import json,subprocess,sys
+          from pathlib import Path
+          import pandas as pd
+          trades=Path("artifacts/top10_full_official_audit/trade_feature_diagnostics_10bps.csv")
+          out=Path("artifacts/top10_full_official_audit/false_signal_analysis")
+          d=pd.read_csv(trades)
+          if d.empty:
+              out.mkdir(parents=True,exist_ok=True)
+              summary={"status":"INSUFFICIENT_EXECUTED_TRADES","total_trades":0,
+                       "train_period":"2015-01-01 through 2021-12-31",
+                       "test_period":"2022-01-01 through final official raw bar",
+                       "filter_approval":"NONE"}
+              (out/"summary.json").write_text(json.dumps(summary,ensure_ascii=False,indent=2),encoding="utf-8")
+              (out/"methodology.txt").write_text("No executed trade rows were available. False-signal filters were not evaluated or approved.\n",encoding="utf-8")
+              print(json.dumps(summary,ensure_ascii=False,indent=2))
+          else:
+              subprocess.run([sys.executable,"analyze_top10_false_signals.py","--trades",str(trades),"--output",str(out)],check=True)
+          PY
       - name: Upload complete point-in-time top-ten research results
         uses: actions/upload-artifact@v4
         with:
@@ -160,6 +255,12 @@ jobs:
           path: |
             data/twse_marketwide_turnover/manifest.json
             data/twse_marketwide_turnover/historical_daily_top10_by_volume.csv
+            data/twse_marketwide_turnover/official_limit_merge_manifest.json
+            data/top10_actions_twt49u/
+            data/tpex_next_day_limits/
+            data/twse_official_limits/
+            data/official_dividend_component_overrides.csv
+            data/mops_dividend_reconciliation/
             artifacts/top10_full_official_audit/
           if-no-files-found: error
           retention-days: 30
