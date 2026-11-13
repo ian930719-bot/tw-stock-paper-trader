@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import requests
 
-URL="https://www.twse.com.tw/rwd/zh/exchangeReport/TWT49U"
+URL="https://www.twse.com.tw/exchangeReport/TWT49U"
 SYMBOLS={"2330":"台積電","2454":"聯發科","1303":"南亞","2327":"國巨","2408":"南亞科","2308":"台達電","3037":"欣興","3008":"大立光","2383":"台光電","2303":"聯電"}
 
 def rocdate(v):
