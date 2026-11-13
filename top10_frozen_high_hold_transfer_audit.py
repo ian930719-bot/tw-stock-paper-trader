@@ -134,9 +134,11 @@ def main():
   uni=pd.read_csv(universe_path,dtype={"symbol":str})
   symbols=sorted(uni.symbol.astype(str).str.strip().unique())
   name_map=uni.drop_duplicates("symbol").set_index("symbol").name.astype(str).to_dict()
+  active_dates_by_symbol={s:set(g.date.astype(str)) for s,g in uni.groupby("symbol")}
  else:
   symbols=sorted(p.stem for p in Path(a.raw_bars).glob("*.csv")) or DEFAULT_SYMBOLS
   name_map={}
+  active_dates_by_symbol={}
  for symbol in symbols:
   try:
    raw=pd.read_csv(Path(a.raw_bars)/f"{symbol}.csv",parse_dates=["date"])
@@ -146,6 +148,9 @@ def main():
    limits=build_limits(raw,ref,event_limits,symbol)
    d=make_features(raw,ev)
    low,high,risk=build_candidate_signals(d)
+   active_dates=active_dates_by_symbol.get(symbol,set())
+   active_mask=d.date.dt.strftime("%Y-%m-%d").isin(active_dates).to_numpy(bool)
+   low &= active_mask
    hold=hold_gate(d)
    start_idx=np.flatnonzero((d.date.dt.year>=2015).to_numpy())
    if not len(start_idx):raise RuntimeError("no 2015+ data")
@@ -153,7 +158,7 @@ def main():
    for slip in SLIPPAGE_BPS:
     sim=simulate(d,low,high,risk,limits,cashdiv,slip,start,end,high_hold_signal=hold)
     m={k:v for k,v in sim.items() if k not in {"trades","equity_curve"}}
-    rows.append({"symbol":symbol,"name":name_map.get(symbol,NAMES.get(symbol,str(raw.name.iloc[0]) if "name" in raw else symbol)),"variant":"frozen_high_hold","slippage_bps":slip,**m})
+    rows.append({"symbol":symbol,"name":name_map.get(symbol,NAMES.get(symbol,str(raw.name.iloc[0]) if "name" in raw else symbol)),"variant":"frozen_high_hold_dynamic_top10_entry_filter","slippage_bps":slip,"top10_active_days":int(active_mask.sum()),"low_signal_days_after_universe_filter":int(low.sum()),**m})
     if slip==10:
      pd.DataFrame(sim["trades"]).to_csv(out/f"trades_{symbol}_10bps.csv",index=False)
      pd.DataFrame(sim["equity_curve"]).to_csv(out/f"equity_{symbol}_10bps.csv",index=False)
