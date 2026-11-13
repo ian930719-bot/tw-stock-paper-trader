@@ -65,12 +65,26 @@ def main():
  s=requests.Session();allrows=[];schemas={}
  for dataset,kind in [("TWTAUU","capital_reduction"),("TWTB8U","par_value_change")]:
   rows=[];schema=[]
-  for y in range(pd.Timestamp(a.start_date).year,pd.Timestamp(a.end_date).year+1):
-   lo=max(pd.Timestamp(a.start_date),pd.Timestamp(y,1,1)).strftime("%Y-%m-%d")
-   hi=min(pd.Timestamp(a.end_date),pd.Timestamp(y,12,31)).strftime("%Y-%m-%d")
-   j=get(s,dataset,y,lo,hi);h=[str(x).strip() for x in j["fields"]];schema.append({"year":y,"fields":h,"rows":len(j["data"])})
+  periods=[(a.start_date,a.end_date)]
+  try:
+   payload=get(s,dataset,"full_range",a.start_date,a.end_date)
+   batches=[(payload,a.start_date,a.end_date)]
+  except Exception as full_error:
+   print(f"[FULL RANGE FALLBACK] {dataset}: {full_error}",flush=True)
+   batches=[]
+   for y in range(pd.Timestamp(a.start_date).year,pd.Timestamp(a.end_date).year+1):
+    lo=max(pd.Timestamp(a.start_date),pd.Timestamp(y,1,1)).strftime("%Y-%m-%d")
+    hi=min(pd.Timestamp(a.end_date),pd.Timestamp(y,12,31)).strftime("%Y-%m-%d")
+    try:batches.append((get(s,dataset,y,lo,hi),lo,hi))
+    except Exception as year_error:
+     if y==2011:
+      print(f"[NO 2011 ROWSET] {dataset}: {year_error}",flush=True)
+      continue
+     raise
+  for j,lo,hi in batches:
+   h=[str(x).strip() for x in j["fields"]];schema.append({"period":[lo,hi],"fields":h,"rows":len(j["data"])})
    if not h and not j["data"]:
-    print(f"[YEAR EMPTY] {dataset} {y}",flush=True)
+    print(f"[PERIOD EMPTY] {dataset} {lo}..{hi}",flush=True)
     continue
    di=ix(h,"恢復買賣日期","恢復買賣日","資料日期","日期")
    si=ix(h,"股票代號","證券代號");ni=ix(h,"股票名稱","證券名稱",required=False)
@@ -83,13 +97,16 @@ def main():
     sym=str(raw[si]).strip()
     try:day=rocdate(raw[di])
     except:continue
-    if not a.start_date<=day<=a.end_date:continue
+    if not lo<=day<=hi:continue
     prev=num(raw[pi]);ref=num(raw[ri])
     if not prev or not ref or prev<=0 or ref<=0:raise RuntimeError(f"{dataset} invalid reference {sym} {day}: {raw}")
     rows.append({"symbol":sym,"date":day,"event_type":kind,"previous_close":prev,"reference_price":ref,
       "limit_up":num(raw[ui]) if ui is not None else None,"limit_down":num(raw[li]) if li is not None else None,
       "reason":str(raw[reason_i]).strip() if reason_i is not None else "",
       "source":"TWSE "+dataset})
+  schemas[dataset]=schema
+  allrows.extend(rows)
+  print(f"[DONE] {dataset}: {len(rows)} special events",flush=True)
   schemas[dataset]=schema
   allrows.extend(rows)
   print(f"[DONE] {dataset}: {len(rows)} basket events",flush=True)
