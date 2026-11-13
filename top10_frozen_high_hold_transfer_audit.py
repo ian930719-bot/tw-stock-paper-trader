@@ -433,7 +433,7 @@ def main():
  p.add_argument("--output",default="artifacts/top10_frozen_high_hold")
  a=p.parse_args()
  out=Path(a.output);out.mkdir(parents=True,exist_ok=True)
- rows=[];blocked=[];prepared={};tsmc_reproduction=None;annual_rows=[];trade_diagnostics=[]
+ rows=[];blocked=[];prepared={};tsmc_reproduction=None;annual_rows=[];trade_diagnostics=[];filter_replay_rows=[]
  universe_path=Path(a.universe_file)
  use_universe_filter=universe_path.exists()
  if use_universe_filter:
@@ -469,6 +469,30 @@ def main():
    else:
     active_mask=np.ones(len(d),dtype=bool)
    hold=hold_gate(d)
+   # Frozen thresholds selected only from 2015-2021 training trades.
+   # Evaluate entries strictly out-of-time from 2022-01-01; orders still fill next session open.
+   test_idx=np.flatnonzero((d.date>=pd.Timestamp("2022-01-01")).to_numpy())
+   if len(test_idx):
+    test_start=int(test_idx[0]);test_end=len(d)-1
+    candidate_masks={
+     "baseline":np.ones(len(d),dtype=bool),
+     "sma50_slope_ge_0.006062":pd.to_numeric(d.sma50_slope_10,errors="coerce").ge(0.006062).fillna(False).to_numpy(bool),
+     "distance_sma200_ge_0.073873":pd.to_numeric(d.distance_sma_200,errors="coerce").ge(0.073873).fillna(False).to_numpy(bool),
+     "sma50_and_sma200":(pd.to_numeric(d.sma50_slope_10,errors="coerce").ge(0.006062)&pd.to_numeric(d.distance_sma_200,errors="coerce").ge(0.073873)).fillna(False).to_numpy(bool)
+    }
+    for filter_name,entry_mask in candidate_masks.items():
+     test_low=low_unfiltered & entry_mask
+     test_sim=simulate(d,test_low,high,risk,limits,cashdiv,10,test_start,test_end,
+       high_hold_signal=hold,share_adjustments=share_adjustments)
+     test_trades=pd.DataFrame(test_sim["trades"])
+     filter_replay_rows.append({"symbol":symbol,"stock_id":stock_id_map[symbol],"name":name_map.get(symbol,NAMES.get(stock_id_map[symbol],symbol)),
+       "filter":filter_name,"slippage_bps":10,"test_start":str(d.date.iloc[test_start].date()),
+       "test_end":str(d.date.iloc[test_end].date()),
+       **{k:v for k,v in test_sim.items() if k not in {"trades","equity_curve"}},
+       "mean_trade_net_return":float(test_trades.net_return.mean()) if len(test_trades) else None,
+       "median_trade_net_return":float(test_trades.net_return.median()) if len(test_trades) else None})
+     pd.DataFrame(test_sim["trades"]).to_csv(out/f"filter_test_trades_{symbol}_{filter_name}_10bps.csv",index=False)
+     pd.DataFrame(test_sim["equity_curve"]).to_csv(out/f"filter_test_equity_{symbol}_{filter_name}_10bps.csv",index=False)
    start_idx=np.flatnonzero((d.date.dt.year>=2015).to_numpy())
    if not len(start_idx):raise RuntimeError("no 2015+ data")
    start=int(start_idx[0]);end=len(d)-1
@@ -567,6 +591,7 @@ def main():
    print(f"[BLOCKED] {symbol}: {e}",flush=True)
  pd.DataFrame(annual_rows).to_csv(out/"annual_metrics_10bps_by_symbol.csv",index=False)
  pd.DataFrame(trade_diagnostics).to_csv(out/"trade_feature_diagnostics_10bps.csv",index=False)
+ pd.DataFrame(filter_replay_rows).to_csv(out/"entry_filter_oos_replay_2022plus.csv",index=False)
  shared_portfolio=None;shared_portfolios={}
  if use_universe_filter and prepared:
   for slip in SLIPPAGE_BPS:
@@ -622,7 +647,7 @@ def main():
   "costs":{"commission_per_side":.001425,"minimum_commission_ntd":20,"sell_tax":.003,"slippage_bps":list(SLIPPAGE_BPS)},
   "target":{"cagr_min":.50,"win_rate_min":.8695652173913043,"max_drawdown_floor":-.25},
   "status":"COMPLETE" if len(set(x["symbol"] for x in rows))==len(symbols) and not blocked else "BLOCKED_OR_PARTIAL",
-  "data_provenance":data_provenance,"cross_validation":{"parameters_frozen_from_TSMC":True,"no_reoptimization_on_transfer_universe":True,"annual_performance_decomposition":"annual_metrics_10bps_by_symbol.csv","interpretation":"Year-by-year stability report using unchanged frozen rules; this is not a retuned annual OOF strategy."},"metrics":rows,"tsmc_2330_universe_free_reproduction":tsmc_reproduction,"shared_capital_portfolio":shared_portfolio,"shared_capital_portfolios_by_slippage":shared_portfolios,"target_assessment":target_assessment,"rules":RULES,
+  "data_provenance":data_provenance,"cross_validation":{"parameters_frozen_from_TSMC":True,"no_reoptimization_on_transfer_universe":True,"annual_performance_decomposition":"annual_metrics_10bps_by_symbol.csv","interpretation":"Year-by-year stability report using unchanged frozen rules; this is not a retuned annual OOF strategy."},"metrics":rows,"entry_filter_oos_replay_2022plus":filter_replay_rows,"entry_filter_threshold_provenance":{"training_period":"2015-01-01 through 2021-12-31","test_period":"2022-01-01 through final official raw bar","sma50_slope_10_min":0.006062,"distance_sma_200_min":0.073873,"thresholds_selected_from_training_trades_only":True},"tsmc_2330_universe_free_reproduction":tsmc_reproduction,"shared_capital_portfolio":shared_portfolio,"shared_capital_portfolios_by_slippage":shared_portfolios,"target_assessment":target_assessment,"rules":RULES,
   "notes":["No per-symbol parameter tuning; frozen TSMC rule family only.",
    "Entry eligibility uses the official same-day closing traded-share top ten; signals are known after close and orders execute no earlier than the next session.",
    "Raw official TWSE MI_INDEX and TPEx afterTrading/otc OHLC used for fills; exchange-specific corporate-action back-adjustment used for signal indicators.",
