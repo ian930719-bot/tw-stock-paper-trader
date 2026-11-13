@@ -44,7 +44,8 @@ def fetch_day(session,day,retries=6):
     v=normnum(a[vol]); m=normnum(a[money])
     if v is None or m is None: continue
     rows.append({"date":pd.Timestamp(day).strftime("%Y-%m-%d"),"symbol":sym,"name":str(a[name]).strip(),
-                 "volume_shares":v,"turnover_ntd":m,"rank_by_turnover":None,"source":"TWSE MI_INDEX"})
+                 "volume_shares":v,"turnover_ntd":m,"open":normnum(a[op]),"high":normnum(a[hi]),
+                 "low":normnum(a[lo]),"close":normnum(a[cl]),"rank_by_turnover":None,"source":"TWSE MI_INDEX"})
    if not rows: raise RuntimeError("No market-wide equity rows parsed")
    rows.sort(key=lambda z:(-z["turnover_ntd"],z["symbol"]))
    for n,z in enumerate(rows,1):z["rank_by_turnover"]=n
