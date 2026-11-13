@@ -61,6 +61,12 @@ def read_events(action_root,symbol_key,stock_id,market):
   day=pd.Timestamp(r.date).strftime("%Y-%m-%d")
   if str(getattr(r,"cash_dividend_status","resolved"))!="resolved":
    raise RuntimeError(f"{symbol_key}: unresolved official cash-dividend component {day}")
+  action_type=str(getattr(r,"action_type",""))
+  if "權" in action_type:
+   raise RuntimeError(f"{symbol_key}: ex-rights/rights event requires a share/rights valuation model {day} ({action_type})")
+  rights_value=getattr(r,"rights_issue_shares",np.nan)
+  if pd.notna(rights_value) and float(rights_value)>0:
+   raise RuntimeError(f"{symbol_key}: rights-issue subscription event requires a rights valuation model {day}")
   stock_value=getattr(r,"stock_dividend",np.nan)
   if pd.notna(stock_value) and float(stock_value)>0:
    raise RuntimeError(f"{symbol_key}: stock dividend requires share-count adjustment model {day}")
