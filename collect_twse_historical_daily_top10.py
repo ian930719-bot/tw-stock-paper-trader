@@ -5,7 +5,7 @@ dates present in the official raw-price collection's trading calendar. No
 current-survivor filtering is applied to the ranking source.
 """
 from __future__ import annotations
-import argparse,json,random,time,hashlib
+import argparse,csv,json,random,time,hashlib
 from pathlib import Path
 import pandas as pd
 import requests
@@ -83,9 +83,30 @@ def main():
  frame=pd.DataFrame(combined)
  frame=frame.sort_values(["date","rank_by_turnover"])
  frame.to_csv(out/"historical_daily_top10_by_turnover.csv",index=False)
+ # Extract complete daily histories for every symbol that ever entered the
+ # point-in-time top ten; one pass over the saved market-wide daily files.
+ union=sorted(frame.symbol.astype(str).unique())
+ bars_dir=out/"symbol_bars";bars_dir.mkdir(exist_ok=True)
+ handles={}
+ try:
+  for sym in union:
+   fh=(bars_dir/f"{sym}.csv").open("w",newline="",encoding="utf-8")
+   wr=csv.writer(fh);wr.writerow(["symbol","name","date","open","high","low","close","volume","turnover","note","source"])
+   handles[sym]=(fh,wr)
+  for path in sorted(daily.glob("*.csv")):
+   dayframe=pd.read_csv(path,dtype={"symbol":str})
+   for r in dayframe.itertuples(index=False):
+    sym=str(r.symbol)
+    if sym not in handles:continue
+    vals=[r.open,r.high,r.low,r.close]
+    if any(pd.isna(x) for x in vals):continue
+    handles[sym][1].writerow([sym,r.name,r.date,r.open,r.high,r.low,r.close,
+      r.volume_shares,r.turnover_ntd,"","TWSE MI_INDEX"])
+ finally:
+  for fh,wr in handles.values():fh.close()
  man={"source":"TWSE official MI_INDEX daily market-wide closing report","endpoint":URL,
       "dates_requested":len(dates),"dates_completed":len(summary),"complete":len(summary)==len(dates),
-      "first_date":dates[0],"last_date":dates[-1],"rows":len(frame),
+      "first_date":dates[0],"last_date":dates[-1],"rows":len(frame),"point_in_time_union_symbols":len(union),"symbol_bar_files":len(union),
       "sha256":hashlib.sha256((out/"historical_daily_top10_by_turnover.csv").read_bytes()).hexdigest(),
       "method":"rank all listed common-stock rows by official daily turnover NT dollars; top 10 per date",
       "limitations":["Market-wide endpoint includes securities that must be classified; script filters four-digit numeric codes only.",
