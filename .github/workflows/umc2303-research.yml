@@ -24,6 +24,8 @@ jobs:
         run: python research/umc2303/run_period_robustness.py
       - name: Run broad strategy search v2
         run: python research/umc2303/run_strategy_search_v2.py
+      - name: Run drawdown-controlled portfolio search
+        run: python research/umc2303/run_risk_control_search.py
       - name: Upload research outputs
         uses: actions/upload-artifact@v4
         with:
