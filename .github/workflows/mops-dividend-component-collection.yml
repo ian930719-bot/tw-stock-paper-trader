@@ -39,7 +39,7 @@ jobs:
             --actions-dir data/top10_actions_twt49u \
             --overrides data/official_dividend_component_overrides.csv \
             --output-dir data/mops_dividend_reconciliation \
-            --pause 0.5
+            --pause 0.25
       - name: Validate every new MOPS override against official TWSE reference prices
         run: |
           python - <<'PY'
