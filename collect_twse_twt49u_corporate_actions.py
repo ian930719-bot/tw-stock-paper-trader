@@ -84,7 +84,6 @@ def main():
   for raw in payload["data"]:
    if len(raw)<=max(x for x in [date_i,sym_i,name_i,prev_i,ref_i,up_i,down_i] if x is not None):continue
    sym=str(raw[sym_i]).strip()
-   if sym not in SYMBOLS:continue
    try:day=rocdate(raw[date_i])
    except:continue
    if not a.start_date<=day<=a.end_date:continue
@@ -98,7 +97,7 @@ def main():
     cash=total if kind=="息" else (0.0 if kind=="權" else None)
     stock=total if kind=="權" else (0.0 if kind=="息" else None)
     cash_status="resolved" if kind in {"息","權"} else "unresolved_mixed_action"
-   vals={"symbol":sym,"stock_id":sym,"name":str(raw[name_i]).strip() or SYMBOLS[sym],
+   vals={"symbol":sym,"stock_id":sym,"name":str(raw[name_i]).strip() or SYMBOLS.get(sym,sym),
     "date":day,"previous_close":num(raw[prev_i]),"reference_price":num(raw[ref_i]),
     "limit_up":num(raw[up_i]),"limit_down":num(raw[down_i]),
     "cash_dividend":cash,"stock_dividend":stock,"action_type":kind,
@@ -121,7 +120,7 @@ def main():
  events=frame[["symbol","date","adjustment_ratio","source"]].copy()
  events["sources"]="TWSE TWT49U";events["source_count"]=1;events["conflict"]=False
  events.to_csv(out/"events.csv",index=False)
- for sym in SYMBOLS:frame[frame.symbol==sym].to_csv(out/f"{sym}.csv",index=False)
+ for sym in sorted(frame.symbol.astype(str).unique()):frame[frame.symbol.astype(str)==sym].to_csv(out/f"{sym}.csv",index=False)
  manifest={"source":"TWSE official TWT49U","url":URL,"queried_urls":urls,
   "collected_at_taipei":datetime.now(ZoneInfo("Asia/Taipei")).isoformat(),
   "requested_period":[a.start_date,a.end_date],"rows":len(frame),
