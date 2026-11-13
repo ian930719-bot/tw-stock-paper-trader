@@ -83,17 +83,51 @@ jobs:
       - name: Attach official TWSE price limits and MOPS component checkpoints
         run: |
           python - <<'PY'
+          import pandas as pd
+          from pathlib import Path
+          root=Path("data/top10_official_raw/bars")
+          limits=pd.read_csv(next(Path("data/twse_official_limits").rglob("twse_twt84u_limits.csv")),dtype={"stock_id":str})
+          known=set(zip(pd.to_datetime(limits.date).dt.strftime("%Y-%m-%d"),limits.stock_id.astype(str).str.strip()))
+          missing=[]
+          for path in sorted(root.glob("*.csv")):
+              raw=pd.read_csv(path,dtype={"symbol":str})
+              raw["date"]=pd.to_datetime(raw.date,errors="coerce").dt.strftime("%Y-%m-%d")
+              volume=pd.to_numeric(raw.volume,errors="coerce").fillna(0)
+              for row in raw.loc[(raw.date>="2014-01-01")&(volume>0),["date","symbol"]].itertuples(index=False):
+                  key=(str(row.date),str(row.symbol).strip())
+                  if key not in known:missing.append(key)
+          out=Path("data/fixed_missing_twt84u");daily=out/"daily";daily.mkdir(parents=True,exist_ok=True)
+          by_day={}
+          for day,symbol in missing:by_day.setdefault(day,set()).add(symbol)
+          for day,symbols in by_day.items():
+              pd.DataFrame([{"stock_id":symbol,"market":"TWSE"} for symbol in sorted(symbols)]).to_csv(daily/f"{day}.csv",index=False)
+          ids=sorted({symbol for _,symbol in missing})
+          pd.DataFrame([{"symbol":symbol,"stock_id":symbol,"market":"TWSE"} for symbol in ids]).to_csv(out/"universe.csv",index=False)
+          print("Missing official TWT84U keys",len(missing),"symbols",ids,"dates",len(by_day))
+          PY
+          if [ -s data/fixed_missing_twt84u/universe.csv ] && [ "$(wc -l < data/fixed_missing_twt84u/universe.csv)" -gt 1 ]; then
+            python collect_twse_twt84u_limits.py \
+              --daily-dir data/fixed_missing_twt84u/daily \
+              --universe-file data/fixed_missing_twt84u/universe.csv \
+              --output data/twse_official_limits/fixed_missing_twt84u.csv \
+              --pause 0.25
+          fi
+          python - <<'PY'
           import hashlib,json,shutil
           from pathlib import Path
           import pandas as pd
           root=Path("data/top10_official_raw/bars")
           limit_path=next(Path("data/twse_official_limits").rglob("twse_twt84u_limits.csv"))
           limits=pd.read_csv(limit_path,dtype={"stock_id":str})
+          extra=Path("data/twse_official_limits/fixed_missing_twt84u.csv")
+          if extra.exists():
+              more=pd.read_csv(extra,dtype={"stock_id":str})
+              limits=pd.concat([limits,more],ignore_index=True)
           limits["symbol"]=limits.stock_id.astype(str).str.strip()
           limits["date"]=pd.to_datetime(limits.date,errors="coerce").dt.strftime("%Y-%m-%d")
           limits=limits[["date","symbol","official_limit_up","official_reference_price","official_limit_down"]]
           if limits.duplicated(["date","symbol"]).any():
-              raise RuntimeError("Duplicate official TWT84U date/symbol keys")
+              raise RuntimeError("Duplicate official TWT84U date/symbol keys after targeted completion")
           manifest={"source":"TWSE official TWT84U","limits_rows":len(limits),"symbols":int(limits.symbol.nunique()),
                     "files":[],"missing_traded_rows_after_2015":0}
           for path in sorted(root.glob("*.csv")):
