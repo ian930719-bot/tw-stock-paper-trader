@@ -294,7 +294,7 @@ def main():
  p.add_argument("--output",default="artifacts/top10_frozen_high_hold")
  a=p.parse_args()
  out=Path(a.output);out.mkdir(parents=True,exist_ok=True)
- rows=[];blocked=[];prepared={};tsmc_reproduction=None
+ rows=[];blocked=[];prepared={};tsmc_reproduction=None;annual_rows=[]
  universe_path=Path(a.universe_file)
  use_universe_filter=universe_path.exists()
  if use_universe_filter:
@@ -351,6 +351,9 @@ def main():
     pd.DataFrame(rep["equity_curve"]).to_csv(out/"tsmc_2330_universe_free_reproduction_equity_10bps.csv",index=False)
    for slip in SLIPPAGE_BPS:
     sim=simulate(d,low,high,risk,limits,cashdiv,slip,start,end,high_hold_signal=hold)
+    if slip==10:
+     for annual_row in annual_metrics(sim["equity_curve"],sim["trades"],INITIAL_CAPITAL):
+      annual_rows.append({"symbol":symbol,"stock_id":stock_id_map[symbol],"market":market_map[symbol],"name":name_map.get(symbol,symbol),**annual_row})
     m={k:v for k,v in sim.items() if k not in {"trades","equity_curve"}}
     row_out={"symbol":symbol,"stock_id":stock_id_map[symbol],"market":market_map[symbol],"name":name_map.get(symbol,NAMES.get(stock_id_map[symbol],str(raw.name.iloc[0]) if "name" in raw else symbol)),"variant":"frozen_high_hold_dynamic_top10_entry_filter","slippage_bps":slip,"top10_active_days":int(active_mask.sum()),"low_signal_days_after_universe_filter":int(low.sum()),**m}
     row_out["cagr_pass_50pct"]=bool(row_out.get("cagr_mark_to_market") is not None and row_out["cagr_mark_to_market"]>=.50)
@@ -367,6 +370,7 @@ def main():
   except Exception as e:
    blocked.append({"symbol":symbol,"name":name_map.get(symbol,NAMES.get(symbol,symbol)),"reason":f"{type(e).__name__}: {e}"})
    print(f"[BLOCKED] {symbol}: {e}",flush=True)
+ pd.DataFrame(annual_rows).to_csv(out/"annual_metrics_10bps_by_symbol.csv",index=False)
  shared_portfolio=None
  if use_universe_filter and prepared:
   portfolio=run_shared_capital_portfolio(prepared,uni,slippage_bps=10,initial_capital=INITIAL_CAPITAL)
@@ -396,7 +400,7 @@ def main():
   "costs":{"commission_per_side":.001425,"minimum_commission_ntd":20,"sell_tax":.003,"slippage_bps":list(SLIPPAGE_BPS)},
   "target":{"cagr_min":.50,"win_rate_min":.8695652173913043,"max_drawdown_floor":-.25},
   "status":"COMPLETE" if len(set(x["symbol"] for x in rows))==len(symbols) and not blocked else "BLOCKED_OR_PARTIAL",
-  "data_provenance":data_provenance,"metrics":rows,"tsmc_2330_universe_free_reproduction":tsmc_reproduction,"shared_capital_portfolio":shared_portfolio,"target_assessment":target_assessment,"rules":RULES,
+  "data_provenance":data_provenance,"cross_validation":{"parameters_frozen_from_TSMC":True,"no_reoptimization_on_transfer_universe":True,"annual_performance_decomposition":"annual_metrics_10bps_by_symbol.csv","interpretation":"Year-by-year stability report using unchanged frozen rules; this is not a retuned annual OOF strategy."},"metrics":rows,"tsmc_2330_universe_free_reproduction":tsmc_reproduction,"shared_capital_portfolio":shared_portfolio,"target_assessment":target_assessment,"rules":RULES,
   "notes":["No per-symbol parameter tuning; frozen TSMC rule family only.",
    "Entry eligibility uses the official same-day closing traded-share top ten; signals are known after close and orders execute no earlier than the next session.",
    "Raw official TWSE MI_INDEX and TPEx afterTrading/otc OHLC used for fills; exchange-specific corporate-action back-adjustment used for signal indicators.",
