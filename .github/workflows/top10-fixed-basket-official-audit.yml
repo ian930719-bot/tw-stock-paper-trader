@@ -17,8 +17,8 @@ permissions:
   actions: read
 
 concurrency:
-  group: top10-fixed-basket-official-audit-v3
-  cancel-in-progress: false
+  group: top10-fixed-basket-official-audit-v4
+  cancel-in-progress: true
 
 jobs:
   fixed-basket:
@@ -50,17 +50,15 @@ jobs:
           run-id: 43342707340
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: data/top10_actions_twt49u
-      - name: Collect complete official TWSE TWT49U dividend reference data
+      - name: Validate downloaded official corporate-action checkpoint
         run: |
-          python -m py_compile collect_twse_twt49u_corporate_actions.py
-          python collect_twse_twt49u_corporate_actions.py --start-date 2014-01-01 --end-date 2026-11-12 --output data/top10_actions_twt49u
           python - <<'PY'
           import json
           from pathlib import Path
           m=json.loads(Path("data/top10_actions_twt49u/manifest.json").read_text(encoding="utf-8"))
-          assert m["complete"] and m["rows"] > 10000
           s=json.loads(Path("data/top10_actions_twt49u/special_events_manifest.json").read_text(encoding="utf-8"))
-          assert s["complete"]
+          assert m["complete"] and m["rows"] > 10000
+          assert s["complete"] and s["tpex"]["exDailyQ_rows"] > 0
           print("TWT49U rows",m["rows"],"special events",s["rows"],"TPEx events",s["tpex"]["exDailyQ_rows"])
           PY
       - name: Upload official dividend and corporate-action checkpoint
