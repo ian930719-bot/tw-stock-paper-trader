@@ -38,8 +38,10 @@ def read_events(action_root,symbol_key,stock_id,market):
  if not special_path.exists():raise RuntimeError("Missing official TWSE/TPEx special-action event table")
  special=pd.read_csv(special_path,dtype={"symbol":str})
  if "market" not in special:special["market"]="TWSE"
+ special["date"]=pd.to_datetime(special.date,errors="coerce")
  special=special[(special.market.astype(str).str.upper()==market.upper()) &
-                 (special.symbol.astype(str).str.strip()==stock_id)]
+                 (special.symbol.astype(str).str.strip()==stock_id) &
+                 (special.date>=pd.Timestamp("2014-01-01"))]
  if not special.empty:
   raise RuntimeError(f"{symbol_key}: official capital-reduction/par-value events require a share-count/cash-refund model: {special.to_dict('records')[:3]}")
  if market.upper()=="TWSE":
