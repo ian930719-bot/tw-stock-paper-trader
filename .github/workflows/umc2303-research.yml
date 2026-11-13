@@ -1,0 +1,26 @@
+name: UMC 2303 Swing Research
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "research/umc2303/**"
+      - ".github/workflows/umc2303-research.yml"
+permissions:
+  contents: read
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run reproducible TWSE research
+        run: python research/umc2303/run_research.py
+      - name: Upload research outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: umc2303-research-output
+          path: research/umc2303/output/
+          if-no-files-found: error
