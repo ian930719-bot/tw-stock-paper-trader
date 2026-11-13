@@ -38,7 +38,7 @@ jobs:
           if table is None and isinstance(j.get("fields"),list):
             table={"fields":j["fields"],"data":j.get("data",[])}
           if table is None: raise RuntimeError("TPEx revivt table missing")
-          fields=[re.sub(r"\\s+","",BeautifulSoup(str(x),"html.parser").get_text(" ",strip=True)) for x in table["fields"]]
+          fields=[re.sub(r"\s+","",BeautifulSoup(str(x),"html.parser").get_text(" ",strip=True)) for x in table["fields"]]
           code_i=next(i for i,x in enumerate(fields) if x in ("股票代號","代號","證券代號"))
           detail_i=next(i for i,x in enumerate(fields) if x=="詳細資料")
           targets={"1584","3105","3141","3234","3615","4303","5371","6148","6167","6173"}
