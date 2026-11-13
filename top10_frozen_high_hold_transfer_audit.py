@@ -317,9 +317,9 @@ def main():
     rep_metrics={k:v for k,v in rep.items() if k not in {"trades","equity_curve"}}
     expected={"cagr":0.376871,"win_rate":0.933333,"trade_count":15,"max_drawdown":-0.254384}
     tsmc_reproduction={"metrics":rep_metrics,"expected_previous_benchmark":expected,
-     "cagr_delta_pp":(rep_metrics.get("cagr")-expected["cagr"])*100 if rep_metrics.get("cagr") is not None else None,
-     "win_rate_delta_pp":(rep_metrics.get("win_rate")-expected["win_rate"])*100 if rep_metrics.get("win_rate") is not None else None,
-     "trade_count_delta":rep_metrics.get("trade_count")-expected["trade_count"] if rep_metrics.get("trade_count") is not None else None,
+     "cagr_delta_pp":(rep_metrics.get("cagr_mark_to_market")-expected["cagr"])*100 if rep_metrics.get("cagr_mark_to_market") is not None else None,
+     "win_rate_delta_pp":(rep_metrics.get("win_rate_completed_only")-expected["win_rate"])*100 if rep_metrics.get("win_rate_completed_only") is not None else None,
+     "trade_count_delta":rep_metrics.get("completed_trades")-expected["trade_count"] if rep_metrics.get("completed_trades") is not None else None,
      "max_drawdown_delta_pp":(rep_metrics.get("max_drawdown")-expected["max_drawdown"])*100 if rep_metrics.get("max_drawdown") is not None else None}
     deltas=[tsmc_reproduction.get("cagr_delta_pp"),tsmc_reproduction.get("win_rate_delta_pp"),
             tsmc_reproduction.get("trade_count_delta"),tsmc_reproduction.get("max_drawdown_delta_pp")]
@@ -332,8 +332,8 @@ def main():
     sim=simulate(d,low,high,risk,limits,cashdiv,slip,start,end,high_hold_signal=hold)
     m={k:v for k,v in sim.items() if k not in {"trades","equity_curve"}}
     row_out={"symbol":symbol,"name":name_map.get(symbol,NAMES.get(symbol,str(raw.name.iloc[0]) if "name" in raw else symbol)),"variant":"frozen_high_hold_dynamic_top10_entry_filter","slippage_bps":slip,"top10_active_days":int(active_mask.sum()),"low_signal_days_after_universe_filter":int(low.sum()),**m}
-    row_out["cagr_pass_50pct"]=bool(row_out.get("cagr") is not None and row_out["cagr"]>=.50)
-    row_out["win_rate_pass_floor"]=bool(row_out.get("win_rate") is not None and row_out["win_rate"]>=.8695652173913043)
+    row_out["cagr_pass_50pct"]=bool(row_out.get("cagr_mark_to_market") is not None and row_out["cagr_mark_to_market"]>=.50)
+    row_out["win_rate_pass_floor"]=bool(row_out.get("win_rate_completed_only") is not None and row_out["win_rate_completed_only"]>=.8695652173913043)
     row_out["drawdown_pass_25pct"]=bool(row_out.get("max_drawdown") is not None and row_out["max_drawdown"]>=-.25)
     row_out["all_targets_pass"]=row_out["cagr_pass_50pct"] and row_out["win_rate_pass_floor"] and row_out["drawdown_pass_25pct"]
     rows.append(row_out)
