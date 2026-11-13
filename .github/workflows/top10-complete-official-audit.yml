@@ -4,13 +4,7 @@ on:
   push:
     branches: [research/top10-official-ohlcv-baseline-audit]
     paths:
-      - .github/workflows/top10-complete-official-audit.yml
-      - collect_twse_historical_daily_top10.py
-      - collect_twse_twt49u_corporate_actions.py
-      - collect_twse_special_corporate_actions.py
-      - collect_tpex_corporate_actions.py
-      - top10_frozen_high_hold_transfer_audit.py
-      - corporate_action_adjustments.py
+      - .github/workflows/manual-full-audit-trigger.txt
   workflow_dispatch:
 
 permissions:
