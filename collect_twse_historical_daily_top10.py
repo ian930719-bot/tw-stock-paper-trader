@@ -54,6 +54,9 @@ def fetch_twse_day(session,day,retries=8):
     tables=j.get("tables",[])
     table=next((t for t in tables if "每日收盤行情" in str(t.get("title",""))),None)
     if table is None:table=next((t for t in tables if "證券代號" in t.get("fields",[]) and "成交金額" in t.get("fields",[])),None)
+    # Legacy exchangeReport/MI_INDEX returns fields/data at the JSON root.
+    if table is None and isinstance(j.get("fields"),list):
+     table={"fields":j.get("fields",[]),"data":j.get("data",[]),"title":j.get("title","")}
     if table is None:raise RuntimeError("TWSE MI_INDEX daily quote table not found")
     fields=[normfield(x) for x in table.get("fields",[])]
     def idx(*names,required=True):
