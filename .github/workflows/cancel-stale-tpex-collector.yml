@@ -18,3 +18,4 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh api --method POST repos/ian930719-bot/tw-stock-paper-trader/actions/runs/43393239097/cancel || true
+          gh api --method POST repos/ian930719-bot/tw-stock-paper-trader/actions/runs/43395796244/cancel || true
