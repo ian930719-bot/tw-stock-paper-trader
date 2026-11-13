@@ -176,7 +176,7 @@ def main():
   except Exception as e:
    blocked.append({"symbol":symbol,"name":name_map.get(symbol,NAMES.get(symbol,symbol)),"reason":f"{type(e).__name__}: {e}"})
    print(f"[BLOCKED] {symbol}: {e}",flush=True)
- result={"classification":"FIXED_TSMC_RULE_TRANSFER_AUDIT_NOT_PER_SYMBOL_RETUNED",
+ result={"classification":"FIXED_TSMC_RULE_TRANSFER_AUDIT_DAILY_TOP10_TURNOVER_UNIVERSE",
   "period":"2015 onward through last official raw bar","symbols_expected":len(symbols),
   "symbols_completed":len(set(x["symbol"] for x in rows)),"blocked":blocked,
   "costs":{"commission_per_side":.001425,"minimum_commission_ntd":20,"sell_tax":.003,"slippage_bps":list(SLIPPAGE_BPS)},
@@ -184,6 +184,7 @@ def main():
   "status":"COMPLETE" if len(set(x["symbol"] for x in rows))==len(symbols) and not blocked else "BLOCKED_OR_PARTIAL",
   "metrics":rows,"rules":RULES,
   "notes":["No per-symbol parameter tuning; frozen TSMC rule family only.",
+   "Entry eligibility uses the official same-day closing turnover top ten; signals are known after close and orders execute no earlier than the next session.",
    "Raw official TWSE OHLC used for fills; corporate-action back-adjustment used for signal indicators.",
    "Any missing action data, missing limit reference, or OHLC-limit conflict blocks that symbol.",
    "Single-symbol results do not represent shared-capital portfolio results."]}
