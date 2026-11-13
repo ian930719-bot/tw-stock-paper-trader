@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: top10-complete-official-audit
   cancel-in-progress: false
