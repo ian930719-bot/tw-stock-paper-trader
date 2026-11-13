@@ -47,14 +47,18 @@ def collect_exdailyq(session,start,end):
  stock_i=idx(f,"每仟股無償配股","權值",required=False)
  rights_fields=[idx(f,n,required=False) for n in ("現金增資股數","公開承銷股數","員工認購股數","原股東認購股數","按持股比例仟股認購")]
  ui=idx(f,"漲停價","漲停價格",required=False);li=idx(f,"跌停價","跌停價格",required=False)
- out=[]
+ out=[];invalid=[]
  for raw in rows:
   sym=clean(raw[si])
   try:day=rocdate(raw[di])
   except:continue
   if not start<=day<=end:continue
   prev=num(raw[pi]);ref=num(raw[ri])
-  if not prev or not ref or prev<=0 or ref<=0:raise RuntimeError(f"Invalid TPEx exDailyQ reference {sym} {day}: fields={[clean(x) for x in f]}; row={raw}")
+  if not prev or not ref or prev<=0 or ref<=0:
+   invalid.append({"market":"TPEX","symbol":sym,"date":day,"reason":"non_positive_or_missing_reference",
+    "previous_close":prev,"reference_price":ref,"raw_row":json.dumps(raw,ensure_ascii=False),
+    "source":"TPEx bulletin/exDailyQ"})
+   continue
   cash=num(raw[cash_i]) if cash_i is not None else None
   stock=num(raw[stock_i]) if stock_i is not None else None
   rights_shares=sum((num(raw[k]) or 0.0) for k in rights_fields if k is not None)
@@ -71,7 +75,7 @@ def collect_exdailyq(session,start,end):
    "limit_down":num(raw[li]) if li is not None else None,
    "source":"TPEx bulletin/exDailyQ"})
  if not out:raise RuntimeError("TPEx exDailyQ returned zero dated events; coverage cannot be verified")
- return out,{"url":url,"fields":[clean(x) for x in f],"rows":len(out)}
+ return out,invalid,{"url":url,"fields":[clean(x) for x in f],"rows":len(out),"invalid_rows":len(invalid)}
 def collect_revivt(session,start,end):
  t,url,payload=get_table(session,"bulletin/revivt",start,end)
  f=t["fields"];rows=t["data"]
@@ -104,7 +108,7 @@ def main():
  p.add_argument("--output",default="data/top10_actions_twt49u")
  a=p.parse_args()
  s=requests.Session()
- ex,exmeta=collect_exdailyq(s,a.start_date,a.end_date)
+ ex,invalid_ex,exmeta=collect_exdailyq(s,a.start_date,a.end_date)
  rev,revmeta=collect_revivt(s,a.special_start_date,a.end_date)
  ex_years=sorted({int(r["date"][:4]) for r in ex})
  rev_years=sorted({int(r["date"][:4]) for r in rev})
@@ -115,6 +119,7 @@ def main():
   raise RuntimeError(f"TPEx revivt 2025 control events missing; years={rev_years}")
  out=Path(a.output);out.mkdir(parents=True,exist_ok=True)
  pd.DataFrame(ex).to_csv(out/"tpex_exdailyq_all.csv",index=False)
+ pd.DataFrame(invalid_ex,columns=["market","symbol","date","reason","previous_close","reference_price","raw_row","source"]).to_csv(out/"tpex_exdailyq_invalid_rows.csv",index=False)
  special_path=out/"special_events.csv"
  new=pd.DataFrame(rev)
  if special_path.exists():
@@ -129,7 +134,7 @@ def main():
  if mp.exists():
   try:previous=json.loads(mp.read_text(encoding="utf-8"))
   except:previous={}
- tpex_meta={"exDailyQ":exmeta,"revivt":revmeta,"exDailyQ_rows":len(ex),"revivt_rows":len(rev),"exDailyQ_years":ex_years,"revivt_years":rev_years}
+ tpex_meta={"exDailyQ":exmeta,"revivt":revmeta,"exDailyQ_rows":len(ex),"exDailyQ_invalid_rows":len(invalid_ex),"revivt_rows":len(rev),"exDailyQ_years":ex_years,"revivt_years":rev_years}
  complete=bool(previous.get("complete",False)) and len(ex)>0 and len(rev)>0
  manifest={**previous,"complete":complete,"tpex":tpex_meta,
   "sources":list(set(previous.get("sources",[])+["TPEx bulletin/exDailyQ","TPEx bulletin/revivt"])),
