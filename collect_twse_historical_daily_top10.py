@@ -13,6 +13,7 @@ import requests
 from bs4 import BeautifulSoup
 
 TWSE_URL="https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX"
+TWSE_FALLBACK_URL="https://www.twse.com.tw/exchangeReport/MI_INDEX"
 TPEX_URL="https://www.tpex.org.tw/www/zh-tw/afterTrading/otc"
 
 def clean(x):
@@ -34,46 +35,54 @@ def rank_rows(rows):
  for n,z in enumerate(sorted(rows,key=lambda z:(-z["turnover_ntd"],-z["volume_shares"],z["symbol"])),1):z["rank_by_turnover"]=n
  return rows
 
-def fetch_twse_day(session,day,retries=6):
+def fetch_twse_day(session,day,retries=8):
  params={"date":pd.Timestamp(day).strftime("%Y%m%d"),"type":"ALLBUT0999","response":"json"}
  err=None
+ # Try the current RWD endpoint first, then the exchange's legacy JSON route.
  for k in range(retries):
-  try:
-   r=session.get(TWSE_URL,params=params,timeout=(10,45),headers={"User-Agent":"Mozilla/5.0"})
-   r.raise_for_status();j=r.json()
-   if j.get("stat")!="OK":raise RuntimeError("TWSE stat="+str(j.get("stat")))
-   tables=j.get("tables",[])
-   table=next((t for t in tables if "每日收盤行情" in str(t.get("title",""))),None)
-   if table is None:table=next((t for t in tables if "證券代號" in t.get("fields",[]) and "成交金額" in t.get("fields",[])),None)
-   if table is None:raise RuntimeError("TWSE MI_INDEX daily quote table not found")
-   fields=[normfield(x) for x in table.get("fields",[])]
-   def idx(*names,required=True):
-    for n in names:
-     nn=normfield(n)
-     if nn in fields:return fields.index(nn)
-    if required:raise RuntimeError("Missing TWSE field "+"/".join(names)+"; got "+repr(fields))
-    return None
-   code=idx("證券代號");name=idx("證券名稱");vol=idx("成交股數");money=idx("成交金額")
-   op=idx("開盤價");hi=idx("最高價");lo=idx("最低價");cl=idx("收盤價")
-   note=idx("註記",required=False)
-   rows=[]
-   for a in table.get("data",[]):
-    sym=clean(a[code])
-    if not common_code(sym):continue
-    v=normnum(a[vol]);m=normnum(a[money])
-    if v is None or m is None:continue
-    rows.append({"date":pd.Timestamp(day).strftime("%Y-%m-%d"),"symbol":"TWSE_"+sym,"stock_id":sym,"market":"TWSE",
-     "name":clean(a[name]),"volume_shares":v,"turnover_ntd":m,"open":normnum(a[op]),"high":normnum(a[hi]),
-     "low":normnum(a[lo]),"close":normnum(a[cl]),"note":clean(a[note]) if note is not None else "",
-     "rank_by_volume":None,"rank_by_turnover":None,"source":"TWSE MI_INDEX"})
-   if len(rows)<100:raise RuntimeError(f"TWSE suspiciously few common stocks: {len(rows)}")
-   return rows
-  except Exception as e:
-   err=e
-   if k+1<retries:time.sleep(min(25,2**k)+random.random())
+  for endpoint in (TWSE_URL,TWSE_FALLBACK_URL):
+   try:
+    r=session.get(endpoint,params=params,timeout=(10,45),
+      headers={"User-Agent":"Mozilla/5.0","Accept":"application/json, text/plain, */*",
+               "Referer":"https://www.twse.com.tw/"})
+    r.raise_for_status()
+    try:j=r.json()
+    except ValueError as e:
+     raise RuntimeError(f"TWSE non-JSON response HTTP {r.status_code}; content-type={r.headers.get('content-type')}; body={r.text[:120]!r}") from e
+    if str(j.get("stat","")).upper()!="OK":
+     raise RuntimeError("TWSE stat="+str(j.get("stat")))
+    tables=j.get("tables",[])
+    table=next((t for t in tables if "每日收盤行情" in str(t.get("title",""))),None)
+    if table is None:table=next((t for t in tables if "證券代號" in t.get("fields",[]) and "成交金額" in t.get("fields",[])),None)
+    if table is None:raise RuntimeError("TWSE MI_INDEX daily quote table not found")
+    fields=[normfield(x) for x in table.get("fields",[])]
+    def idx(*names,required=True):
+     for n in names:
+      nn=normfield(n)
+      if nn in fields:return fields.index(nn)
+     if required:raise RuntimeError("Missing TWSE field "+"/".join(names)+"; got "+repr(fields))
+     return None
+    code=idx("證券代號");name=idx("證券名稱");vol=idx("成交股數");money=idx("成交金額")
+    op=idx("開盤價");hi=idx("最高價");lo=idx("最低價");cl=idx("收盤價")
+    note=idx("註記",required=False)
+    rows=[]
+    for a in table.get("data",[]):
+     sym=clean(a[code])
+     if not common_code(sym):continue
+     v=normnum(a[vol]);m=normnum(a[money])
+     if v is None or m is None:continue
+     rows.append({"date":pd.Timestamp(day).strftime("%Y-%m-%d"),"symbol":"TWSE_"+sym,"stock_id":sym,"market":"TWSE",
+      "name":clean(a[name]),"volume_shares":v,"turnover_ntd":m,"open":normnum(a[op]),"high":normnum(a[hi]),
+      "low":normnum(a[lo]),"close":normnum(a[cl]),"note":clean(a[note]) if note is not None else "",
+      "rank_by_volume":None,"rank_by_turnover":None,"source":"TWSE MI_INDEX"})
+    if len(rows)<100:raise RuntimeError(f"TWSE suspiciously few common stocks: {len(rows)}")
+    return rows
+   except Exception as e:
+    err=e
+  if k+1<retries:time.sleep(min(45,2**k)+random.uniform(0.5,1.5))
  raise RuntimeError(f"TWSE {day}: {err}")
 
-def fetch_tpex_day(session,day,retries=6):
+def fetch_tpex_day(session,day,retries=8):
  day=pd.Timestamp(day)
  # TPEx afterTrading/otc expects Gregorian YYYY/MM/DD, not ROC year.
  gregorian=day.strftime("%Y/%m/%d")
