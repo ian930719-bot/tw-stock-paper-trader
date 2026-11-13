@@ -136,7 +136,8 @@ def main():
  out=Path(a.output);out.mkdir(parents=True,exist_ok=True)
  rows=[];blocked=[]
  universe_path=Path(a.universe_file)
- if universe_path.exists():
+ use_universe_filter=universe_path.exists()
+ if use_universe_filter:
   uni=pd.read_csv(universe_path,dtype={"symbol":str})
   symbols=sorted(uni.symbol.astype(str).str.strip().unique())
   name_map=uni.drop_duplicates("symbol").set_index("symbol").name.astype(str).to_dict()
@@ -157,9 +158,12 @@ def main():
    if len(raw)<260:raise RuntimeError(f"insufficient traded raw history after no-trade filtering {len(raw)}")
    d=make_features(raw,ev)
    low,high,risk=build_candidate_signals(d)
-   active_dates=active_dates_by_symbol.get(symbol,set())
-   active_mask=d.date.dt.strftime("%Y-%m-%d").isin(active_dates).to_numpy(bool)
-   low &= active_mask
+   if use_universe_filter:
+    active_dates=active_dates_by_symbol.get(symbol,set())
+    active_mask=d.date.dt.strftime("%Y-%m-%d").isin(active_dates).to_numpy(bool)
+    low &= active_mask
+   else:
+    active_mask=np.ones(len(d),dtype=bool)
    hold=hold_gate(d)
    start_idx=np.flatnonzero((d.date.dt.year>=2015).to_numpy())
    if not len(start_idx):raise RuntimeError("no 2015+ data")
