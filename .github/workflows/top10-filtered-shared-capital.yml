@@ -1,0 +1,150 @@
+name: Frozen Entry Filters - Shared NT$100,000 Top Ten Account
+
+on:
+  push:
+    branches: [research/top10-official-ohlcv-baseline-audit]
+    paths:
+      - .github/workflows/top10-filtered-shared-capital.yml
+      - top10_filtered_shared_capital_replay.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: top10-filtered-shared-capital
+  cancel-in-progress: true
+
+jobs:
+  shared-capital-filter-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/top10-official-ohlcv-baseline-audit
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - run: pip install -r requirements.txt
+      - name: Wait for all thirteen official annual universe checkpoints
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          found=0
+          for attempt in $(seq 1 720); do
+            count=$(gh api repos/ian930719-bot/tw-stock-paper-trader/actions/runs/43357713305/artifacts \
+              --jq '[.artifacts[] | select(.expired==false) | select(.name | startswith("top10-point-in-time-year-"))] | length')
+            if [ "$count" -eq 13 ]; then
+              found=1
+              echo "All thirteen yearly official checkpoints are available."
+              break
+            fi
+            status=$(gh api repos/ian930719-bot/tw-stock-paper-trader/actions/runs/43357713305 --jq '.status')
+            if [ "$status" = "completed" ] && [ "$count" -ne 13 ]; then
+              echo "Annual collector completed without all 13 required checkpoints."
+              exit 1
+            fi
+            echo "Waiting for annual checkpoints: $count/13 (attempt $attempt/720)"
+            sleep 30
+          done
+          test "$found" -eq 1
+      - name: Download all official annual universe checkpoints
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          for year in {2014..2026}; do
+            mkdir -p "data/year_${year}"
+            gh run download 43357713305 --repo ian930719-bot/tw-stock-paper-trader \
+              --name "top10-point-in-time-year-${year}" --dir "data/year_${year}"
+          done
+      - name: Download verified official corporate-action checkpoint
+        uses: actions/download-artifact@v4
+        with:
+          name: top10-fixed-basket-corporate-actions
+          repository: ian930719-bot/tw-stock-paper-trader
+          run-id: 43356733685
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: data/top10_actions_twt49u
+      - name: Merge official annual data into point-in-time universe and raw constituent bars
+        run: |
+          python - <<'PY'
+          import csv,hashlib,json,shutil
+          from pathlib import Path
+          import pandas as pd
+          root=Path("data/twse_marketwide_turnover")
+          daily=root/"daily";daily.mkdir(parents=True,exist_ok=True)
+          manifests=[]
+          for year in range(2014,2027):
+              src=Path(f"data/year_{year}")
+              m=json.loads((src/"manifest.json").read_text(encoding="utf-8"))
+              assert m["complete"] and m["dates_completed"]==m["dates_requested"],(year,m)
+              manifests.append(m)
+              for f in (src/"daily").glob("*.csv"):
+                  shutil.copy2(f,daily/f.name)
+          daily_files=sorted(daily.glob("*.csv"))
+          assert daily_files,"No daily official market-wide files"
+          tops=[]
+          for year in range(2014,2027):
+              f=Path(f"data/year_{year}/historical_daily_top10_by_volume.csv")
+              tops.append(pd.read_csv(f,dtype={"symbol":str,"stock_id":str}))
+          top=pd.concat(tops,ignore_index=True).sort_values(["date","rank_by_volume","symbol"])
+          top=top.drop_duplicates(["date","symbol"])
+          top.to_csv(root/"historical_daily_top10_by_volume.csv",index=False)
+          union=sorted(top.symbol.astype(str).unique())
+          bars=root/"symbol_bars";bars.mkdir(exist_ok=True)
+          handles={}
+          try:
+              for sym in union:
+                  fh=(bars/f"{sym}.csv").open("w",newline="",encoding="utf-8")
+                  wr=csv.writer(fh)
+                  wr.writerow(["symbol","stock_id","market","name","date","open","high","low","close","volume","turnover","note","source"])
+                  handles[sym]=(fh,wr)
+              for f in daily_files:
+                  d=pd.read_csv(f,dtype={"symbol":str,"stock_id":str})
+                  d=d[d.symbol.isin(handles)]
+                  for r in d.itertuples(index=False):
+                      handles[str(r.symbol)][1].writerow([r.symbol,r.stock_id,r.market,r.name,r.date,r.open,r.high,r.low,r.close,r.volume_shares,r.turnover_ntd,getattr(r,"note",""),r.source])
+          finally:
+              for fh,wr in handles.values():fh.close()
+          dates=sorted(f.stem for f in daily_files)
+          manifest={
+              "source":["TWSE official MI_INDEX","TPEx official afterTrading/otc"],
+              "dates_requested":sum(m["dates_requested"] for m in manifests),
+              "dates_completed":len(dates),
+              "complete":len(dates)==sum(m["dates_requested"] for m in manifests),
+              "first_date":dates[0],"last_date":dates[-1],
+              "top10_rows":len(top),"point_in_time_union_symbols":len(union),
+              "symbol_bar_files":len(union),
+              "top10_rows_by_market":{str(k):int(v) for k,v in top.market.value_counts().to_dict().items()},
+              "sha256":hashlib.sha256((root/"historical_daily_top10_by_volume.csv").read_bytes()).hexdigest(),
+              "yearly_checkpoints":[{"year":2014+i,"dates":m["dates_completed"],"complete":m["complete"]} for i,m in enumerate(manifests)],
+              "method":"Rank TWSE and TPEx ordinary common stocks together by official daily traded shares at close; entries execute no earlier than the next session.",
+              "limitations":["TPEx afterTrading/otc round-lot volume excludes odd-lot trading; borderline daily rankings may differ from a total-volume universe.","Four-digit code class filter excludes 00xx ETF and 91xx TDR; six-digit warrants excluded.","Seed-stock trading calendar defines requested sessions; every annual checkpoint must be complete."]
+          }
+          assert manifest["complete"]
+          (root/"manifest.json").write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding="utf-8")
+          print(json.dumps(manifest,ensure_ascii=False,indent=2))
+          PY
+      - name: Run frozen-threshold filters in the actual shared NT$100,000 account
+        run: |
+          python -m py_compile top10_filtered_shared_capital_replay.py
+          python top10_filtered_shared_capital_replay.py \
+            --raw-bars data/twse_marketwide_turnover/symbol_bars \
+            --universe-file data/twse_marketwide_turnover/historical_daily_top10_by_volume.csv \
+            --actions data/top10_actions_twt49u \
+            --output artifacts/top10_shared_capital_filter_validation
+      - name: Upload shared-capital entry-filter validation
+        uses: actions/upload-artifact@v4
+        with:
+          name: top10-shared-capital-filter-validation
+          path: |
+            artifacts/top10_shared_capital_filter_validation/
+            data/twse_marketwide_turnover/manifest.json
+          if-no-files-found: error
+          retention-days: 30
