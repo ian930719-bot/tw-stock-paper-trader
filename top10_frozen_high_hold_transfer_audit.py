@@ -52,6 +52,15 @@ def read_events(action_root,symbol_key,stock_id,market):
  strategy_start=pd.Timestamp("2015-01-01")
  special_pre=special[special.date<strategy_start].copy()
  special_post=special[special.date>=strategy_start].copy()
+ terms_path=Path(__file__).resolve().parent/"data"/"official_special_action_terms.csv"
+ if terms_path.exists():
+  terms=pd.read_csv(terms_path,dtype={"symbol":str})
+  terms=terms[terms.symbol.astype(str).str.strip()==stock_id].copy()
+  terms["event_date"]=pd.to_datetime(terms.event_date,errors="coerce").dt.strftime("%Y-%m-%d")
+  special_terms={r.event_date:{"share_multiplier":float(r.share_multiplier),
+    "cash_refund":float(r.cash_refund_per_old_share),"source_url":str(r.source_url)}
+    for r in terms.itertuples(index=False)}
+ else:special_terms={}
  if market.upper()=="TWSE":
   p=root/"twt49u_all.csv"
   if not p.exists():raise RuntimeError("Missing global official TWSE TWT49U event table")
@@ -129,7 +138,14 @@ def read_events(action_root,symbol_key,stock_id,market):
   reason=str(getattr(r,"reason",""))
   if not all(np.isfinite(x) and x>0 for x in (prev,ref,up,down)):
    raise RuntimeError(f"{symbol_key}: invalid post-2015 special-action reference {day}")
-  if event_type=="par_value_change" or "面額" in event_type:
+  if day in special_terms:
+   multiplier=special_terms[day]["share_multiplier"]
+   refund=special_terms[day]["cash_refund"]
+   expected_ref=(prev-refund-cash.get(day,0.0))/multiplier
+   if abs(expected_ref-ref)>0.03:
+    raise RuntimeError(f"{symbol_key}: documented cash-refund/share terms do not reconcile to official reference price on {day}: expected {expected_ref}, official {ref}")
+   cash[day]=cash.get(day,0.0)+refund
+  elif event_type=="par_value_change" or "面額" in event_type:
    multiplier=prev/ref
   elif "彌補虧損" in reason:
    multiplier=prev/ref
@@ -139,7 +155,8 @@ def read_events(action_root,symbol_key,stock_id,market):
    raise RuntimeError(f"{symbol_key}: invalid special-event share multiplier {day}: {multiplier}")
   if day in refs and abs(refs[day]-ref)>1e-6:
    raise RuntimeError(f"{symbol_key}: special-action reference conflicts with dividend event {day}")
-  refs[day]=ref;limits[day]=(up,down);share_adjustments[day]=multiplier
+  refs[day]=ref;limits[day]=(up,down)
+  share_adjustments[day]=share_adjustments.get(day,1.0)*multiplier
   post_rows.append({"symbol":symbol_key,"date":pd.Timestamp(r.date),
                     "adjustment_ratio":ref/prev,
                     "source":str(getattr(r,"source","official special corporate action"))})
@@ -518,7 +535,7 @@ def main():
    "Raw official TWSE MI_INDEX and TPEx afterTrading/otc OHLC used for fills; exchange-specific corporate-action back-adjustment used for signal indicators.",
    "TWSE TWT49U covers ex-rights/ex-dividend events from 2010 and TPEx exDailyQ from 2014 (the required 200-session warmup window); TWSE TWTAUU/TWTB8U and TPEx revivt cover special resumption events from 2011/2013; performance measurement begins 2015.",
    "Any missing action data, missing limit reference, or OHLC-limit conflict blocks that symbol. The shared-capital portfolio also skips new entries when any daily top-ten constituent is unaudited.",
-  "Post-2015 stock dividends are modeled as share multipliers derived from official prior close, cash dividend, and ex-right reference price; fractional share entitlements are rounded down conservatively. Post-2015 loss-recovery capital reductions and par-value changes use official reference-price-derived share ratios; cash-refund reductions remain blocked until refund and share-ratio details are modeled.",
+  "Post-2015 stock dividends are modeled as share multipliers derived from official prior close, cash dividend, and ex-right reference price; fractional share entitlements are rounded down conservatively. Post-2015 loss-recovery capital reductions and par-value changes use official reference-price-derived share ratios. Documented Yageo cash-refund reductions use issuer-notice share ratios and refunds, reconciled to TWSE reference prices; unsupported cash-refund events remain blocked.",
    "Single-symbol results are independent NT$100,000 per-stock transfer tests; shared_capital_portfolio is a separate one-position shared-NT$100,000 account."]}
  (out/"report.json").write_text(json.dumps(result,ensure_ascii=False,indent=2,default=float),encoding="utf-8")
  pd.DataFrame(rows).to_csv(out/"metrics.csv",index=False)
