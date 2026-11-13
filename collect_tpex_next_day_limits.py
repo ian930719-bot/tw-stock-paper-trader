@@ -18,7 +18,7 @@ import requests
 URL = "https://www.tpex.org.tw/www/zh-tw/afterTrading/otc"
 
 def clean(value):
-    return re.sub(r"\\s+", "", html.unescape(re.sub(r"<[^>]*>", "", str(value or ""))))
+    return re.sub(r"\s+", "", html.unescape(re.sub(r"<[^>]*>", "", str(value or ""))))
 
 def number(value):
     s = clean(value).replace(",", "").replace("−", "-").replace("－", "-")
@@ -100,6 +100,8 @@ def main():
     daily_files = sorted(daily_dir.glob("*.csv"))
     if not daily_files:
         raise RuntimeError(f"No daily official market-wide files in {daily_dir}")
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     session = requests.Session()
     records = []
     missing_symbols = []
@@ -132,11 +134,10 @@ def main():
                     missing_symbols.append({"date": day, "stock_id": symbol, "reason": "official next-day limit field blank"})
                 records.append(record)
         if i % 25 == 0 or i == len(daily_files):
-            pd.DataFrame(records).to_csv(args.output, index=False)
+            pd.DataFrame(records).to_csv(output_path, index=False)
             print(f"PROGRESS files={i}/{len(daily_files)} queried_dates={len(queried_dates)} rows={len(records)} missing={len(missing_symbols)}", flush=True)
         time.sleep(args.pause)
-    out = Path(args.output)
-    out.parent.mkdir(parents=True, exist_ok=True)
+    out = output_path
     frame = pd.DataFrame(records)
     if frame.empty:
         raise RuntimeError("No TPEx next-day limit rows collected")
