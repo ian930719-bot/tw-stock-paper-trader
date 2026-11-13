@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd,requests
 
 
-BASE="https://www.twse.com.tw/exchangeReport/"
+BASES=["https://www.twse.com.tw/rwd/zh/reducation/","https://www.twse.com.tw/exchangeReport/"]
 def rocdate(v):
  s=str(v).strip().replace("年","/").replace("月","/").replace("日","")
  p=s.split("/")
@@ -26,38 +26,38 @@ def ix(h,*terms,required=True):
  if required:raise RuntimeError(f"missing {terms} in {h}")
  return None
 def get(session,dataset,year,start,end):
- url=BASE+dataset
  lo=pd.Timestamp(start);hi=pd.Timestamp(end)
+ errors=[]
  candidates=[
+  {"response":"json","startDate":lo.strftime("%Y%m%d"),"endDate":hi.strftime("%Y%m%d")},
+  {"response":"json","startDate":lo.strftime("%Y/%m/%d"),"endDate":hi.strftime("%Y/%m/%d")},
   {"response":"json","strDate":lo.strftime("%Y%m%d"),"endDate":hi.strftime("%Y%m%d")},
   {"response":"json","strDate":f"{lo.year-1911:03d}{lo.strftime('%m%d')}","endDate":f"{hi.year-1911:03d}{hi.strftime('%m%d')}"},
-  {"response":"json","startDate":lo.strftime("%Y%m%d"),"endDate":hi.strftime("%Y%m%d")},
-  {"response":"json","strDate":hi.strftime("%Y%m%d"),"endDate":lo.strftime("%Y%m%d")},
  ]
- errors=[]
- for params in candidates:
-  try:
-   r=session.get(url,params=params,timeout=(15,120),headers={"User-Agent":"Mozilla/5.0"});r.raise_for_status()
-   j=r.json()
-   if isinstance(j,dict) and "stat" in j and ("查無資料" in str(j.get("stat")) or "沒有符合條件" in str(j.get("stat"))):
-    return {"fields":[],"data":[],"stat":j.get("stat")}
-   if not isinstance(j,dict) or not isinstance(j.get("fields"),list) or not isinstance(j.get("data"),list):
-    errors.append({"url":r.url,"payload":str(j)[:300]});continue
-   if not j["fields"] and not j["data"]:
+ for base in BASES:
+  url=base+dataset
+  for params in candidates:
+   try:
+    r=session.get(url,params=params,timeout=(15,120),headers={"User-Agent":"Mozilla/5.0","Accept":"application/json"});r.raise_for_status()
+    j=r.json()
+    if isinstance(j,dict) and "stat" in j and ("查無資料" in str(j.get("stat")) or "沒有符合條件" in str(j.get("stat"))):
+     return {"fields":[],"data":[],"stat":j.get("stat")}
+    if not isinstance(j,dict) or not isinstance(j.get("fields"),list) or not isinstance(j.get("data"),list):
+     errors.append({"url":r.url,"payload":str(j)[:300]});continue
+    if not j["fields"] and not j["data"]:return j
+    if j["data"]:
+     h=[str(x).strip() for x in j["fields"]]
+     di=ix(h,"恢復買賣日期","恢復買賣日","資料日期","日期")
+     found=False
+     for row in j["data"]:
+      try:
+       day=rocdate(row[di])
+       if start<=day<=end:found=True;break
+      except:pass
+     if not found:
+      errors.append({"url":r.url,"sample":j["data"][:1]});continue
     return j
-   if j["data"]:
-    h=[str(x).strip() for x in j["fields"]]
-    di=ix(h,"恢復買賣日期","恢復買賣日","資料日期","日期")
-    found=False
-    for row in j["data"]:
-     try:
-      day=rocdate(row[di])
-      if start<=day<=end:found=True;break
-     except:pass
-    if not found:
-     errors.append({"url":r.url,"sample":j["data"][:1]});continue
-   return j
-  except Exception as e:errors.append({"params":params,"error":str(e)})
+   except Exception as e:errors.append({"url":url,"params":params,"error":str(e)})
  raise RuntimeError(f"{dataset} {year} query failed; attempts={errors}")
 
 def main():
