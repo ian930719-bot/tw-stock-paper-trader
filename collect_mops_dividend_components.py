@@ -111,6 +111,8 @@ def fetch_year(session, roc_year, symbols, raw_dir, raw_cache_dir=None, retries=
                 dividend_year=str(row[year_c]).strip() if year_c else ""
                 common={"symbol":symbol,"par_value_per_share":par,"dividend_year":dividend_year,
                   "mops_year":roc_year,"ex_right_date":ex_right,"ex_dividend_date":ex_div,
+                  "announcement_date":str(row.get("公告日期","")).strip(),
+                  "announcement_time":str(row.get("公告時間","")).strip(),
                   "rights_issue_ratio_pct":rights_pct,
                   "rights_subscription_price":rights_price if rights_pct>0 else None,
                   "rights_issue_total_shares":rights_shares,
@@ -170,7 +172,14 @@ def main():
         if i<len(jobs):time.sleep(a.pause)
     comp=pd.DataFrame(components)
     if comp.empty:raise RuntimeError("MOPS returned no matching dividend component rows")
-    # Collapse multiple MOPS distributions for the same issuer and ex-date.
+    raw_component_rows=len(comp)
+    # MOPS may export multiple revisions of the same issuer/year/ex-date record.
+    # Keep the latest official announcement; summing revisions double-counts dividends.
+    if "announcement_date" in comp:
+        comp=comp.sort_values(["symbol","event_date","dividend_year","announcement_date","announcement_time"],kind="stable")
+        comp=comp.drop_duplicates(["symbol","event_date","dividend_year"],keep="last").copy()
+    duplicate_announcement_rows_removed=raw_component_rows-len(comp)
+    # Collapse distinct MOPS distributions for the same issuer and ex-date.
     grouped=[]
     for (symbol,event_date),g in comp.groupby(["symbol","event_date"],sort=True):
         pars=sorted({round(float(x),6) for x in g.par_value_per_share.dropna() if float(x)>0})
@@ -250,7 +259,7 @@ def main():
       "query_types":["listed companies (TYPEK=sii)","OTC companies (TYPEK=otc)"],
       "roc_years_queried":years,
       "twt49u_unresolved_events":int(len(unresolved)),
-      "mops_component_event_rows":int(len(comp)),
+      "mops_component_event_rows":int(len(comp)),\n      "raw_component_event_rows":int(raw_component_rows),\n      "duplicate_announcement_rows_removed":int(duplicate_announcement_rows_removed),
       "new_overrides_reconciled":int(len(additions)),
       "existing_override_rows":int(len(existing)),
       "unresolved_after_mops":int(len(unmatched)),
