@@ -56,10 +56,15 @@ def fetch_year(session,year,start_date,end_date):
    di=next((i for i,x in enumerate(h) if any(t in x for t in ("資料日期","除權息日期","除權日期","日期"))),None)
    if di is None:errors.append({"url":r.url,"fields":h});continue
    sample=[]
-   for row in payload["data"][:5]:
-    try:sample.append(rocdate(row[di]))
+   matched=False
+   for row in payload["data"]:
+    try:
+     d=rocdate(row[di])
+     if len(sample)<5:sample.append(d)
+     if start_date<=d<=end_date:
+      matched=True;break
     except:pass
-   if not sample or not any(start_date<=d<=end_date for d in sample):
+   if not matched:
     errors.append({"url":r.url,"stat":payload.get("stat"),"sample_dates":sample,"row_count":len(payload["data"])});continue
    return payload,r.url
   except Exception as e:errors.append({"params":params,"error":str(e)})
