@@ -45,9 +45,9 @@ jobs:
       - name: Download verified official corporate-action and special-event data
         uses: actions/download-artifact@v4
         with:
-          name: tpex-official-data-smoke
+          name: top10-fixed-basket-corporate-actions
           repository: ian930719-bot/tw-stock-paper-trader
-          run-id: 43342707340
+          run-id: 43344297044
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: data/top10_actions_twt49u
       - name: Validate downloaded official corporate-action checkpoint
