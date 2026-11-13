@@ -1,0 +1,35 @@
+name: Probe MOPS Full CSV Export
+
+on:
+  push:
+    branches: [research/top10-official-ohlcv-baseline-audit]
+    paths:
+      - .github/workflows/mops-full-csv-export-probe.yml
+      - probe_mops_full_csv_export.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pandas requests beautifulsoup4
+      - name: Retrieve full official MOPS CSV exports for selected years
+        run: |
+          python -m py_compile probe_mops_full_csv_export.py
+          python probe_mops_full_csv_export.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mops-full-csv-export-probe
+          path: artifacts/mops_full_csv_export_probe/
+          if-no-files-found: error
+          retention-days: 30
