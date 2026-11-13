@@ -92,6 +92,22 @@ def read_events(action_root,symbol_key,stock_id,market):
   rights_value=getattr(r,"rights_issue_shares",np.nan)
   stock_value=getattr(r,"stock_dividend",np.nan)
   cash_value=getattr(r,"cash_dividend",np.nan)
+  # Explicitly sourced component override for a mixed TWT49U row. The
+  # override is accepted only when its cash/stock terms independently
+  # reconcile to the exchange-published ex-rights reference price.
+  override_path=Path(__file__).resolve().parent/"data"/"official_dividend_component_overrides.csv"
+  if status!="resolved" and override_path.exists():
+   _ov=pd.read_csv(override_path,dtype={"symbol":str})
+   _ov=_ov[(_ov.symbol.astype(str).str.strip()==stock_id) & (_ov.event_date.astype(str)==day)]
+   if len(_ov)==1:
+    _o=_ov.iloc[0]
+    _cash=float(_o.cash_dividend_per_share)
+    _stock=float(_o.stock_dividend_per_share)
+    _par=float(_o.par_value_per_share)
+    _expected=(float(r.previous_close)-_cash)/(1.0+_stock/_par)
+    if abs(_expected-float(r.reference_price))>0.03:
+     raise RuntimeError(f"{symbol_key}: sourced dividend override fails official reference-price reconciliation on {day}: expected {_expected}, official {r.reference_price}")
+    cash_value=_cash;stock_value=_stock;status="resolved"
   if not pre_strategy:
    if status!="resolved":
     raise RuntimeError(f"{symbol_key}: unresolved official cash-dividend component {day}")
