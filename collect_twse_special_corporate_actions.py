@@ -64,7 +64,7 @@ def main():
  p=argparse.ArgumentParser();p.add_argument("--start-date",default="2011-01-01");p.add_argument("--end-date",default="2026-11-12");p.add_argument("--output",default="data/top10_actions_twt49u");a=p.parse_args()
  s=requests.Session();allrows=[];schemas={};skipped_periods=[]
  for dataset,kind in [("TWTAUU","capital_reduction"),("TWTB8U","par_value_change")]:
-  rows=[];schema=[]
+  rows=[];schema=[];invalid=[]
   periods=[(a.start_date,a.end_date)]
   try:
    payload=get(s,dataset,"full_range",a.start_date,a.end_date)
@@ -100,7 +100,11 @@ def main():
     except:continue
     if not lo<=day<=hi:continue
     prev=num(raw[pi]);ref=num(raw[ri])
-    if not prev or not ref or prev<=0 or ref<=0:raise RuntimeError(f"{dataset} invalid reference {sym} {day}: {raw}")
+    if not prev or not ref or prev<=0 or ref<=0:
+     invalid.append({"market":"TWSE","symbol":sym,"date":day,"dataset":dataset,
+      "reason":"non_positive_or_missing_reference","previous_close":prev,"reference_price":ref,
+      "raw_row":json.dumps(raw,ensure_ascii=False)})
+     continue
     rows.append({"market":"TWSE","symbol":sym,"date":day,"event_type":kind,"previous_close":prev,"reference_price":ref,
       "limit_up":num(raw[ui]) if ui is not None else None,"limit_down":num(raw[li]) if li is not None else None,
       "reason":str(raw[reason_i]).strip() if reason_i is not None else "",
@@ -113,9 +117,10 @@ def main():
  out=Path(a.output);out.mkdir(parents=True,exist_ok=True)
  frame=pd.DataFrame(allrows,columns=["market","symbol","date","event_type","previous_close","reference_price","limit_up","limit_down","reason","source"])
  frame.to_csv(out/"special_events.csv",index=False)
+ pd.DataFrame(invalid,columns=["market","symbol","date","dataset","reason","previous_close","reference_price","raw_row"]).to_csv(out/"special_events_invalid_rows.csv",index=False)
  m={"source":"TWSE official TWTAUU/TWTB8U","collected_at_taipei":datetime.now(ZoneInfo("Asia/Taipei")).isoformat(),
   "requested_period":[a.start_date,a.end_date],"rows":len(frame),"events_by_type":frame.event_type.value_counts().to_dict() if len(frame) else {},
-  "complete":len(skipped_periods)==0,"skipped_periods":skipped_periods,"schemas":schemas,"note":"Empty response for a year is accepted only when endpoint returns a valid JSON schema and empty data list."}
+  "complete":len(skipped_periods)==0,"skipped_periods":skipped_periods,"invalid_reference_rows":len(invalid),"schemas":schemas,"note":"Empty response for a year is accepted only when endpoint returns a valid JSON schema and empty data list."}
  (out/"special_events_manifest.json").write_text(json.dumps(m,ensure_ascii=False,indent=2),encoding="utf-8")
  print(json.dumps({k:v for k,v in m.items() if k!="schemas"},ensure_ascii=False,indent=2))
 if __name__=="__main__":main()
