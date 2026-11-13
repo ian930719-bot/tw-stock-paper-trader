@@ -36,11 +36,11 @@ def fetch_day(session,day,retries=6):
     for n in names:
      if n in fields:return fields.index(n)
     raise RuntimeError("Missing MI_INDEX field: "+"/".join(names))
-   code=idx("證券代號"); name=idx("證券名稱"); vol=idx("成交股數"); money=idx("成交金額")
+   code=idx("證券代號"); name=idx("證券名稱"); vol=idx("成交股數"); money=idx("成交金額"); op=idx("開盤價"); hi=idx("最高價"); lo=idx("最低價"); cl=idx("收盤價")
    rows=[]
    for a in table.get("data",[]):
     sym=str(a[code]).strip()
-    if not (len(sym)==4 and sym.isdigit()): continue
+    if not (len(sym)==4 and sym.isdigit()) or sym.startswith("0") or sym.startswith("91"): continue
     v=normnum(a[vol]); m=normnum(a[money])
     if v is None or m is None: continue
     rows.append({"date":pd.Timestamp(day).strftime("%Y-%m-%d"),"symbol":sym,"name":str(a[name]).strip(),
