@@ -126,6 +126,7 @@ def main():
         "historical_action_policy":"For dates before 2022-01-01, use exchange-published adjustment ratios for indicator warm-up only; no pre-test cash dividend or share entitlement is credited because the shared account starts flat on 2022-01-01.",
         "official_price_limit_validation_start":"2022-01-01; earlier prices are indicator warm-up only and cannot execute orders.",
         "cash_capital_increase_rights_policy":"Do not exercise subscription rights; no subscription cash or new shares are booked. TPEx free stock dividends are booked using the official per-1,000-share ratio, and exchange-published adjustment ratios are used for indicator history.",
+        "special_resumption_policy":"A special resumption marker must match an official exchange event record even on a no-trade session; unmatched markers fail closed.",
         "filters":report_filters,
         "interpretation":"This is the actual one-position shared NT$100,000 account. A filter is not approved unless its out-of-time portfolio results improve risk without unacceptable return/trade-frequency loss. No threshold is reselected on 2022+ data.",
     }
