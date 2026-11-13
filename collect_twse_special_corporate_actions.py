@@ -6,7 +6,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import pandas as pd,requests
 
-SYMBOLS={"2330","2454","1303","2327","2408","2308","3037","3008","2383","2303"}
+
 BASE="https://www.twse.com.tw/exchangeReport/"
 def rocdate(v):
  s=str(v).strip().replace("年","/").replace("月","/").replace("日","")
@@ -51,7 +51,6 @@ def main():
    for raw in j["data"]:
     if len(raw)<=max(di,si,pi,ri):continue
     sym=str(raw[si]).strip()
-    if sym not in SYMBOLS:continue
     try:day=rocdate(raw[di])
     except:continue
     if not a.start_date<=day<=a.end_date:continue
