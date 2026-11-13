@@ -78,7 +78,7 @@ def main():
             print(f"[BLOCKED] {sym}: {e}",flush=True)
     if not prepared:
         raise RuntimeError("No constituent passed official-data validation")
-    rows=[];report_filters={}
+    rows=[];report_filters={};partial_rows=[];report_filters_eligible_subset={}
     for filter_name,spec in FILTERS.items():
         variant={}
         for sym,x in prepared.items():
@@ -98,8 +98,30 @@ def main():
                 if result.get("equity_curve"):
                     pd.DataFrame(annual_metrics(result["equity_curve"],result.get("trades",[]),INITIAL_CAPITAL)).to_csv(
                         out/f"annual_{filter_name}_10bps.csv",index=False)
-        print(f"[PORTFOLIO] {filter_name} complete",flush=True)
+        # Secondary diagnostic only: verified members of the true daily top ten,
+        # retaining original volume ranks. This never replaces strict validation.
+        partial_variant={}
+        for sym,x in prepared.items():
+            y=dict(x)
+            y["low"]=x["low"] & entry_mask(x["d"],spec)
+            partial_variant[sym]=y
+        report_filters_eligible_subset[filter_name]={}
+        for slip in SLIPPAGE_BPS:
+            partial=run_shared_capital_portfolio(
+                partial_variant,uni,slippage_bps=slip,initial_capital=INITIAL_CAPITAL,
+                require_complete_universe=False)
+            pm={k:v for k,v in partial.items() if k not in {"trades","equity_curve"}}
+            partial_rows.append({"filter":filter_name,"slippage_bps":slip,**pm})
+            report_filters_eligible_subset[filter_name][f"{slip}bps"]=pm
+            if slip==10:
+                pd.DataFrame(partial.get("trades",[])).to_csv(out/f"trades_{filter_name}_eligible_members_only_10bps.csv",index=False)
+                pd.DataFrame(partial.get("equity_curve",[])).to_csv(out/f"equity_{filter_name}_eligible_members_only_10bps.csv",index=False)
+                if partial.get("equity_curve"):
+                    pd.DataFrame(annual_metrics(partial["equity_curve"],partial.get("trades",[]),INITIAL_CAPITAL)).to_csv(
+                        out/f"annual_{filter_name}_eligible_members_only_10bps.csv",index=False)
+        print(f"[PORTFOLIO] {filter_name} strict + partial diagnostics complete",flush=True)
     pd.DataFrame(rows).to_csv(out/"shared_capital_entry_filter_metrics.csv",index=False)
+    pd.DataFrame(partial_rows).to_csv(out/"shared_capital_eligible_members_only_metrics.csv",index=False)
     manifest_path=Path(a.universe_file).parent/"manifest.json"
     manifest=json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
     baseline_10bps=report_filters["baseline"].get("10bps",{})
@@ -128,11 +150,17 @@ def main():
         "cash_capital_increase_rights_policy":"Do not exercise subscription rights; no subscription cash or new shares are booked. TPEx free stock dividends are booked using the official per-1,000-share ratio, and exchange-published adjustment ratios are used for indicator history.",
         "special_resumption_policy":"A special resumption marker must match an official exchange event record even on a no-trade session; unmatched markers fail closed.",
         "filters":report_filters,
-        "interpretation":"This is the actual one-position shared NT$100,000 account. A filter is not approved unless its out-of-time portfolio results improve risk without unacceptable return/trade-frequency loss. No threshold is reselected on 2022+ data.",
+        "eligible_members_only_diagnostic":{
+            "classification":"SECONDARY_PARTIAL_COVERAGE_DIAGNOSTIC_NOT_FULL_UNIVERSE_VALIDATION",
+            "filters":report_filters_eligible_subset,
+            "warning":"Unverified daily top-ten members are excluded from candidate selection; this diagnostic is not a substitute for strict full-universe coverage and may have selection bias."
+        },
+        "interpretation":"Strict full-universe results remain primary. The eligible-members-only replay is a secondary diagnostic and must not be presented as full-universe performance. A filter is not approved unless out-of-time risk improves without unacceptable return or trade-frequency loss. No threshold is reselected on 2022+ data.",
     }
     (out/"report.json").write_text(json.dumps(report,ensure_ascii=False,indent=2,default=float),encoding="utf-8")
     print(json.dumps({"symbols_expected":len(symbols),"symbols_prepared":len(prepared),
         "blocked":len(blocked),"baseline_10bps":report_filters["baseline"].get("10bps"),
+        "partial_baseline_10bps":report_filters_eligible_subset["baseline"].get("10bps"),
         "filters_10bps":{k:v.get("10bps") for k,v in report_filters.items() if k!="baseline"}},
         ensure_ascii=False,indent=2,default=float))
 
