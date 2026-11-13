@@ -15,7 +15,7 @@ from tsmc_swing_research import build_causal_features
 from tsmc_2330_4019_replication import RULES,build_candidate_signals,simulate,annual_metrics,INITIAL_CAPITAL,SLIPPAGE_BPS
 from tsmc_2330_trend_reentry_annual_oof import tick_size
 
-SYMBOLS=["2330","2454","1303","2327","2408","2308","3037","3008","2383","2303"]
+DEFAULT_SYMBOLS=["2330","2454","1303","2327","2408","2308","3037","3008","2383","2303"]
 NAMES={"2330":"台積電","2454":"聯發科","1303":"南亞","2327":"國巨","2408":"南亞科","2308":"台達電","3037":"欣興","3008":"大立光","2383":"台光電","2303":"聯電"}
 
 def limit_price(ref,band,side):
@@ -71,7 +71,7 @@ def read_events(action_root,symbol):
  return ev,cash,refs,limits
 
 def build_limits(bars,ref_prices,event_limits,symbol):
- out={};prev_close=None;missing=[];conflicts=[]
+ out={};prev_close=None;missing=[];conflicts=[];seen=False
  for r in bars.itertuples(index=False):
   day=pd.Timestamp(r.date).strftime("%Y-%m-%d")
   note=str(getattr(r,"note","")).strip()
@@ -83,6 +83,10 @@ def build_limits(bars,ref_prices,event_limits,symbol):
   elif prev_close is not None:
    ref=prev_close;band=.07 if day<"2015-06-01" else .10
    up=limit_price(ref,band,"UP");down=limit_price(ref,band,"DOWN");src="TWSE official band/tick rules from prior traded close"
+  elif not seen:
+   seen=True
+   if float(r.volume)>0:prev_close=float(r.close)
+   continue
   else:
    if day>="2015-01-01":missing.append(day)
    continue
@@ -90,6 +94,7 @@ def build_limits(bars,ref_prices,event_limits,symbol):
   if hi>up+1e-6 or lo<down-1e-6:
    conflicts.append({"date":day,"high":hi,"low":lo,"up":up,"down":down,"reference":ref,"source":src})
   out[day]=(up,down)
+  seen=True
   if float(r.volume)>0:prev_close=float(r.close)
   else:prev_close=None
  if missing:raise RuntimeError(f"{symbol}: missing price-limit reference on {len(missing)} sessions; first={missing[:5]}")
@@ -116,13 +121,22 @@ def hold_gate(d):
 
 def main():
  p=argparse.ArgumentParser()
- p.add_argument("--raw-bars",default="data/top10_official_raw/bars")
+ p.add_argument("--raw-bars",default="data/twse_marketwide_turnover/symbol_bars")
+ p.add_argument("--universe-file",default="data/twse_marketwide_turnover/historical_daily_top10_by_turnover.csv")
  p.add_argument("--actions",default="data/top10_actions_twt49u")
  p.add_argument("--output",default="artifacts/top10_frozen_high_hold")
  a=p.parse_args()
  out=Path(a.output);out.mkdir(parents=True,exist_ok=True)
  rows=[];blocked=[]
- for symbol in SYMBOLS:
+ universe_path=Path(a.universe_file)
+ if universe_path.exists():
+  uni=pd.read_csv(universe_path,dtype={"symbol":str})
+  symbols=sorted(uni.symbol.astype(str).str.strip().unique())
+  name_map=uni.drop_duplicates("symbol").set_index("symbol").name.astype(str).to_dict()
+ else:
+  symbols=sorted(p.stem for p in Path(a.raw_bars).glob("*.csv")) or DEFAULT_SYMBOLS
+  name_map={}
+ for symbol in symbols:
   try:
    raw=pd.read_csv(Path(a.raw_bars)/f"{symbol}.csv",parse_dates=["date"])
    raw=raw.sort_values("date").drop_duplicates("date").reset_index(drop=True)
@@ -138,21 +152,21 @@ def main():
    for slip in SLIPPAGE_BPS:
     sim=simulate(d,low,high,risk,limits,cashdiv,slip,start,end,high_hold_signal=hold)
     m={k:v for k,v in sim.items() if k not in {"trades","equity_curve"}}
-    rows.append({"symbol":symbol,"name":NAMES[symbol],"variant":"frozen_high_hold","slippage_bps":slip,**m})
+    rows.append({"symbol":symbol,"name":name_map.get(symbol,NAMES.get(symbol,str(raw.name.iloc[0]) if "name" in raw else symbol)),"variant":"frozen_high_hold","slippage_bps":slip,**m})
     if slip==10:
      pd.DataFrame(sim["trades"]).to_csv(out/f"trades_{symbol}_10bps.csv",index=False)
      pd.DataFrame(sim["equity_curve"]).to_csv(out/f"equity_{symbol}_10bps.csv",index=False)
      pd.DataFrame(annual_metrics(sim["equity_curve"],sim["trades"],INITIAL_CAPITAL)).to_csv(out/f"annual_{symbol}_10bps.csv",index=False)
-   print(f"[DONE] {symbol} {NAMES[symbol]}",flush=True)
+   print(f"[DONE] {symbol} {name_map.get(symbol,NAMES.get(symbol,symbol))}",flush=True)
   except Exception as e:
-   blocked.append({"symbol":symbol,"name":NAMES[symbol],"reason":f"{type(e).__name__}: {e}"})
+   blocked.append({"symbol":symbol,"name":name_map.get(symbol,NAMES.get(symbol,symbol)),"reason":f"{type(e).__name__}: {e}"})
    print(f"[BLOCKED] {symbol}: {e}",flush=True)
  result={"classification":"FIXED_TSMC_RULE_TRANSFER_AUDIT_NOT_PER_SYMBOL_RETUNED",
-  "period":"2015 onward through last official raw bar","symbols_expected":len(SYMBOLS),
+  "period":"2015 onward through last official raw bar","symbols_expected":len(symbols),
   "symbols_completed":len(set(x["symbol"] for x in rows)),"blocked":blocked,
   "costs":{"commission_per_side":.001425,"minimum_commission_ntd":20,"sell_tax":.003,"slippage_bps":list(SLIPPAGE_BPS)},
   "target":{"cagr_min":.50,"win_rate_min":.8695652173913043,"max_drawdown_floor":-.25},
-  "status":"COMPLETE" if len(set(x["symbol"] for x in rows))==len(SYMBOLS) and not blocked else "BLOCKED_OR_PARTIAL",
+  "status":"COMPLETE" if len(set(x["symbol"] for x in rows))==len(symbols) and not blocked else "BLOCKED_OR_PARTIAL",
   "metrics":rows,"rules":RULES,
   "notes":["No per-symbol parameter tuning; frozen TSMC rule family only.",
    "Raw official TWSE OHLC used for fills; corporate-action back-adjustment used for signal indicators.",
