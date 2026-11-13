@@ -41,7 +41,10 @@ def main():
   for y in range(pd.Timestamp(a.start_date).year,pd.Timestamp(a.end_date).year+1):
    lo=max(pd.Timestamp(a.start_date),pd.Timestamp(y,1,1)).strftime("%Y-%m-%d")
    hi=min(pd.Timestamp(a.end_date),pd.Timestamp(y,12,31)).strftime("%Y-%m-%d")
-   j=get(s,dataset,y,lo,hi);h=[str(x).strip() for x in j["fields"]];schema.append({"year":y,"fields":h})
+   j=get(s,dataset,y,lo,hi);h=[str(x).strip() for x in j["fields"]];schema.append({"year":y,"fields":h,"rows":len(j["data"])})
+   if not h and not j["data"]:
+    print(f"[YEAR EMPTY] {dataset} {y}",flush=True)
+    continue
    di=ix(h,"恢復買賣日期","恢復買賣日","資料日期","日期")
    si=ix(h,"股票代號","證券代號");ni=ix(h,"股票名稱","證券名稱",required=False)
    pi=ix(h,"停止買賣前收盤價格","停止買賣前價格","停止買賣前收盤價","變更前收盤價")
