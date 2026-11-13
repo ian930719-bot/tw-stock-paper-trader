@@ -18,6 +18,8 @@ jobs:
           python-version: "3.12"
       - name: Run reproducible TWSE research
         run: python research/umc2303/run_research.py
+      - name: Audit official TWSE TWT49U ex-right and ex-dividend events
+        run: python research/umc2303/run_official_twt49u_audit.py
       - name: Run MA5 exit and reclaim re-entry experiments
         run: python research/umc2303/run_exit_reentry_research.py
       - name: Run chronological robustness checks
