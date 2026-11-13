@@ -89,10 +89,20 @@ def main():
     d=parse_features(a.trades)
     train=d[d.period=="train_2015_2021"].copy()
     test=d[d.period=="test_2022_2026"].copy()
+    non_tsmc_train=train[train.symbol.astype(str)!="2330"].copy()
+    non_tsmc_test=test[test.symbol.astype(str)!="2330"].copy()
+    tsmc_train=train[train.symbol.astype(str)=="2330"].copy()
+    tsmc_test=test[test.symbol.astype(str)=="2330"].copy()
     base={"total_trades":len(d),"symbols":sorted(d.symbol.astype(str).unique().tolist()),
           "train_trades":len(train),"test_trades":len(test),
           "train_win_rate":float(train.win.mean()) if len(train) else None,
           "test_win_rate":float(test.win.mean()) if len(test) else None,
+          "non_tsmc_train_trades":len(non_tsmc_train),"non_tsmc_test_trades":len(non_tsmc_test),
+          "non_tsmc_train_win_rate":float(non_tsmc_train.win.mean()) if len(non_tsmc_train) else None,
+          "non_tsmc_test_win_rate":float(non_tsmc_test.win.mean()) if len(non_tsmc_test) else None,
+          "tsmc_train_trades":len(tsmc_train),"tsmc_test_trades":len(tsmc_test),
+          "tsmc_train_win_rate":float(tsmc_train.win.mean()) if len(tsmc_train) else None,
+          "tsmc_test_win_rate":float(tsmc_test.win.mean()) if len(tsmc_test) else None,
           "split_date":SPLIT_DATE,"features_available":[x for x in FEATURES if x in d.columns]}
     (out/"summary.json").write_text(json.dumps(base,ensure_ascii=False,indent=2),encoding="utf-8")
     sep=[]
@@ -124,6 +134,30 @@ def main():
                       "test_win_rate_delta_pp":(test_metrics["win_rate"]-baseline_test["win_rate"])*100
                         if test_metrics["win_rate"] is not None and baseline_test["win_rate"] is not None else None})
     pd.DataFrame(rules).sort_values(["test_win_rate_delta_pp","test_n"],ascending=[False,False]).to_csv(out/"single_feature_filter_validation.csv",index=False)
+    non_tsmc_baseline=score_mask(non_tsmc_test,pd.Series(True,index=non_tsmc_test.index))
+    non_tsmc_rules=[]
+    non_tsmc_sep=[]
+    for feature in base["features_available"]:
+        w=pd.to_numeric(non_tsmc_train.loc[non_tsmc_train.win==1,feature],errors="coerce").dropna()
+        l=pd.to_numeric(non_tsmc_train.loc[non_tsmc_train.win==0,feature],errors="coerce").dropna()
+        if len(w)>=3 and len(l)>=3:
+            try:pval=float(mannwhitneyu(w,l,alternative="two-sided").pvalue)
+            except Exception:pval=None
+            pooled=np.sqrt((w.var(ddof=1)+l.var(ddof=1))/2)
+            effect=float((w.mean()-l.mean())/pooled) if pooled and np.isfinite(pooled) else None
+            non_tsmc_sep.append({"feature":feature,"wins_n":len(w),"losses_n":len(l),
+                "win_mean":float(w.mean()),"loss_mean":float(l.mean()),
+                "standardized_mean_difference":effect,"mann_whitney_p":pval})
+        rule=choose_filter(non_tsmc_train,feature)
+        if not rule:continue
+        metrics,_=evaluate_filter(non_tsmc_test,rule)
+        non_tsmc_rules.append({**rule,"test_n":metrics["n"],
+            "test_retention":metrics["n"]/len(non_tsmc_test) if len(non_tsmc_test) else None,
+            "test_win_rate":metrics["win_rate"],"test_mean_net_return":metrics["mean_net_return"],
+            "test_win_rate_delta_pp":(metrics["win_rate"]-non_tsmc_baseline["win_rate"])*100
+              if metrics["win_rate"] is not None and non_tsmc_baseline["win_rate"] is not None else None})
+    pd.DataFrame(non_tsmc_rules).sort_values(["test_win_rate_delta_pp","test_n"],ascending=[False,False]).to_csv(out/"non_tsmc_single_feature_filter_validation.csv",index=False)
+    pd.DataFrame(non_tsmc_sep).sort_values("mann_whitney_p",na_position="last").to_csv(out/"non_tsmc_feature_separation.csv",index=False)
     loso=[]
     for heldout in sorted(d.symbol.astype(str).unique()):
         tr=d[(d.symbol.astype(str)!=heldout)&(d.period=="train_2015_2021")]
