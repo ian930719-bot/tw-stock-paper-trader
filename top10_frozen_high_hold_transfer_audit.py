@@ -380,14 +380,16 @@ def main():
    blocked.append({"symbol":symbol,"name":name_map.get(symbol,NAMES.get(symbol,symbol)),"reason":f"{type(e).__name__}: {e}"})
    print(f"[BLOCKED] {symbol}: {e}",flush=True)
  pd.DataFrame(annual_rows).to_csv(out/"annual_metrics_10bps_by_symbol.csv",index=False)
- shared_portfolio=None
+ shared_portfolio=None;shared_portfolios={}
  if use_universe_filter and prepared:
-  portfolio=run_shared_capital_portfolio(prepared,uni,slippage_bps=10,initial_capital=INITIAL_CAPITAL)
-  pd.DataFrame(portfolio.get("trades",[])).to_csv(out/"shared_capital_trades_10bps.csv",index=False)
-  pd.DataFrame(portfolio.get("equity_curve",[])).to_csv(out/"shared_capital_equity_10bps.csv",index=False)
-  if portfolio.get("equity_curve"):
-   pd.DataFrame(annual_metrics(portfolio["equity_curve"],portfolio["trades"],INITIAL_CAPITAL)).to_csv(out/"shared_capital_annual_10bps.csv",index=False)
-  shared_portfolio={k:v for k,v in portfolio.items() if k not in {"trades","equity_curve"}}
+  for slip in SLIPPAGE_BPS:
+   portfolio=run_shared_capital_portfolio(prepared,uni,slippage_bps=slip,initial_capital=INITIAL_CAPITAL)
+   pd.DataFrame(portfolio.get("trades",[])).to_csv(out/f"shared_capital_trades_{slip}bps.csv",index=False)
+   pd.DataFrame(portfolio.get("equity_curve",[])).to_csv(out/f"shared_capital_equity_{slip}bps.csv",index=False)
+   if portfolio.get("equity_curve"):
+    pd.DataFrame(annual_metrics(portfolio["equity_curve"],portfolio["trades"],INITIAL_CAPITAL)).to_csv(out/f"shared_capital_annual_{slip}bps.csv",index=False)
+   shared_portfolios[f"{slip}bps"]={k:v for k,v in portfolio.items() if k not in {"trades","equity_curve"}}
+  shared_portfolio=shared_portfolios.get("10bps")
  target_assessment=None
  if shared_portfolio:
   target_assessment={
@@ -410,7 +412,7 @@ def main():
   "costs":{"commission_per_side":.001425,"minimum_commission_ntd":20,"sell_tax":.003,"slippage_bps":list(SLIPPAGE_BPS)},
   "target":{"cagr_min":.50,"win_rate_min":.8695652173913043,"max_drawdown_floor":-.25},
   "status":"COMPLETE" if len(set(x["symbol"] for x in rows))==len(symbols) and not blocked else "BLOCKED_OR_PARTIAL",
-  "data_provenance":data_provenance,"cross_validation":{"parameters_frozen_from_TSMC":True,"no_reoptimization_on_transfer_universe":True,"annual_performance_decomposition":"annual_metrics_10bps_by_symbol.csv","interpretation":"Year-by-year stability report using unchanged frozen rules; this is not a retuned annual OOF strategy."},"metrics":rows,"tsmc_2330_universe_free_reproduction":tsmc_reproduction,"shared_capital_portfolio":shared_portfolio,"target_assessment":target_assessment,"rules":RULES,
+  "data_provenance":data_provenance,"cross_validation":{"parameters_frozen_from_TSMC":True,"no_reoptimization_on_transfer_universe":True,"annual_performance_decomposition":"annual_metrics_10bps_by_symbol.csv","interpretation":"Year-by-year stability report using unchanged frozen rules; this is not a retuned annual OOF strategy."},"metrics":rows,"tsmc_2330_universe_free_reproduction":tsmc_reproduction,"shared_capital_portfolio":shared_portfolio,"shared_capital_portfolios_by_slippage":shared_portfolios,"target_assessment":target_assessment,"rules":RULES,
   "notes":["No per-symbol parameter tuning; frozen TSMC rule family only.",
    "Entry eligibility uses the official same-day closing traded-share top ten; signals are known after close and orders execute no earlier than the next session.",
    "Raw official TWSE MI_INDEX and TPEx afterTrading/otc OHLC used for fills; exchange-specific corporate-action back-adjustment used for signal indicators.",
