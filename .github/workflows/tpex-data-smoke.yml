@@ -1,0 +1,68 @@
+name: TPEx Official Data Smoke Test
+
+on:
+  push:
+    branches: [research/top10-official-ohlcv-baseline-audit]
+    paths:
+      - .github/workflows/tpex-data-smoke.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/top10-official-ohlcv-baseline-audit
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - run: pip install -r requirements.txt
+      - name: Download verified official TWSE seed bars
+        uses: actions/download-artifact@v4
+        with:
+          name: top10-official-raw-ohlcv
+          repository: ian930719-bot/tw-stock-paper-trader
+          run-id: 43225571777
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: data/top10_official_raw
+      - name: Probe TPEx daily market endpoint
+        run: |
+          python -m py_compile collect_twse_historical_daily_top10.py collect_tpex_corporate_actions.py
+          python - <<'PY'
+          import json, requests
+          from collect_twse_historical_daily_top10 import fetch_tpex_day
+          rows=fetch_tpex_day(requests.Session(),"2026-11-12")
+          assert len(rows)>=100, f"Too few TPEx common-stock rows: {len(rows)}"
+          print(json.dumps({"date":"2026-11-12","tpex_common_stock_rows":len(rows),"sample":rows[:3]},ensure_ascii=False,indent=2))
+          PY
+      - name: Collect official TPEx corporate actions
+        run: |
+          python collect_tpex_corporate_actions.py --start-date 2010-01-01 --end-date 2026-11-12 --special-start-date 2013-01-01 --output data/top10_actions_twt49u
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path("data/top10_actions_twt49u")
+          ex=json.loads("{}")
+          import pandas as pd
+          a=pd.read_csv(p/"tpex_exdailyq_all.csv")
+          s=pd.read_csv(p/"special_events.csv")
+          m=json.loads((p/"special_events_manifest.json").read_text(encoding="utf-8"))
+          assert len(a)>0 and len(s)>0
+          assert {2015,2020,2025}.issubset(set(pd.to_datetime(a.date).dt.year))
+          assert 2025 in set(pd.to_datetime(s.date).dt.year)
+          print(json.dumps({"exDailyQ_rows":len(a),"revivt_rows":len(s),"manifest":m},ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tpex-official-data-smoke
+          path: data/top10_actions_twt49u/
+          if-no-files-found: error
+          retention-days: 30
