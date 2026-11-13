@@ -41,7 +41,7 @@ def read_events(action_root,symbol_key,stock_id,market):
  special["date"]=pd.to_datetime(special.date,errors="coerce")
  special=special[(special.market.astype(str).str.upper()==market.upper()) &
                  (special.symbol.astype(str).str.strip()==stock_id) &
-                 (special.date>=pd.Timestamp("2014-01-01"))]
+                 (special.date>=pd.Timestamp("2014-01-01"))].copy()
  invalid_special_path=root/"special_events_invalid_rows.csv"
  if invalid_special_path.exists():
   invalid_special=pd.read_csv(invalid_special_path,dtype={"symbol":str})
@@ -49,8 +49,13 @@ def read_events(action_root,symbol_key,stock_id,market):
                               (invalid_special.symbol.astype(str).str.strip()==stock_id)]
   if not bad_special.empty:
    raise RuntimeError(str(symbol_key)+": invalid official special-event references require manual reconciliation: "+str(bad_special.to_dict("records")[:3]))
- if not special.empty:
-  raise RuntimeError(f"{symbol_key}: official capital-reduction/par-value events require a share-count/cash-refund model: {special.to_dict('records')[:3]}")
+ # Events before the first strategy session are price-history adjustments only:
+ # no position existed yet, so no historical share-count/cash-refund accounting is needed.
+ strategy_start=pd.Timestamp("2015-01-01")
+ special_pre=special[special.date<strategy_start].copy()
+ special_post=special[special.date>=strategy_start].copy()
+ if not special_post.empty:
+  raise RuntimeError(f"{symbol_key}: post-2015 capital-reduction/par-value events require a share-count/cash-refund model: {special_post.to_dict('records')[:3]}")
  if market.upper()=="TWSE":
   p=root/"twt49u_all.csv"
   if not p.exists():raise RuntimeError("Missing global official TWSE TWT49U event table")
@@ -66,28 +71,33 @@ def read_events(action_root,symbol_key,stock_id,market):
    if not bad.empty:
     raise RuntimeError(f"{symbol_key}: invalid official TPEx corporate-action reference rows require manual reconciliation: {bad.to_dict('records')[:3]}")
  ev=all_events[all_events.symbol.astype(str).str.strip()==stock_id].copy()
- if ev.empty:return pd.DataFrame(columns=["symbol","date","adjustment_ratio"]),{}, {}, {}
+ if ev.empty:
+  ev=pd.DataFrame(columns=["symbol","date","adjustment_ratio"])
  ev["date"]=pd.to_datetime(ev.date,errors="coerce").dt.normalize()
  ev=ev[ev.date>=pd.Timestamp("2014-01-01")].copy()
  ev["symbol"]=symbol_key
  ev["adjustment_ratio"]=pd.to_numeric(ev.adjustment_ratio,errors="coerce")
  ev=ev.dropna(subset=["date","adjustment_ratio"])
  cash={};refs={};limits={}
+ # Only post-start corporate actions need full cash/share entitlement handling.
  for r in ev.itertuples(index=False):
   day=pd.Timestamp(r.date).strftime("%Y-%m-%d")
-  if str(getattr(r,"cash_dividend_status","resolved"))!="resolved":
-   raise RuntimeError(f"{symbol_key}: unresolved official cash-dividend component {day}")
+  pre_strategy=pd.Timestamp(r.date)<strategy_start
+  status=str(getattr(r,"cash_dividend_status","resolved"))
   action_type=str(getattr(r,"action_type",""))
-  if "權" in action_type:
-   raise RuntimeError(f"{symbol_key}: ex-rights/rights event requires a share/rights valuation model {day} ({action_type})")
   rights_value=getattr(r,"rights_issue_shares",np.nan)
-  if pd.notna(rights_value) and float(rights_value)>0:
-   raise RuntimeError(f"{symbol_key}: rights-issue subscription event requires a rights valuation model {day}")
   stock_value=getattr(r,"stock_dividend",np.nan)
-  if pd.notna(stock_value) and float(stock_value)>0:
-   raise RuntimeError(f"{symbol_key}: stock dividend requires share-count adjustment model {day}")
-  cd=getattr(r,"cash_dividend",np.nan)
-  if pd.notna(cd) and float(cd)>0:cash[day]=float(cd)
+  if not pre_strategy:
+   if status!="resolved":
+    raise RuntimeError(f"{symbol_key}: unresolved official cash-dividend component {day}")
+   if "權" in action_type:
+    raise RuntimeError(f"{symbol_key}: post-2015 ex-rights/rights event requires a share/rights valuation model {day} ({action_type})")
+   if pd.notna(rights_value) and float(rights_value)>0:
+    raise RuntimeError(f"{symbol_key}: post-2015 rights-issue subscription event requires a rights valuation model {day}")
+   if pd.notna(stock_value) and float(stock_value)>0:
+    raise RuntimeError(f"{symbol_key}: post-2015 stock dividend requires share-count adjustment model {day}")
+   cd=getattr(r,"cash_dividend",np.nan)
+   if pd.notna(cd) and float(cd)>0:cash[day]=float(cd)
   ref=float(r.reference_price)
   up=getattr(r,"limit_up",np.nan);down=getattr(r,"limit_down",np.nan)
   if not np.isfinite(float(up)) or not np.isfinite(float(down)):
@@ -95,7 +105,26 @@ def read_events(action_root,symbol_key,stock_id,market):
   up=float(up);down=float(down)
   if day in refs and abs(refs[day]-ref)>1e-6:raise RuntimeError(f"{symbol_key} duplicate corporate-action reference conflict {day}")
   refs[day]=ref;limits[day]=(up,down)
- ev["source"]=f"{market.upper()} official ex-rights/ex-dividend calculation"
+ # Pre-2015 special events still adjust the indicator history; positions begin only in 2015.
+ pre_rows=[]
+ for r in special_pre.itertuples(index=False):
+  day=pd.Timestamp(r.date).strftime("%Y-%m-%d")
+  prev=float(r.previous_close);ref=float(r.reference_price)
+  up=float(r.limit_up);down=float(r.limit_down)
+  if not all(np.isfinite(x) and x>0 for x in (prev,ref,up,down)):
+   raise RuntimeError(f"{symbol_key}: invalid pre-2015 special-action reference {day}")
+  if day in refs and abs(refs[day]-ref)>1e-6:
+   raise RuntimeError(f"{symbol_key}: special-action reference conflicts with dividend event {day}")
+  refs[day]=ref;limits[day]=(up,down)
+  pre_rows.append({"symbol":symbol_key,"date":pd.Timestamp(r.date),
+                   "adjustment_ratio":ref/prev,
+                   "source":str(getattr(r,"source","official special corporate action"))})
+ if pre_rows:
+  ev=pd.concat([ev,pd.DataFrame(pre_rows)],ignore_index=True)
+ if not ev.empty and ev.duplicated(["symbol","date"]).any():
+  dup=ev[ev.duplicated(["symbol","date"],keep=False)]
+  raise RuntimeError(f"{symbol_key}: duplicate same-day corporate-action adjustments require reconciliation: {dup.to_dict('records')[:3]}")
+ ev["source"]=f"{market.upper()} official ex-rights/ex-dividend and pre-2015 special-event adjustments"
  return ev,cash,refs,limits
 
 def build_limits(bars,ref_prices,event_limits,symbol):
