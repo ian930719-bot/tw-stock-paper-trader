@@ -76,6 +76,12 @@ def build_limits(bars,ref_prices,event_limits,symbol):
  for r in bars.itertuples(index=False):
   day=pd.Timestamp(r.date).strftime("%Y-%m-%d")
   note=str(getattr(r,"note","")).strip()
+  ohlc=[getattr(r,x,np.nan) for x in ("open","high","low","close")]
+  volume=float(getattr(r,"volume",0) or 0)
+  if volume<=0 or not all(np.isfinite(float(x)) for x in ohlc):
+   if day>="2015-01-01":missing.append(day)
+   prev_close=None;seen=True
+   continue
   if note in {"**","＊＊"} and day not in event_limits:
    raise RuntimeError(f"{symbol}: official raw-bar special resumption marker without TWT49U event {day}")
   if day in event_limits:
@@ -141,11 +147,14 @@ def main():
   active_dates_by_symbol={}
  for symbol in symbols:
   try:
-   raw=pd.read_csv(Path(a.raw_bars)/f"{symbol}.csv",parse_dates=["date"])
-   raw=raw.sort_values("date").drop_duplicates("date").reset_index(drop=True)
-   if len(raw)<260:raise RuntimeError(f"insufficient raw history {len(raw)}")
+   raw_full=pd.read_csv(Path(a.raw_bars)/f"{symbol}.csv",parse_dates=["date"])
+   raw_full=raw_full.sort_values("date").drop_duplicates("date").reset_index(drop=True)
+   if len(raw_full)<260:raise RuntimeError(f"insufficient raw history {len(raw_full)}")
    ev,cashdiv,ref,event_limits=read_events(a.actions,symbol)
-   limits=build_limits(raw,ref,event_limits,symbol)
+   limits=build_limits(raw_full,ref,event_limits,symbol)
+   raw=raw_full.dropna(subset=["open","high","low","close"]).copy()
+   raw=raw[raw.volume>0].reset_index(drop=True)
+   if len(raw)<260:raise RuntimeError(f"insufficient traded raw history after no-trade filtering {len(raw)}")
    d=make_features(raw,ev)
    low,high,risk=build_candidate_signals(d)
    active_dates=active_dates_by_symbol.get(symbol,set())
