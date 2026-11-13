@@ -384,7 +384,7 @@ def main():
    raw_full=pd.read_csv(Path(a.raw_bars)/f"{symbol}.csv",parse_dates=["date"])
    raw_full=raw_full.sort_values("date").drop_duplicates("date").reset_index(drop=True)
    if len(raw_full)<1:raise RuntimeError("no official raw history")
-   ev,cashdiv,ref,event_limits=read_events(a.actions,symbol,stock_id_map[symbol],market_map[symbol])
+   ev,cashdiv,ref,event_limits,share_adjustments=read_events(a.actions,symbol,stock_id_map[symbol],market_map[symbol])
    limits=build_limits(raw_full,ref,event_limits,symbol)
    raw=raw_full.dropna(subset=["open","high","low","close"]).copy()
    raw=raw[raw.volume>0].reset_index(drop=True)
@@ -403,7 +403,7 @@ def main():
    if not len(start_idx):raise RuntimeError("no 2015+ data")
    start=int(start_idx[0]);end=len(d)-1
    if market_map[symbol]=="TWSE" and stock_id_map[symbol]=="2330":
-    rep=simulate(d,low_unfiltered,high,risk,limits,cashdiv,10,start,end,high_hold_signal=hold)
+    rep=simulate(d,low_unfiltered,high,risk,limits,cashdiv,10,start,end,high_hold_signal=hold,share_adjustments=share_adjustments)
     rep_metrics={k:v for k,v in rep.items() if k not in {"trades","equity_curve"}}
     expected={"cagr":0.376871,"win_rate":0.933333,"trade_count":15,"max_drawdown":-0.254384}
     tsmc_reproduction={"metrics":rep_metrics,"expected_previous_benchmark":expected,
@@ -419,7 +419,7 @@ def main():
     pd.DataFrame(rep["trades"]).to_csv(out/"tsmc_2330_universe_free_reproduction_trades_10bps.csv",index=False)
     pd.DataFrame(rep["equity_curve"]).to_csv(out/"tsmc_2330_universe_free_reproduction_equity_10bps.csv",index=False)
    for slip in SLIPPAGE_BPS:
-    sim=simulate(d,low,high,risk,limits,cashdiv,slip,start,end,high_hold_signal=hold)
+    sim=simulate(d,low,high,risk,limits,cashdiv,slip,start,end,high_hold_signal=hold,share_adjustments=share_adjustments)
     if slip==10:
      for annual_row in annual_metrics(sim["equity_curve"],sim["trades"],INITIAL_CAPITAL):
       annual_rows.append({"symbol":symbol,"stock_id":stock_id_map[symbol],"market":market_map[symbol],"name":name_map.get(symbol,symbol),**annual_row})
@@ -434,7 +434,7 @@ def main():
      pd.DataFrame(sim["trades"]).to_csv(out/f"trades_{symbol}_10bps.csv",index=False)
      pd.DataFrame(sim["equity_curve"]).to_csv(out/f"equity_{symbol}_10bps.csv",index=False)
      pd.DataFrame(annual_metrics(sim["equity_curve"],sim["trades"],INITIAL_CAPITAL)).to_csv(out/f"annual_{symbol}_10bps.csv",index=False)
-   prepared[symbol]={"d":d,"low":low,"high":high,"risk":risk,"hold":hold,"limits":limits,"dividends":cashdiv}
+   prepared[symbol]={"d":d,"low":low,"high":high,"risk":risk,"hold":hold,"limits":limits,"dividends":cashdiv,"share_adjustments":share_adjustments}
    print(f"[DONE] {symbol} {name_map.get(symbol,NAMES.get(symbol,symbol))}",flush=True)
   except Exception as e:
    blocked.append({"symbol":symbol,"name":name_map.get(symbol,NAMES.get(symbol,symbol)),"reason":f"{type(e).__name__}: {e}"})
