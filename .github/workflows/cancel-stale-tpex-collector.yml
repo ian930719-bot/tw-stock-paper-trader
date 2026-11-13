@@ -23,4 +23,5 @@ jobs:
           gh api --method POST repos/ian930719-bot/tw-stock-paper-trader/actions/runs/43397039579/cancel || true
           gh api --method POST repos/ian930719-bot/tw-stock-paper-trader/actions/runs/43398069179/cancel || true
           gh api --method POST repos/ian930719-bot/tw-stock-paper-trader/actions/runs/43398382267/cancel || true
+          gh api --method POST repos/ian930719-bot/tw-stock-paper-trader/actions/runs/43398437208/cancel || true
 
