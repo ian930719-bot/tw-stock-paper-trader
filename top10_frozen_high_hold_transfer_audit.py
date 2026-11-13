@@ -240,6 +240,13 @@ def read_events(action_root,symbol_key,stock_id,market,accounting_start_date="20
 
 def build_limits(bars,ref_prices,event_limits,symbol,strict_from="2015-01-01"):
  out={};prev_close=None;missing=[];conflicts=[];seen=False
+ bar_days=set(pd.to_datetime(bars.date,errors="coerce").dropna().dt.strftime("%Y-%m-%d"))
+ for event_day in list(event_limits):
+  if event_day not in bar_days:
+   next_day=next((d for d in sorted(bar_days) if d>event_day),None)
+   if next_day is not None:
+    event_limits.setdefault(next_day,event_limits[event_day])
+    ref_prices.setdefault(next_day,ref_prices[event_day])
  for session_i,r in enumerate(bars.itertuples(index=False)):
   day=pd.Timestamp(r.date).strftime("%Y-%m-%d")
   note=str(getattr(r,"note","")).strip()
@@ -287,6 +294,29 @@ def build_limits(bars,ref_prices,event_limits,symbol,strict_from="2015-01-01"):
  if missing:raise RuntimeError(f"{symbol}: missing price-limit reference on {len(missing)} sessions; first={missing[:5]}")
  if conflicts:raise RuntimeError(f"{symbol}: {len(conflicts)} OHLC/official-rule conflicts; first={conflicts[:5]}")
  return out
+
+def align_action_entitlements_to_traded_sessions(raw_full,cash_dividends,share_adjustments):
+ """Move cash/share entitlements to the first traded session on or after ex-date.
+ Signal-history adjustment events retain their original official event dates.
+ """
+ traded=sorted(pd.to_datetime(raw_full.loc[
+  pd.to_numeric(raw_full.volume,errors="coerce").fillna(0)>0,"date"],errors="coerce")
+  .dropna().dt.strftime("%Y-%m-%d").unique())
+ if not traded:return cash_dividends,share_adjustments
+ def next_traded(day):
+  return next((d for d in traded if d>=day),None)
+ for day in list(cash_dividends):
+  if day not in traded:
+   target=next_traded(day)
+   if target is not None and target!=day:
+    cash_dividends[target]=cash_dividends.get(target,0.0)+cash_dividends.pop(day)
+ for day in list(share_adjustments):
+  if day not in traded:
+   target=next_traded(day)
+   if target is not None and target!=day:
+    share_adjustments[target]=share_adjustments.get(target,1.0)*share_adjustments.pop(day)
+ return cash_dividends,share_adjustments
+
 
 def make_features(raw,events):
  adj=apply_back_adjustments(raw,events)
@@ -528,6 +558,7 @@ def main():
    raw_full=raw_full.sort_values("date").drop_duplicates("date").reset_index(drop=True)
    if len(raw_full)<1:raise RuntimeError("no official raw history")
    ev,cashdiv,ref,event_limits,share_adjustments=read_events(a.actions,symbol,stock_id_map[symbol],market_map[symbol])
+   cashdiv,share_adjustments=align_action_entitlements_to_traded_sessions(raw_full,cashdiv,share_adjustments)
    limits=build_limits(raw_full,ref,event_limits,symbol)
    raw=raw_full.dropna(subset=["open","high","low","close"]).copy()
    raw=raw[raw.volume>0].reset_index(drop=True)
