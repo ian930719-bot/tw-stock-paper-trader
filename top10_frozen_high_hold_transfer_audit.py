@@ -384,8 +384,8 @@ def main():
   "metrics":rows,"tsmc_2330_universe_free_reproduction":tsmc_reproduction,"shared_capital_portfolio":shared_portfolio,"target_assessment":target_assessment,"rules":RULES,
   "notes":["No per-symbol parameter tuning; frozen TSMC rule family only.",
    "Entry eligibility uses the official same-day closing traded-share top ten; signals are known after close and orders execute no earlier than the next session.",
-   "Raw official TWSE OHLC used for fills; corporate-action back-adjustment used for signal indicators.",
-   "TWT49U covers historical ex-rights/ex-dividend events from 2010; TWTAUU/TWTB8U special-event audit begins 2011, while performance measurement begins 2015.",
+   "Raw official TWSE MI_INDEX and TPEx afterTrading/otc OHLC used for fills; exchange-specific corporate-action back-adjustment used for signal indicators.",
+   "TWSE TWT49U and TPEx exDailyQ cover ex-rights/ex-dividend events from 2010; TWSE TWTAUU/TWTB8U and TPEx revivt cover special resumption events from 2011/2013; performance measurement begins 2015.",
    "Any missing action data, missing limit reference, or OHLC-limit conflict blocks that symbol. The shared-capital portfolio also skips new entries when any daily top-ten constituent is unaudited.",
    "Single-symbol results are independent NT$100,000 per-stock transfer tests; shared_capital_portfolio is a separate one-position shared-NT$100,000 account."]}
  (out/"report.json").write_text(json.dumps(result,ensure_ascii=False,indent=2,default=float),encoding="utf-8")
