@@ -277,7 +277,7 @@ def main():
  p.add_argument("--output",default="artifacts/top10_frozen_high_hold")
  a=p.parse_args()
  out=Path(a.output);out.mkdir(parents=True,exist_ok=True)
- rows=[];blocked=[];prepared={}
+ rows=[];blocked=[];prepared={};tsmc_reproduction=None
  universe_path=Path(a.universe_file)
  use_universe_filter=universe_path.exists()
  if use_universe_filter:
@@ -301,6 +301,7 @@ def main():
    if len(raw)<260:raise RuntimeError(f"insufficient traded raw history after no-trade filtering {len(raw)}")
    d=make_features(raw,ev)
    low,high,risk=build_candidate_signals(d)
+   low_unfiltered=low.copy()
    if use_universe_filter:
     active_dates=active_dates_by_symbol.get(symbol,set())
     active_mask=d.date.dt.strftime("%Y-%m-%d").isin(active_dates).to_numpy(bool)
@@ -311,6 +312,16 @@ def main():
    start_idx=np.flatnonzero((d.date.dt.year>=2015).to_numpy())
    if not len(start_idx):raise RuntimeError("no 2015+ data")
    start=int(start_idx[0]);end=len(d)-1
+   if symbol=="2330":
+    rep=simulate(d,low_unfiltered,high,risk,limits,cashdiv,10,start,end,high_hold_signal=hold)
+    rep_metrics={k:v for k,v in rep.items() if k not in {"trades","equity_curve"}}
+    expected={"cagr":0.376871,"win_rate":0.933333,"trade_count":15,"max_drawdown":-0.254384}
+    tsmc_reproduction={"metrics":rep_metrics,"expected_previous_benchmark":expected,
+     "cagr_delta_pp":(rep_metrics.get("cagr")-expected["cagr"])*100 if rep_metrics.get("cagr") is not None else None,
+     "win_rate_delta_pp":(rep_metrics.get("win_rate")-expected["win_rate"])*100 if rep_metrics.get("win_rate") is not None else None,
+     "trade_count_delta":rep_metrics.get("trade_count")-expected["trade_count"] if rep_metrics.get("trade_count") is not None else None,
+     "max_drawdown_delta_pp":(rep_metrics.get("max_drawdown")-expected["max_drawdown"])*100 if rep_metrics.get("max_drawdown") is not None else None}
+    pd.DataFrame(rep["trades"]).to_csv(out/"tsmc_2330_universe_free_reproduction_trades_10bps.csv",index=False)
    for slip in SLIPPAGE_BPS:
     sim=simulate(d,low,high,risk,limits,cashdiv,slip,start,end,high_hold_signal=hold)
     m={k:v for k,v in sim.items() if k not in {"trades","equity_curve"}}
@@ -351,7 +362,7 @@ def main():
   "costs":{"commission_per_side":.001425,"minimum_commission_ntd":20,"sell_tax":.003,"slippage_bps":list(SLIPPAGE_BPS)},
   "target":{"cagr_min":.50,"win_rate_min":.8695652173913043,"max_drawdown_floor":-.25},
   "status":"COMPLETE" if len(set(x["symbol"] for x in rows))==len(symbols) and not blocked else "BLOCKED_OR_PARTIAL",
-  "metrics":rows,"shared_capital_portfolio":shared_portfolio,"target_assessment":target_assessment,"rules":RULES,
+  "metrics":rows,"tsmc_2330_universe_free_reproduction":tsmc_reproduction,"shared_capital_portfolio":shared_portfolio,"target_assessment":target_assessment,"rules":RULES,
   "notes":["No per-symbol parameter tuning; frozen TSMC rule family only.",
    "Entry eligibility uses the official same-day closing traded-share top ten; signals are known after close and orders execute no earlier than the next session.",
    "Raw official TWSE OHLC used for fills; corporate-action back-adjustment used for signal indicators.",
