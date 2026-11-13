@@ -242,7 +242,7 @@ def hold_gate(d):
  return x.fillna(False).to_numpy(bool)
 
 
-def run_shared_capital_portfolio(prepared, universe, slippage_bps=10, initial_capital=INITIAL_CAPITAL, trailing_atr_multiple=None, atr_activation_profit_pct=0.0):
+def run_shared_capital_portfolio(prepared, universe, slippage_bps=10, initial_capital=INITIAL_CAPITAL, trailing_atr_multiple=None, atr_activation_profit_pct=0.0, trailing_peak_drawdown_pct=None):
  """One-position, all-in/all-out portfolio using the frozen TSMC rules.
 
  The top-ten membership is known at signal close; the order executes next
@@ -256,6 +256,8 @@ def run_shared_capital_portfolio(prepared, universe, slippage_bps=10, initial_ca
   raise ValueError("trailing_atr_multiple must be positive finite or None")
  if not np.isfinite(atr_activation_profit_pct) or not 0.0<=atr_activation_profit_pct<1.0:
   raise ValueError("atr_activation_profit_pct must be in [0,1)")
+ if trailing_peak_drawdown_pct is not None and (not np.isfinite(trailing_peak_drawdown_pct) or not 0.0<trailing_peak_drawdown_pct<1.0):
+  raise ValueError("trailing_peak_drawdown_pct must be in (0,1) or None")
  u=universe.copy()
  u["date"]=pd.to_datetime(u.date,errors="coerce").dt.strftime("%Y-%m-%d")
  u["symbol"]=u.symbol.astype(str).str.strip()
@@ -276,7 +278,7 @@ def run_shared_capital_portfolio(prepared, universe, slippage_bps=10, initial_ca
 
  cash=float(initial_capital);position=None;shares=0;entry_date=None;entry_reason=None
  entry_cost=0.0;trade_dividend=0.0;pending=None;high_wait_start=None;position_last_close=None
- high_water_mark=None;atr_activation_entry_price=None;atr_stop_exit_count=0
+ high_water_mark=None;atr_activation_entry_price=None;atr_stop_exit_count=0;peak_stop_exit_count=0
  risk_exit_fired=False;cooldown_until=-1;trades=[];curve=[]
  total_commission=total_tax=total_dividend=0.0;total_slippage=0.0
  missing_limit=locked_limit=outside_limit=0;exposure_days=0;suppressed_high=0
@@ -332,6 +334,7 @@ def run_shared_capital_portfolio(prepared, universe, slippage_bps=10, initial_ca
       total_commission+=fee;total_tax+=tax;total_slippage+=shares*(op-fill)
       if pending["reason"]=="sma200_risk_exit":cooldown_until=gi+RULES["risk_exit_cooldown_sessions"]
       if pending["reason"]=="atr_trailing_stop":atr_stop_exit_count+=1
+      if pending["reason"]=="profit_peak_drawdown_stop":peak_stop_exit_count+=1
       position=None;shares=0;entry_date=None;entry_reason=None;entry_cost=0.0;trade_dividend=0.0
       high_water_mark=None;atr_activation_entry_price=None;position_last_close=None
       high_wait_start=None;pending=None
@@ -371,14 +374,18 @@ def run_shared_capital_portfolio(prepared, universe, slippage_bps=10, initial_ca
    if bool(x["risk"][di]) and not risk_exit_fired:
     risk_exit_fired=True;high_wait_start=None
     pending={"side":"SELL","symbol":position,"reason":"sma200_risk_exit"}
-   elif trailing_atr_multiple is not None:
+   elif trailing_atr_multiple is not None or trailing_peak_drawdown_pct is not None:
     high_water_mark=max(float(high_water_mark or row.raw_high),float(row.raw_high))
     activated=(atr_activation_entry_price is not None and high_water_mark>=atr_activation_entry_price*(1.0+atr_activation_profit_pct))
-    atr_pct=float(row.atr_pct14) if pd.notna(row.get("atr_pct14",np.nan)) else np.nan
-    atr_value=float(row.raw_close)*atr_pct if np.isfinite(atr_pct) and atr_pct>0 else np.nan
-    if activated and np.isfinite(atr_value) and float(row.raw_close)<=high_water_mark-trailing_atr_multiple*atr_value:
+    atr_hit=False
+    if trailing_atr_multiple is not None:
+     atr_pct=float(row.atr_pct14) if pd.notna(row.get("atr_pct14",np.nan)) else np.nan
+     atr_value=float(row.raw_close)*atr_pct if np.isfinite(atr_pct) and atr_pct>0 else np.nan
+     atr_hit=activated and np.isfinite(atr_value) and float(row.raw_close)<=high_water_mark-trailing_atr_multiple*atr_value
+    peak_hit=(activated and trailing_peak_drawdown_pct is not None and float(row.raw_close)<=high_water_mark*(1.0-trailing_peak_drawdown_pct))
+    if atr_hit or peak_hit:
      high_wait_start=None
-     pending={"side":"SELL","symbol":position,"reason":"atr_trailing_stop"}
+     pending={"side":"SELL","symbol":position,"reason":"atr_trailing_stop" if atr_hit else "profit_peak_drawdown_stop"}
    if pending is None and high_wait_start is None and bool(x["high"][di]):
     if bool(x["hold"][di]):suppressed_high+=1
     else:
@@ -403,7 +410,8 @@ def run_shared_capital_portfolio(prepared, universe, slippage_bps=10, initial_ca
   "initial_capital":initial_capital,"final_equity_mark_to_market":final,
   "cagr_mark_to_market":(final/initial_capital)**(1/years)-1 if years>0 and final>0 else None,
   "max_drawdown":float(dd.min()),"completed_trades":len(trades),
-  "atr_trailing_stop_exit_count":atr_stop_exit_count,"trailing_atr_multiple":trailing_atr_multiple,
+  "atr_trailing_stop_exit_count":atr_stop_exit_count,"profit_peak_drawdown_stop_exit_count":peak_stop_exit_count,
+  "trailing_atr_multiple":trailing_atr_multiple,"trailing_peak_drawdown_pct":trailing_peak_drawdown_pct,
   "atr_activation_profit_pct":atr_activation_profit_pct,
   "win_rate_completed_only":float((tdf.net_pnl>0).mean()) if len(tdf) else None,
   "exposure_ratio":exposure_days/len(cdf),"total_commission":total_commission,
@@ -486,9 +494,7 @@ def main():
    # Drawdown overlay experiment: baseline is retained unchanged; each ATR
    # trail is close-confirmed and filled no earlier than the next session open.
    if not use_universe_filter or stock_id_map[symbol]=="2330":
-    # Profit-gated ATR trails: activation only after the raw-price high-water
-    # mark exceeds entry fill by the stated threshold. Signal at close, execute
-    # at next session open; zero threshold reproduces the ungated ATR variant.
+    # Profit-gated ATR trails.
     for activation_pct in (0.05,0.10,0.15,0.20):
      for atr_multiple in (2.5,3.0,3.5):
       overlay=simulate(d,low,high,risk,limits,cashdiv,10,start,end,
@@ -501,6 +507,20 @@ def main():
       if activation_pct==0.10 and atr_multiple==3.0:
        pd.DataFrame(overlay["trades"]).to_csv(out/f"trades_{symbol}_atr3_activation10pct_10bps.csv",index=False)
        pd.DataFrame(overlay["equity_curve"]).to_csv(out/f"equity_{symbol}_atr3_activation10pct_10bps.csv",index=False)
+    # Fixed percentage trailing protection, activated only after unrealized
+    # profit threshold. Width and activation are independently swept.
+    for activation_pct in (0.05,0.10,0.15,0.20):
+     for peak_dd in (0.05,0.08,0.10,0.12,0.15):
+      overlay=simulate(d,low,high,risk,limits,cashdiv,10,start,end,
+        high_hold_signal=hold,share_adjustments=share_adjustments,
+        atr_activation_profit_pct=activation_pct,trailing_peak_drawdown_pct=peak_dd)
+      om={k:v for k,v in overlay.items() if k not in {"trades","equity_curve"}}
+      rows.append({"symbol":symbol,"stock_id":stock_id_map[symbol],"market":market_map[symbol],
+        "name":name_map.get(symbol,NAMES.get(stock_id_map[symbol],symbol)),
+        "variant":"profit_gated_peak_drawdown_stop","slippage_bps":10,**om})
+      if activation_pct==0.10 and peak_dd==0.10:
+       pd.DataFrame(overlay["trades"]).to_csv(out/f"trades_{symbol}_peak10_activation10_10bps.csv",index=False)
+       pd.DataFrame(overlay["equity_curve"]).to_csv(out/f"equity_{symbol}_peak10_activation10_10bps.csv",index=False)
    for slip in SLIPPAGE_BPS:
     sim=simulate(d,low,high,risk,limits,cashdiv,slip,start,end,high_hold_signal=hold,share_adjustments=share_adjustments)
     if slip==10:
@@ -569,10 +589,17 @@ def main():
      metric={k:v for k,v in overlay.items() if k not in {"trades","equity_curve"}}
      atr_portfolio_rows.append({"variant":"shared_capital_profit_gated_atr_trailing_stop",
        "slippage_bps":slip,**metric})
-     if slip==10 and activation_pct==0.10 and atr_multiple==3.0:
-      pd.DataFrame(overlay.get("trades",[])).to_csv(out/"shared_capital_atr3_activation10pct_trades_10bps.csv",index=False)
-      pd.DataFrame(overlay.get("equity_curve",[])).to_csv(out/"shared_capital_atr3_activation10pct_equity_10bps.csv",index=False)
-  pd.DataFrame(atr_portfolio_rows).to_csv(out/"shared_capital_atr_overlay_metrics.csv",index=False)
+   for peak_dd in (0.05,0.08,0.10,0.12,0.15):
+    overlay=run_shared_capital_portfolio(prepared,uni,slippage_bps=slip,
+      initial_capital=INITIAL_CAPITAL,atr_activation_profit_pct=0.10,
+      trailing_peak_drawdown_pct=peak_dd)
+    metric={k:v for k,v in overlay.items() if k not in {"trades","equity_curve"}}
+    atr_portfolio_rows.append({"variant":"shared_capital_profit_gated_peak_drawdown_stop",
+      "slippage_bps":slip,**metric})
+    if slip==10 and peak_dd==0.10:
+     pd.DataFrame(overlay.get("trades",[])).to_csv(out/"shared_capital_peak10_activation10_trades_10bps.csv",index=False)
+     pd.DataFrame(overlay.get("equity_curve",[])).to_csv(out/"shared_capital_peak10_activation10_equity_10bps.csv",index=False)
+  pd.DataFrame(atr_portfolio_rows).to_csv(out/"shared_capital_exit_overlay_metrics.csv",index=False)
  target_assessment=None
  if shared_portfolio:
   target_assessment={
