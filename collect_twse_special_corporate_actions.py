@@ -34,7 +34,7 @@ def get(session,dataset,year,start,end):
   raise RuntimeError(f"{dataset} {year} invalid payload {str(j)[:500]}")
  return j
 def main():
- p=argparse.ArgumentParser();p.add_argument("--start-date",default="2010-01-04");p.add_argument("--end-date",default="2026-11-12");p.add_argument("--output",default="data/top10_actions_twt49u");a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument("--start-date",default="2011-01-01");p.add_argument("--end-date",default="2026-11-12");p.add_argument("--output",default="data/top10_actions_twt49u");a=p.parse_args()
  s=requests.Session();allrows=[];schemas={}
  for dataset,kind in [("TWTAUU","capital_reduction"),("TWTB8U","par_value_change")]:
   rows=[];schema=[]
