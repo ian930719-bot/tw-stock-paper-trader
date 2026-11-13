@@ -38,10 +38,16 @@ jobs:
           python -m py_compile collect_twse_historical_daily_top10.py collect_tpex_corporate_actions.py
           python - <<'PY'
           import json, requests
-          from collect_twse_historical_daily_top10 import fetch_tpex_day
-          rows=fetch_tpex_day(requests.Session(),"2026-11-12")
-          assert len(rows)>=100, f"Too few TPEx common-stock rows: {len(rows)}"
-          print(json.dumps({"date":"2026-11-12","tpex_common_stock_rows":len(rows),"sample":rows[:3]},ensure_ascii=False,indent=2))
+          from collect_twse_historical_daily_top10 import fetch_tpex_day, fetch_twse_day
+          s=requests.Session()
+          checks=[]
+          for day in ("2010-01-04","2015-01-05","2020-01-02","2026-11-12"):
+              tw=fetch_twse_day(s,day)
+              ot=fetch_tpex_day(s,day)
+              assert len(tw)>=100, f"Too few TWSE common-stock rows on {day}: {len(tw)}"
+              assert len(ot)>=100, f"Too few TPEx common-stock rows on {day}: {len(ot)}"
+              checks.append({"date":day,"twse_common_stock_rows":len(tw),"tpex_common_stock_rows":len(ot)})
+          print(json.dumps(checks,ensure_ascii=False,indent=2))
           PY
       - name: Collect and validate official TWSE capital-reduction and par-value events
         run: |
