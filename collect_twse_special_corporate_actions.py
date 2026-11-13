@@ -101,7 +101,7 @@ def main():
     if not lo<=day<=hi:continue
     prev=num(raw[pi]);ref=num(raw[ri])
     if not prev or not ref or prev<=0 or ref<=0:raise RuntimeError(f"{dataset} invalid reference {sym} {day}: {raw}")
-    rows.append({"symbol":sym,"date":day,"event_type":kind,"previous_close":prev,"reference_price":ref,
+    rows.append({"market":"TWSE","symbol":sym,"date":day,"event_type":kind,"previous_close":prev,"reference_price":ref,
       "limit_up":num(raw[ui]) if ui is not None else None,"limit_down":num(raw[li]) if li is not None else None,
       "reason":str(raw[reason_i]).strip() if reason_i is not None else "",
       "source":"TWSE "+dataset})
