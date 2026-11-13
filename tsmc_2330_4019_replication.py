@@ -321,7 +321,7 @@ def simulate(
                     pending = {"side": "SELL", "reason": "sma200_risk_exit", "signal_date": day}
                 elif trailing_atr_multiple is not None:
                     high_water_mark = max(float(high_water_mark or row.raw_high), float(row.raw_high))
-                    atr_pct = float(row.atr_pct) if pd.notna(row.get("atr_pct", np.nan)) else np.nan
+                    atr_pct = float(row.atr_pct14) if pd.notna(row.get("atr_pct14", np.nan)) else np.nan
                     atr_value = close * atr_pct if np.isfinite(atr_pct) and atr_pct > 0 else np.nan
                     if np.isfinite(atr_value) and close <= high_water_mark - trailing_atr_multiple * atr_value:
                         high_wait_start = None
