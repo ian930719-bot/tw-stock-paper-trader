@@ -1,4 +1,4 @@
-"""Reconstruct point-in-time daily top-10 TWSE stocks by official turnover.
+"""Reconstruct point-in-time daily top-10 TWSE common stocks by official traded shares.
 
 Uses official TWSE MI_INDEX daily market-wide close reports. It requests only
 dates present in the official raw-price collection's trading calendar. No
@@ -45,10 +45,11 @@ def fetch_day(session,day,retries=6):
     if v is None or m is None: continue
     rows.append({"date":pd.Timestamp(day).strftime("%Y-%m-%d"),"symbol":sym,"name":str(a[name]).strip(),
                  "volume_shares":v,"turnover_ntd":m,"open":normnum(a[op]),"high":normnum(a[hi]),
-                 "low":normnum(a[lo]),"close":normnum(a[cl]),"note":str(a[note]).strip() if note is not None else "","rank_by_turnover":None,"source":"TWSE MI_INDEX"})
+                 "low":normnum(a[lo]),"close":normnum(a[cl]),"note":str(a[note]).strip() if note is not None else "","rank_by_volume":None,"rank_by_turnover":None,"source":"TWSE MI_INDEX"})
    if not rows: raise RuntimeError("No market-wide equity rows parsed")
-   rows.sort(key=lambda z:(-z["turnover_ntd"],z["symbol"]))
-   for n,z in enumerate(rows,1):z["rank_by_turnover"]=n
+   rows.sort(key=lambda z:(-z["volume_shares"],-z["turnover_ntd"],z["symbol"]))
+   for n,z in enumerate(rows,1):z["rank_by_volume"]=n
+   for n,z in enumerate(sorted(rows,key=lambda z:(-z["turnover_ntd"],-z["volume_shares"],z["symbol"])),1):z["rank_by_turnover"]=n
    return rows
   except Exception as e:
    err=e
@@ -82,7 +83,7 @@ def main():
   if a.pause:time.sleep(a.pause)
  frame=pd.DataFrame(combined)
  frame=frame.sort_values(["date","rank_by_turnover"])
- frame.to_csv(out/"historical_daily_top10_by_turnover.csv",index=False)
+ frame.to_csv(out/"historical_daily_top10_by_volume.csv",index=False)
  # Extract complete daily histories for every symbol that ever entered the
  # point-in-time top ten; one pass over the saved market-wide daily files.
  union=sorted(frame.symbol.astype(str).unique())
@@ -106,7 +107,7 @@ def main():
       "dates_requested":len(dates),"dates_completed":len(summary),"complete":len(summary)==len(dates),
       "first_date":dates[0],"last_date":dates[-1],"rows":len(frame),"point_in_time_union_symbols":len(union),"symbol_bar_files":len(union),
       "sha256":hashlib.sha256((out/"historical_daily_top10_by_turnover.csv").read_bytes()).hexdigest(),
-      "method":"rank all listed common-stock rows by official daily turnover NT dollars; top 10 per date",
+      "method":"rank all listed common-stock rows by official daily traded shares; top 10 per date; turnover rank and value retained as secondary fields",
       "limitations":["Market-wide endpoint includes securities that must be classified; script filters four-digit numeric codes only.",
                      "Historical universe categories and special security types require separate classification audit.",
                      "Daily top ten is ranked on same-day close turnover and can only be used to choose next-session trades, never same-day entries."]}
