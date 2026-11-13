@@ -22,8 +22,9 @@ NAMES={"2330":"台積電","2454":"聯發科","1303":"南亞","2327":"國巨","24
 def limit_price(ref,band,side):
  return official_limit_price(ref,band,side)
 
-def read_events(action_root,symbol_key,stock_id,market):
+def read_events(action_root,symbol_key,stock_id,market,accounting_start_date="2015-01-01"):
  root=Path(action_root)
+ accounting_start=pd.Timestamp(accounting_start_date).normalize()
  manifest=root/"manifest.json"
  if not manifest.exists():raise RuntimeError("Missing official TWSE TWT49U manifest")
  m=json.loads(manifest.read_text(encoding="utf-8"))
@@ -108,6 +109,16 @@ def read_events(action_root,symbol_key,stock_id,market):
     if abs(_expected-float(r.reference_price))>0.03:
      raise RuntimeError(f"{symbol_key}: sourced dividend override fails official reference-price reconciliation on {day}: expected {_expected}, official {r.reference_price}")
     cash_value=_cash;stock_value=_stock;status="resolved"
+  ref=float(r.reference_price)
+  up=getattr(r,"limit_up",np.nan);down=getattr(r,"limit_down",np.nan)
+  if pd.Timestamp(r.date).normalize()<accounting_start:
+   if not all(np.isfinite(float(x)) and float(x)>0 for x in (ref,up,down)):
+    raise RuntimeError(f"{symbol_key}: invalid official historical corporate-action reference {day}")
+   refs[day]=ref;limits[day]=(float(up),float(down))
+   # No portfolio position is held before accounting_start. The exchange-published
+   # adjustment_ratio still adjusts indicator history; no historical cash/share
+   # entitlement is credited to the OOS account.
+   continue
   if not pre_strategy:
    if status!="resolved":
     raise RuntimeError(f"{symbol_key}: unresolved official cash-dividend component {day}")
@@ -123,8 +134,6 @@ def read_events(action_root,symbol_key,stock_id,market):
      raise RuntimeError(f"{symbol_key}: invalid stock-dividend share multiplier {day}: {multiplier}")
     share_adjustments[day]=multiplier
    if pd.notna(cash_value) and float(cash_value)>0:cash[day]=float(cash_value)
-  ref=float(r.reference_price)
-  up=getattr(r,"limit_up",np.nan);down=getattr(r,"limit_down",np.nan)
   if not np.isfinite(float(up)) or not np.isfinite(float(down)):
    raise RuntimeError(f"{symbol_key}: missing official event-day limit price {day}")
   up=float(up);down=float(down)
@@ -154,6 +163,14 @@ def read_events(action_root,symbol_key,stock_id,market):
   reason=str(getattr(r,"reason",""))
   if not all(np.isfinite(x) and x>0 for x in (prev,ref,up,down)):
    raise RuntimeError(f"{symbol_key}: invalid post-2015 special-action reference {day}")
+  if pd.Timestamp(r.date).normalize()<accounting_start:
+   refs[day]=ref;limits[day]=(up,down)
+   post_rows.append({"symbol":symbol_key,"date":pd.Timestamp(r.date),
+                     "adjustment_ratio":ref/prev,
+                     "source":str(getattr(r,"source","official special corporate action"))})
+   # Historical share/cash terms are irrelevant to the OOS account, which
+   # starts flat on accounting_start; retain the official price adjustment.
+   continue
   if day in special_terms:
    multiplier=special_terms[day]["share_multiplier"]
    refund=special_terms[day]["cash_refund"]
@@ -184,16 +201,25 @@ def read_events(action_root,symbol_key,stock_id,market):
  ev["source"]=f"{market.upper()} official ex-rights/ex-dividend and special-event adjustments"
  return ev,cash,refs,limits,share_adjustments
 
-def build_limits(bars,ref_prices,event_limits,symbol):
+def build_limits(bars,ref_prices,event_limits,symbol,strict_from="2015-01-01"):
  out={};prev_close=None;missing=[];conflicts=[];seen=False
  for session_i,r in enumerate(bars.itertuples(index=False)):
   day=pd.Timestamp(r.date).strftime("%Y-%m-%d")
   note=str(getattr(r,"note","")).strip()
   ohlc=[getattr(r,x,np.nan) for x in ("open","high","low","close")]
   volume=float(getattr(r,"volume",0) or 0)
-  if volume<=0 or not all(np.isfinite(float(x)) for x in ohlc):
-   if day>="2015-01-01":missing.append(day)
-   prev_close=None;seen=True
+  if volume<=0:
+   # A no-trade session has no new close. Preserve the last valid reference
+   # instead of poisoning every later session with prev_close=None. If an
+   # official ex-rights/capital-action reference occurs on this date, it becomes
+   # the next session's reference even when no shares traded.
+   if day in event_limits:
+    prev_close=float(ref_prices[day])
+   seen=True
+   continue
+  if not all(np.isfinite(float(x)) for x in ohlc):
+   if day>=strict_from:missing.append(day)
+   seen=True
    continue
   if note in {"**","＊＊"} and day not in event_limits:
    raise RuntimeError(f"{symbol}: official raw-bar special resumption marker without a matching official event {day}")
@@ -205,15 +231,17 @@ def build_limits(bars,ref_prices,event_limits,symbol):
   elif prev_close is not None:
    ref=prev_close;band=.07 if day<"2015-06-01" else .10
    up=limit_price(ref,band,"UP");down=limit_price(ref,band,"DOWN");src="TWSE/TPEx official band/tick rules from prior traded close"
-  elif not seen or day<"2015-01-01":
+  elif day<strict_from:
+   # Price limits before the OOS execution window are not used for fills;
+   # seed the next reference from the observed close and continue warm-up.
    seen=True
    prev_close=float(r.close)
    continue
   else:
-   if day>="2015-01-01":missing.append(day)
+   missing.append(day)
    continue
   hi=float(r.high);lo=float(r.low)
-  if hi>up+1e-6 or lo<down-1e-6:
+  if day>=strict_from and (hi>up+1e-6 or lo<down-1e-6):
    conflicts.append({"date":day,"high":hi,"low":lo,"up":up,"down":down,"reference":ref,"source":src})
   out[day]=(up,down)
   seen=True
