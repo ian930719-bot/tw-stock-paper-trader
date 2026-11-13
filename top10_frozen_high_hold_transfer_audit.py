@@ -37,6 +37,12 @@ def read_events(action_root,symbol):
  if not manifest.exists():raise RuntimeError("Missing official TWT49U manifest")
  m=json.loads(manifest.read_text(encoding="utf-8"))
  if not m.get("complete"):raise RuntimeError(f"Official TWT49U collection incomplete: {m}")
+ special_path=root/"special_events.csv"
+ if special_path.exists():
+  special=pd.read_csv(special_path,dtype={"symbol":str})
+  special=special[special.symbol.astype(str).str.strip()==symbol]
+  if not special.empty:
+   raise RuntimeError(f"{symbol}: official capital-reduction/par-value events require a share-count/cash-refund model: {special.to_dict('records')[:3]}")
  p=root/f"{symbol}.csv"
  if not p.exists():raise RuntimeError(f"Missing official TWT49U event file for {symbol}")
  ev=pd.read_csv(p)
@@ -52,6 +58,9 @@ def read_events(action_root,symbol):
   day=pd.Timestamp(r.date).strftime("%Y-%m-%d")
   if str(getattr(r,"cash_dividend_status","resolved"))!="resolved":
    raise RuntimeError(f"{symbol}: mixed rights/dividend event needs separate official cash component {day}")
+  stock_value=getattr(r,"stock_dividend",np.nan)
+  if pd.notna(stock_value) and float(stock_value)>0:
+   raise RuntimeError(f"{symbol}: stock dividend event needs share-count adjustment model {day}")
   cd=getattr(r,"cash_dividend",np.nan)
   if pd.notna(cd) and float(cd)>0:cash[day]=float(cd)
   ref=float(r.reference_price);up=float(r.limit_up);down=float(r.limit_down)
