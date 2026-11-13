@@ -1,0 +1,206 @@
+name: Reconcile Official Limits and Rerun Top 10 Audit
+
+on:
+  push:
+    branches: [research/top10-official-ohlcv-baseline-audit]
+    paths:
+      - .github/workflows/top10-official-reconciled-audit.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - run: pip install -r requirements.txt
+      - name: Wait for official TWSE, TPEx and MOPS checkpoints
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          repo=ian930719-bot/tw-stock-paper-trader
+          branch=research/top10-official-ohlcv-baseline-audit
+          wait_artifact() {
+            local workflow_name="$1"
+            local artifact_name="$2"
+            local attempt
+            for attempt in $(seq 1 240); do
+              local runs
+              runs=$(gh api "repos/$repo/actions/runs?branch=$branch&per_page=100")
+              local run_id
+              run_id=$(echo "$runs" | jq -r --arg n "$workflow_name" '
+                [.workflow_runs[] | select(.name==$n and .status=="completed" and .conclusion=="success")]
+                | sort_by(.created_at) | last | .id // empty')
+              if [ -n "$run_id" ]; then
+                local artifact_id
+                artifact_id=$(gh api "repos/$repo/actions/runs/$run_id/artifacts" --jq                   ".artifacts[] | select(.name==\"$artifact_name\" and .expired==false) | .id" | head -n 1)
+                if [ -n "$artifact_id" ]; then
+                  echo "Found $artifact_name in run $run_id (artifact $artifact_id)"
+                  echo "${artifact_name//-/_}_RUN_ID=$run_id" >> "$GITHUB_ENV"
+                  return 0
+                fi
+              fi
+              echo "Waiting for $workflow_name / $artifact_name ($attempt/240)"
+              sleep 30
+            done
+            echo "Timed out waiting for $artifact_name"
+            return 1
+          }
+          wait_artifact "Collect TPEx Official Next-Day Price Limits" "tpex-official-next-day-limits"
+          wait_artifact "Collect TWSE Official Daily Price Limits" "twse-official-daily-price-limits"
+          wait_artifact "Collect MOPS Official Dividend Components" "mops-official-dividend-component-overrides"
+      - name: Download original raw seed and all yearly point-in-time checkpoints
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p data/top10_official_raw data/top10_actions_twt49u data/yearly
+          gh run download 43225571777 --repo ian930719-bot/tw-stock-paper-trader \
+            --name top10-official-raw-ohlcv --dir data/top10_official_raw
+          gh run download 43394241266 --repo ian930719-bot/tw-stock-paper-trader \
+            --name top10-official-corporate-actions-with-terms --dir data/top10_actions_twt49u
+          for year in {2014..2026}; do
+            mkdir -p "data/year_${year}"
+            gh run download 43357713305 --repo ian930719-bot/tw-stock-paper-trader \
+              --name "top10-point-in-time-year-${year}" --dir "data/year_${year}"
+          done
+      - name: Download completed exchange limit and MOPS artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p data/tpex_limits data/twse_limits data/mops_download
+          gh run download "$TPEX_OFFICIAL_NEXT_DAY_LIMITS_RUN_ID" --repo ian930719-bot/tw-stock-paper-trader \
+            --name tpex-official-next-day-limits --dir data/tpex_limits
+          gh run download "$TWSE_OFFICIAL_DAILY_PRICE_LIMITS_RUN_ID" --repo ian930719-bot/tw-stock-paper-trader \
+            --name twse-official-daily-price-limits --dir data/twse_limits
+          gh run download "$MOPS_OFFICIAL_DIVIDEND_COMPONENT_OVERRIDES_RUN_ID" --repo ian930719-bot/tw-stock-paper-trader \
+            --name mops-official-dividend-component-overrides --dir data/mops_download
+          find data/mops_download -name official_dividend_component_overrides.csv -exec cp {} data/official_dividend_component_overrides.csv \;
+          find data/mops_download -name mops_dividend_components.csv -exec sh -c 'mkdir -p data/mops_dividend_reconciliation; cp "$1" data/mops_dividend_reconciliation/mops_dividend_components.csv' _ {} \;
+          find data/mops_download -name manifest.json -path '*mops_dividend_reconciliation*' -exec sh -c 'cp "$1" data/mops_dividend_reconciliation/manifest.json' _ {} \;
+          test -s data/official_dividend_component_overrides.csv
+          test -s data/mops_dividend_reconciliation/mops_dividend_components.csv
+      - name: Verify all yearly official source checkpoints
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          for year in range(2014,2027):
+              root=Path(f"data/year_{year}")
+              m=json.loads((root/"manifest.json").read_text(encoding="utf-8"))
+              assert m["complete"] and m["dates_completed"]==m["dates_requested"], (year,m)
+          for root in ["data/top10_actions_twt49u","data/tpex_limits","data/twse_limits"]:
+              manifests=list(Path(root).rglob("manifest.json"))
+              assert manifests, f"Missing manifest in {root}"
+              print(root, json.loads(manifests[0].read_text(encoding="utf-8")))
+          print("MOPS rows",sum(1 for _ in Path("data/mops_dividend_reconciliation/mops_dividend_components.csv").open(encoding="utf-8"))-1)
+          PY
+      - name: Merge official daily universe, bars and exchange price limits
+        run: |
+          python - <<'PY'
+          import csv,hashlib,json,shutil
+          from pathlib import Path
+          import pandas as pd
+          root=Path("data/twse_marketwide_turnover")
+          daily=root/"daily"; daily.mkdir(parents=True,exist_ok=True)
+          frames=[]
+          for year in range(2014,2027):
+              src=Path(f"data/year_{year}")
+              for f in (src/"daily").glob("*.csv"):
+                  shutil.copy2(f,daily/f.name)
+              frames.append(pd.read_csv(src/"historical_daily_top10_by_volume.csv",dtype={"symbol":str,"stock_id":str}))
+          top=pd.concat(frames,ignore_index=True).drop_duplicates(["date","symbol"])
+          top.to_csv(root/"historical_daily_top10_by_volume.csv",index=False)
+          union=sorted(top.symbol.astype(str).unique())
+          twse=pd.read_csv(next(Path("data/twse_limits").rglob("twse_twt84u_limits.csv")),dtype={"stock_id":str})
+          tpex=pd.read_csv(next(Path("data/tpex_limits").rglob("tpex_next_day_limits.csv")),dtype={"stock_id":str})
+          for name,df in [("TWSE",twse),("TPEx",tpex)]:
+              if df.duplicated(["date","stock_id"]).any(): raise RuntimeError(f"Duplicate {name} limit keys")
+          twse_lookup=twse.set_index(["date","stock_id"]).to_dict("index")
+          tpex_lookup=tpex.set_index(["date","stock_id"]).to_dict("index")
+          bars=root/"symbol_bars"; bars.mkdir(exist_ok=True)
+          handles={}
+          try:
+              for sym in union:
+                  fh=(bars/f"{sym}.csv").open("w",newline="",encoding="utf-8")
+                  wr=csv.writer(fh)
+                  wr.writerow(["symbol","stock_id","market","name","date","open","high","low","close","volume","turnover","note","source",
+                    "official_limit_up","official_reference_price","official_limit_down","next_day_limit_up","next_day_limit_down"])
+                  handles[sym]=(fh,wr)
+              for f in sorted(daily.glob("*.csv")):
+                  d=pd.read_csv(f,dtype={"symbol":str,"stock_id":str})
+                  d=d[d.symbol.isin(handles)]
+                  for r in d.itertuples(index=False):
+                      key=(str(r.date),str(r.stock_id))
+                      tw=twse_lookup.get(key,{}) if str(r.market).upper()=="TWSE" else {}
+                      tp=tpex_lookup.get(key,{}) if str(r.market).upper()=="TPEX" else {}
+                      handles[str(r.symbol)][1].writerow([
+                        r.symbol,r.stock_id,r.market,r.name,r.date,r.open,r.high,r.low,r.close,
+                        getattr(r,"volume_shares",getattr(r,"volume",0)),getattr(r,"turnover_ntd",getattr(r,"turnover",0)),
+                        getattr(r,"note",""),getattr(r,"source",""),
+                        tw.get("official_limit_up"),tw.get("official_reference_price"),tw.get("official_limit_down"),
+                        tp.get("next_day_limit_up"),tp.get("next_day_limit_down")
+                      ])
+          finally:
+              for fh,wr in handles.values(): fh.close()
+          dates=sorted(f.stem for f in daily.glob("*.csv"))
+          manifest={"source":["TWSE official MI_INDEX","TPEx official afterTrading/otc"],
+            "markets_included":["TWSE","TPEX"],"dates_requested":3137,"dates_completed":len(dates),
+            "complete":len(dates)==3137,"first_date":dates[0],"last_date":dates[-1],
+            "top10_rows":len(top),"point_in_time_union_symbols":len(union),"symbol_bar_files":len(union),
+            "top10_rows_by_market":top.market.value_counts().to_dict(),
+            "sha256":hashlib.sha256((root/"historical_daily_top10_by_volume.csv").read_bytes()).hexdigest(),
+            "method":"Daily point-in-time top ten ranked across TWSE and TPEx by official traded shares; exact official exchange limit fields joined by market/date/security code.",
+            "limit_rows":{"TWSE":len(twse),"TPEX":len(tpex)}}
+          assert manifest["complete"], manifest
+          (root/"manifest.json").write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding="utf-8")
+          print(json.dumps(manifest,ensure_ascii=False,indent=2))
+          PY
+      - name: Run fixed TSMC rule transfer audit with exact official price limits and corporate actions
+        run: |
+          set -euo pipefail
+          python -m py_compile top10_frozen_high_hold_transfer_audit.py analyze_top10_false_signals.py
+          python top10_frozen_high_hold_transfer_audit.py \
+            --raw-bars data/twse_marketwide_turnover/symbol_bars \
+            --universe-file data/twse_marketwide_turnover/historical_daily_top10_by_volume.csv \
+            --actions data/top10_actions_twt49u \
+            --output artifacts/top10_reconciled_official_audit
+          python analyze_top10_false_signals.py \
+            --trades artifacts/top10_reconciled_official_audit/trade_feature_diagnostics_10bps.csv \
+            --output artifacts/top10_reconciled_official_audit/false_signal_analysis
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path("artifacts/top10_reconciled_official_audit/report.json").read_text(encoding="utf-8"))
+          print("STATUS",r["status"],"COMPLETED",r["symbols_completed"],"EXPECTED",r["symbols_expected"],"BLOCKED",len(r["blocked"]))
+          print("TSMC",json.dumps(r["tsmc_2330_universe_free_reproduction"]["metrics"],ensure_ascii=False))
+          print("SHARED",json.dumps({k:v for k,v in r["shared_capital_portfolio"].items() if k not in {"trades","equity_curve"}},ensure_ascii=False))
+          print("TARGETS",json.dumps(r["target_assessment"],ensure_ascii=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: top10-reconciled-official-audit
+          path: |
+            data/twse_marketwide_turnover/manifest.json
+            data/twse_marketwide_turnover/historical_daily_top10_by_volume.csv
+            data/top10_actions_twt49u/
+            data/twse_limits/
+            data/tpex_limits/
+            data/mops_dividend_reconciliation/
+            data/official_dividend_component_overrides.csv
+            artifacts/top10_reconciled_official_audit/
+          if-no-files-found: error
+          retention-days: 30
