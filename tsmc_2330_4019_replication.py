@@ -111,6 +111,7 @@ def simulate(
     cash = float(initial_capital)
     shares = 0
     entry_date = None
+    entry_signal_date = None
     entry_cost = 0.0
     trade_dividend = 0.0
     pending = None
@@ -192,6 +193,7 @@ def simulate(
                             cash -= notional + fee
                             shares = qty
                             entry_date = day
+                            entry_signal_date = pending.get("signal_date")
                             entry_reason = reason
                             if reason == "trend_reentry":
                                 trend_reentry_count += 1
@@ -215,8 +217,10 @@ def simulate(
                         pnl = proceeds + trade_dividend - entry_cost
                         trades.append({
                             "entry_date": entry_date,
+                            "entry_signal_date": entry_signal_date,
                             "entry_reason": entry_reason,
                             "exit_date": day,
+                            "exit_signal_date": pending.get("signal_date"),
                             "exit_reason": reason,
                             "shares": shares,
                             "entry_cost": round(entry_cost, 2),
@@ -238,6 +242,7 @@ def simulate(
                             trend_cooldown_until = i + reentry_cooldown
                         shares = 0
                         entry_date = None
+                        entry_signal_date = None
                         entry_cost = 0.0
                         trade_dividend = 0.0
                         high_wait_start = None
@@ -263,13 +268,13 @@ def simulate(
                 if i >= cooldown_until and entry_allowed:
                     if low_entry_policy == "immediate":
                         if low[i]:
-                            pending = {"side": "BUY", "reason": "base_low_after_filters"}
+                            pending = {"side": "BUY", "reason": "base_low_after_filters", "signal_date": day}
                     else:
                         if low[i] and low_alert_start is None:
                             if low_entry_policy == "mfi40_reclaim_5":
                                 mfi_now = float(row.mfi14) if pd.notna(row.get("mfi14", np.nan)) else np.nan
                                 if not np.isfinite(mfi_now) or mfi_now >= 40:
-                                    pending = {"side": "BUY", "reason": "base_low_mfi_not_oversold"}
+                                    pending = {"side": "BUY", "reason": "base_low_mfi_not_oversold", "signal_date": day}
                                 else:
                                     low_alert_start = i
                                     low_alert_high = float(row.raw_high)
@@ -287,20 +292,20 @@ def simulate(
                             else:
                                 confirmed = age > 0 and age <= 5 and mfi_reclaim[i]
                             if confirmed:
-                                pending = {"side": "BUY", "reason": f"confirmed_{low_entry_policy}"}
+                                pending = {"side": "BUY", "reason": f"confirmed_{low_entry_policy}", "signal_date": day}
                                 low_alert_start = None
                                 low_alert_high = None
                             elif age >= low_entry_timeout:
                                 low_alert_start = None
                                 low_alert_high = None
                     if pending is None and trend_reentry_allowed and i >= trend_cooldown_until and reentry_signal[i]:
-                        pending = {"side": "BUY", "reason": "trend_reentry"}
+                        pending = {"side": "BUY", "reason": "trend_reentry", "signal_date": day}
             else:
                 # The SMA200 risk exit has priority over high-point processing.
                 if risk[i] and not risk_exit_fired:
                     risk_exit_fired = True
                     high_wait_start = None
-                    pending = {"side": "SELL", "reason": "sma200_risk_exit"}
+                    pending = {"side": "SELL", "reason": "sma200_risk_exit", "signal_date": day}
                 elif high_wait_start is None and high[i]:
                     if high_hold_signal[i]:
                         suppressed_high_signal_count += 1
@@ -317,7 +322,7 @@ def simulate(
                         else:
                             immediate = False
                         if immediate:
-                            pending = {"side": "SELL", "reason": "high_confirm_immediate"}
+                            pending = {"side": "SELL", "reason": "high_confirm_immediate", "signal_date": day}
                         else:
                             high_wait_start = i
                 elif high_wait_start is not None and high_hold_signal[i]:
@@ -339,7 +344,7 @@ def simulate(
                             or rsi < 48.0 or waited >= 14
                         )
                     if confirm_exit:
-                        pending = {"side": "SELL", "reason": "high_confirm_rsi_or_timeout"}
+                        pending = {"side": "SELL", "reason": "high_confirm_rsi_or_timeout", "signal_date": day}
 
     c = pd.DataFrame(curve)
     equity = c.equity.astype(float)
