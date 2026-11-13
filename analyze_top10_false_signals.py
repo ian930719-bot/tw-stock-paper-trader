@@ -1,5 +1,7 @@
 """Pooled, causal false-signal diagnostics for frozen high-hold trade outcomes.
 
+Research revision: 2026-11-13; use verified official corporate-action checkpoints.
+
 Thresholds are selected on 2015-2021 trades only and evaluated on 2022-2026.
 This is a diagnostic screen, not a deployable strategy or a substitute for a
 full event-driven portfolio backtest.
