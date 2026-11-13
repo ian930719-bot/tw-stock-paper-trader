@@ -29,58 +29,7 @@ jobs:
             gh api --method POST "repos/ian930719-bot/tw-stock-paper-trader/actions/runs/${run_id}/cancel" || true
           done
 
-  collect-year:
-    needs: cancel-stale
-    runs-on: ubuntu-latest
-    timeout-minutes: 360
-    strategy:
-      fail-fast: false
-      max-parallel: 2
-      matrix:
-        year: [2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026]
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: research/top10-official-ohlcv-baseline-audit
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - run: pip install pandas numpy requests beautifulsoup4
-      - name: Download verified official seed trading calendar
-        uses: actions/download-artifact@v4
-        with:
-          name: top10-official-raw-ohlcv
-          repository: ian930719-bot/tw-stock-paper-trader
-          run-id: 43225571777
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          path: data/top10_official_raw
-      - name: Collect official TWSE and TPEx daily market-wide turnover for this year
-        env:
-          YEAR: ${{ matrix.year }}
-        run: |
-          set -euo pipefail
-          python -m py_compile collect_twse_historical_daily_top10.py
-          python collect_twse_historical_daily_top10.py \
-            --raw-bars data/top10_official_raw/bars \
-            --output data/twse_marketwide_turnover_${YEAR} \
-            --start-date ${YEAR}-01-01 --end-date ${YEAR}-12-31 --pause 0.15
-          python - <<'PY'
-          import json,os
-          from pathlib import Path
-          p=Path("data")/f"twse_marketwide_turnover_{os.environ['YEAR']}"/"manifest.json"
-          m=json.loads(p.read_text(encoding="utf-8"))
-          assert m["complete"] and m["dates_completed"]>0
-          print("YEAR",os.environ["YEAR"],"DATES",m["dates_completed"],"TOP10_ROWS",m["top10_rows"],"SYMBOLS",m["point_in_time_union_symbols"])
-          PY
-      - uses: actions/upload-artifact@v4
-        with:
-          name: top10-point-in-time-year-${{ matrix.year }}
-          path: data/twse_marketwide_turnover_${{ matrix.year }}/
-          if-no-files-found: error
-          retention-days: 30
-
   merge-and-audit:
-    needs: collect-year
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
@@ -116,7 +65,7 @@ jobs:
           set -euo pipefail
           for year in {2014..2026}; do
             mkdir -p "data/year_${year}"
-            gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            gh run download 43357713305 --repo ian930719-bot/tw-stock-paper-trader \
               --name "top10-point-in-time-year-${year}" --dir "data/year_${year}"
           done
       - name: Merge yearly official data into one verified point-in-time universe
