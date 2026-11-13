@@ -104,6 +104,13 @@ def main():
  s=requests.Session()
  ex,exmeta=collect_exdailyq(s,a.start_date,a.end_date)
  rev,revmeta=collect_revivt(s,a.special_start_date,a.end_date)
+ ex_years=sorted({int(r["date"][:4]) for r in ex})
+ rev_years=sorted({int(r["date"][:4]) for r in rev})
+ required_ex_years={2015,2020,2025}
+ if not required_ex_years.issubset(set(ex_years)):
+  raise RuntimeError(f"TPEx exDailyQ historical coverage missing required years: {required_ex_years-set(ex_years)}; got {ex_years}")
+ if 2025 not in rev_years:
+  raise RuntimeError(f"TPEx revivt 2025 control events missing; years={rev_years}")
  out=Path(a.output);out.mkdir(parents=True,exist_ok=True)
  pd.DataFrame(ex).to_csv(out/"tpex_exdailyq_all.csv",index=False)
  special_path=out/"special_events.csv"
@@ -120,7 +127,7 @@ def main():
  if mp.exists():
   try:previous=json.loads(mp.read_text(encoding="utf-8"))
   except:previous={}
- tpex_meta={"exDailyQ":exmeta,"revivt":revmeta,"exDailyQ_rows":len(ex),"revivt_rows":len(rev)}
+ tpex_meta={"exDailyQ":exmeta,"revivt":revmeta,"exDailyQ_rows":len(ex),"revivt_rows":len(rev),"exDailyQ_years":ex_years,"revivt_years":rev_years}
  complete=bool(previous.get("complete",False)) and len(ex)>0 and len(rev)>0
  manifest={**previous,"complete":complete,"tpex":tpex_meta,
   "sources":list(set(previous.get("sources",[])+["TPEx bulletin/exDailyQ","TPEx bulletin/revivt"])),
