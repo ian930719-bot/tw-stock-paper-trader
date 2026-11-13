@@ -416,9 +416,12 @@ def main():
    if not len(start_idx):raise RuntimeError("no 2015+ data")
    start=int(start_idx[0]);end=len(d)-1
    if market_map[symbol]=="TWSE" and stock_id_map[symbol]=="2330":
-    rep=simulate(d,low_unfiltered,high,risk,limits,cashdiv,10,start,end,high_hold_signal=hold,share_adjustments=share_adjustments)
+    benchmark_end_candidates=np.flatnonzero((d.date<=pd.Timestamp("2026-11-11")).to_numpy())
+    if not len(benchmark_end_candidates):raise RuntimeError("TSMC benchmark end date 2026-11-11 is unavailable")
+    benchmark_end=int(benchmark_end_candidates[-1])
+    rep=simulate(d,low_unfiltered,high,risk,limits,cashdiv,10,start,benchmark_end,high_hold_signal=hold,share_adjustments=share_adjustments)
     rep_metrics={k:v for k,v in rep.items() if k not in {"trades","equity_curve"}}
-    expected={"cagr":0.376871,"win_rate":0.933333,"trade_count":15,"max_drawdown":-0.254384}
+    expected={"period_end":"2026-11-11","cagr":0.376871,"win_rate":0.933333,"trade_count":15,"max_drawdown":-0.254384}
     tsmc_reproduction={"metrics":rep_metrics,"expected_previous_benchmark":expected,
      "cagr_delta_pp":(rep_metrics.get("cagr_mark_to_market")-expected["cagr"])*100 if rep_metrics.get("cagr_mark_to_market") is not None else None,
      "win_rate_delta_pp":(rep_metrics.get("win_rate_completed_only")-expected["win_rate"])*100 if rep_metrics.get("win_rate_completed_only") is not None else None,
