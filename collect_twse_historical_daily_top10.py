@@ -36,7 +36,7 @@ def fetch_day(session,day,retries=6):
     for n in names:
      if n in fields:return fields.index(n)
     raise RuntimeError("Missing MI_INDEX field: "+"/".join(names))
-   code=idx("證券代號"); name=idx("證券名稱"); vol=idx("成交股數"); money=idx("成交金額"); op=idx("開盤價"); hi=idx("最高價"); lo=idx("最低價"); cl=idx("收盤價")
+   code=idx("證券代號"); name=idx("證券名稱"); vol=idx("成交股數"); money=idx("成交金額"); op=idx("開盤價"); hi=idx("最高價"); lo=idx("最低價"); cl=idx("收盤價"); note=next((i for i,x in enumerate(fields) if "註記" in x),None)
    rows=[]
    for a in table.get("data",[]):
     sym=str(a[code]).strip()
@@ -45,7 +45,7 @@ def fetch_day(session,day,retries=6):
     if v is None or m is None: continue
     rows.append({"date":pd.Timestamp(day).strftime("%Y-%m-%d"),"symbol":sym,"name":str(a[name]).strip(),
                  "volume_shares":v,"turnover_ntd":m,"open":normnum(a[op]),"high":normnum(a[hi]),
-                 "low":normnum(a[lo]),"close":normnum(a[cl]),"rank_by_turnover":None,"source":"TWSE MI_INDEX"})
+                 "low":normnum(a[lo]),"close":normnum(a[cl]),"note":str(a[note]).strip() if note is not None else "","rank_by_turnover":None,"source":"TWSE MI_INDEX"})
    if not rows: raise RuntimeError("No market-wide equity rows parsed")
    rows.sort(key=lambda z:(-z["turnover_ntd"],z["symbol"]))
    for n,z in enumerate(rows,1):z["rank_by_turnover"]=n
@@ -101,7 +101,7 @@ def main():
     vals=[r.open,r.high,r.low,r.close]
     if any(pd.isna(x) for x in vals):continue
     handles[sym][1].writerow([sym,r.name,r.date,r.open,r.high,r.low,r.close,
-      r.volume_shares,r.turnover_ntd,"","TWSE MI_INDEX"])
+      r.volume_shares,r.turnover_ntd,getattr(r,"note",""),"TWSE MI_INDEX"])
  finally:
   for fh,wr in handles.values():fh.close()
  man={"source":"TWSE official MI_INDEX daily market-wide closing report","endpoint":URL,
