@@ -214,6 +214,8 @@ def build_limits(bars,ref_prices,event_limits,symbol,strict_from="2015-01-01"):
   note=str(getattr(r,"note","")).strip()
   ohlc=[getattr(r,x,np.nan) for x in ("open","high","low","close")]
   volume=float(getattr(r,"volume",0) or 0)
+  if note in {"**","＊＊"} and day not in event_limits:
+   raise RuntimeError(f"{symbol}: official raw-bar special resumption marker without a matching official event {day}")
   if volume<=0:
    # A no-trade session has no new close. Preserve the last valid reference
    # instead of poisoning every later session with prev_close=None. If an
@@ -227,8 +229,6 @@ def build_limits(bars,ref_prices,event_limits,symbol,strict_from="2015-01-01"):
    if day>=strict_from:missing.append(day)
    seen=True
    continue
-  if note in {"**","＊＊"} and day not in event_limits:
-   raise RuntimeError(f"{symbol}: official raw-bar special resumption marker without a matching official event {day}")
   if session_i<5 or day<"2014-01-01":
    seen=True;prev_close=float(r.close);continue
   if day in event_limits:
