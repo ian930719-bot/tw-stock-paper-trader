@@ -238,7 +238,7 @@ def run_shared_capital_portfolio(prepared, universe, slippage_bps=10, initial_ca
  coverage=complete_days/len(dates) if dates else 0.0
 
  cash=float(initial_capital);position=None;shares=0;entry_date=None;entry_reason=None
- entry_cost=0.0;trade_dividend=0.0;pending=None;high_wait_start=None
+ entry_cost=0.0;trade_dividend=0.0;pending=None;high_wait_start=None;position_last_close=None
  risk_exit_fired=False;cooldown_until=-1;trades=[];curve=[]
  total_commission=total_tax=total_dividend=0.0;total_slippage=0.0
  missing_limit=locked_limit=outside_limit=0;exposure_days=0;suppressed_high=0
@@ -247,6 +247,11 @@ def run_shared_capital_portfolio(prepared, universe, slippage_bps=10, initial_ca
   if position is not None and day in prepared[position]["dividends"]:
    credit=shares*prepared[position]["dividends"][day]
    cash+=credit;trade_dividend+=credit;total_dividend+=credit
+  if position is not None and day in prepared[position].get("share_adjustments",{}):
+   multiplier=float(prepared[position]["share_adjustments"][day])
+   if not np.isfinite(multiplier) or multiplier<=0:
+    raise RuntimeError(f"Invalid share adjustment for {position} on {day}: {multiplier}")
+   shares=int(math.floor(shares*multiplier+1e-9))
   # Execute any order submitted after the previous close.
   if pending is not None:
    sym=pending["symbol"];x=prepared[sym];di=index_maps[sym].get(day)
@@ -273,6 +278,7 @@ def run_shared_capital_portfolio(prepared, universe, slippage_bps=10, initial_ca
       if qty>0:
        notional=qty*fill;fee=commission(notional);cash-=notional+fee
        shares=qty;position=sym;entry_date=day;entry_reason=pending["reason"]
+       position_last_close=None
        entry_cost=notional+fee;trade_dividend=0.0;risk_exit_fired=False;high_wait_start=None
        total_commission+=fee;total_slippage+=qty*(fill-op)
       pending=None
@@ -288,17 +294,24 @@ def run_shared_capital_portfolio(prepared, universe, slippage_bps=10, initial_ca
       total_commission+=fee;total_tax+=tax;total_slippage+=shares*(op-fill)
       if pending["reason"]=="sma200_risk_exit":cooldown_until=gi+RULES["risk_exit_cooldown_sessions"]
       position=None;shares=0;entry_date=None;entry_reason=None;entry_cost=0.0;trade_dividend=0.0
+      position_last_close=None
       high_wait_start=None;pending=None
   # Mark portfolio equity at the close.
+  stale_mark=False
   if position is not None:
    di=index_maps[position].get(day)
-   if di is None:raise RuntimeError(f"Held position {position} missing official bar on {day}")
-   row=prepared[position]["d"].iloc[di]
-   close=float(row.raw_close);equity=cash+shares*close;exposure_days+=1
+   if di is None:
+    if position_last_close is None:raise RuntimeError(f"Held position {position} has no prior official mark on {day}")
+    close=position_last_close;stale_mark=True
+   else:
+    row=prepared[position]["d"].iloc[di]
+    close=float(row.raw_close);position_last_close=close
+   equity=cash+shares*close;exposure_days+=1
   else:
    close=None;equity=cash
   curve.append({"date":day,"equity":equity,"cash":cash,"position":position,
-                "shares":shares,"close":close,"pending_order":pending["side"] if pending else None})
+                "shares":shares,"close":close,"stale_mark":stale_mark,
+                "pending_order":pending["side"] if pending else None})
   if pending is not None or gi>=len(dates)-1:continue
   if position is None:
    # Fail closed on a day when any member of the daily top ten is not audited.
