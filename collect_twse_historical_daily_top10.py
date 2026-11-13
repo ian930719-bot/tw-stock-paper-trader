@@ -132,8 +132,9 @@ def main():
  session=requests.Session();summary=[];combined=[]
  for i,d in enumerate(dates,1):
   path=daily/(d+".csv")
-  if path.exists() and path.stat().st_size>100:
-   rows=pd.read_csv(path,dtype={"symbol":str,"stock_id":str}).to_dict("records")
+  cached=pd.read_csv(path,dtype={"symbol":str,"stock_id":str}) if path.exists() and path.stat().st_size>100 else pd.DataFrame()
+  if not cached.empty and {"market","stock_id","rank_by_volume"}.issubset(cached.columns) and {"TWSE","TPEX"}.issubset(set(cached.market.astype(str))):
+   rows=cached.to_dict("records")
   else:
    twse_rows=fetch_twse_day(session,d)
    tpex_rows=fetch_tpex_day(session,d)
