@@ -32,73 +32,50 @@ def limit_price(ref,band,side):
  raise RuntimeError(f"tick rounding did not converge: {ref=} {band=} {side=}")
 
 def read_events(action_root,symbol):
- root=Path(action_root)/"corporate_actions"
+ root=Path(action_root)
  manifest=root/"manifest.json"
- if not manifest.exists():raise RuntimeError("Missing corporate_actions/manifest.json")
+ if not manifest.exists():raise RuntimeError("Missing official TWT49U manifest")
  m=json.loads(manifest.read_text(encoding="utf-8"))
- if not m.get("corporate_actions_complete") or m.get("event_conflicts",0):
-  raise RuntimeError(f"Corporate action data incomplete/conflicting: {m}")
- p=root/"by_symbol"/f"{symbol}.csv"
- if not p.exists():raise RuntimeError(f"Missing corporate-action file for {symbol}")
- div=pd.read_csv(p,dtype={"stock_id":str})
- if div.empty:return pd.DataFrame(),{},{}
- div["date"]=pd.to_datetime(div.date,errors="coerce").dt.normalize()
- refmap={}
- for r in div.itertuples(index=False):
-  ref=getattr(r,"reference_price",np.nan)
-  if pd.notna(ref) and float(ref)>0:
-   key=pd.Timestamp(r.date).strftime("%Y-%m-%d")
-   refmap.setdefault(key,[]).append(float(ref))
-  if str(getattr(r,"stock_or_cache_dividend","")).strip()=="息":
-   cash=getattr(r,"stock_and_cache_dividend",np.nan)
-   if pd.notna(cash) and float(cash)>0:
-    refmap.setdefault("__cash__"+pd.Timestamp(r.date).strftime("%Y-%m-%d"),[]).append(float(cash))
- # Read global action datasets and add their official post-event reference prices.
- globals_=[
-  ("TaiwanStockSplitPrice","after_price"),
-  ("TaiwanStockCapitalReductionReferencePrice","PostReductionReferencePrice"),
-  ("TaiwanStockParValueChange","after_ref_close"),
- ]
- extra=[]
- for filename,col in globals_:
-  f=root/f"{filename}.csv"
-  if not f.exists():raise RuntimeError(f"Missing global corporate-action source: {filename}")
-  g=pd.read_csv(f,dtype={"stock_id":str})
-  if g.empty:continue
-  g=g[g.stock_id.astype(str).str.strip()==symbol]
-  for r in g.itertuples(index=False):
-   v=getattr(r,col,np.nan)
-   if pd.notna(v) and float(v)>0:
-    key=pd.Timestamp(r.date).strftime("%Y-%m-%d")
-    refmap.setdefault(key,[]).append(float(v))
-    extra.append({"date":key,"source":filename,"reference_price":float(v)})
- # Resolve same-date source conflicts strictly.
+ if not m.get("complete"):raise RuntimeError(f"Official TWT49U collection incomplete: {m}")
+ p=root/f"{symbol}.csv"
+ if not p.exists():raise RuntimeError(f"Missing official TWT49U event file for {symbol}")
+ ev=pd.read_csv(p)
+ if ev.empty:return pd.DataFrame(columns=["symbol","date","adjustment_ratio"]),{}, {}, {}
+ ev["date"]=pd.to_datetime(ev.date,errors="coerce").dt.normalize()
+ ev["symbol"]=ev.symbol.astype(str).str.strip()
+ ev["adjustment_ratio"]=pd.to_numeric(ev.adjustment_ratio,errors="coerce")
+ ev=ev.dropna(subset=["date","adjustment_ratio"])
+ cash={}
  refs={}
- for k,vals in refmap.items():
-  unique=sorted(set(round(float(v),6) for v in vals))
-  if len(unique)>1:raise RuntimeError(f"{symbol} conflicting reference/cash event {k}: {unique}")
-  refs[k]=unique[0]
- events=pd.read_csv(root/"events.csv",dtype={"symbol":str})
- events=events[events.symbol.astype(str).str.strip()==symbol].copy() if not events.empty else pd.DataFrame()
- if not events.empty and events.conflict.fillna(False).any():raise RuntimeError(f"{symbol} corporate action event conflict")
- cash={k.replace("__cash__",""):v for k,v in refs.items() if k.startswith("__cash__")}
- ref_prices={k:v for k,v in refs.items() if not k.startswith("__cash__")}
- return events,cash,ref_prices
+ limits={}
+ for r in ev.itertuples(index=False):
+  day=pd.Timestamp(r.date).strftime("%Y-%m-%d")
+  cd=getattr(r,"cash_dividend",np.nan)
+  if pd.notna(cd) and float(cd)>0:cash[day]=float(cd)
+  ref=float(r.reference_price);up=float(r.limit_up);down=float(r.limit_down)
+  if day in refs and abs(refs[day]-ref)>1e-6:raise RuntimeError(f"{symbol} duplicate TWT49U reference conflict {day}")
+  refs[day]=ref
+  limits[day]=(up,down)
+ ev["source"]="TWSE TWT49U"
+ return ev,cash,refs,limits
 
-def build_limits(bars,ref_prices,symbol):
+def build_limits(bars,ref_prices,event_limits,symbol):
  out={};prev_close=None;missing=[];conflicts=[]
  for r in bars.itertuples(index=False):
   day=pd.Timestamp(r.date).strftime("%Y-%m-%d")
-  if day in ref_prices:ref=ref_prices[day];src="verified_corporate_action_reference"
-  elif prev_close is not None:ref=prev_close;src="prior_traded_close"
+  note=str(getattr(r,"note","")).strip()
+  if note in {"**","＊＊"} and day not in event_limits:
+   raise RuntimeError(f"{symbol}: official raw-bar special resumption marker without TWT49U event {day}")
+  if day in event_limits:
+   up,down=event_limits[day];src="TWSE TWT49U official event limit"
+   ref=ref_prices[day]
+  elif prev_close is not None:
+   ref=prev_close;band=.07 if day<"2015-06-01" else .10
+   up=limit_price(ref,band,"UP");down=limit_price(ref,band,"DOWN");src="TWSE official band/tick rules from prior traded close"
   else:
-   if day >= "2015-01-01": missing.append(day)
+   if day>="2015-01-01":missing.append(day)
    continue
-  band=.07 if day<"2015-06-01" else .10
-  up=limit_price(ref,band,"UP");down=limit_price(ref,band,"DOWN")
   hi=float(r.high);lo=float(r.low)
-  # Any observed traded price outside reconstructed official bounds means
-  # an unmodeled event or special rule; do not backtest through it.
   if hi>up+1e-6 or lo<down-1e-6:
    conflicts.append({"date":day,"high":hi,"low":lo,"up":up,"down":down,"reference":ref,"source":src})
   out[day]=(up,down)
@@ -129,7 +106,7 @@ def hold_gate(d):
 def main():
  p=argparse.ArgumentParser()
  p.add_argument("--raw-bars",default="data/top10_official_raw/bars")
- p.add_argument("--actions",default="data/top10_actions")
+ p.add_argument("--actions",default="data/top10_actions_twt49u")
  p.add_argument("--output",default="artifacts/top10_frozen_high_hold")
  a=p.parse_args()
  out=Path(a.output);out.mkdir(parents=True,exist_ok=True)
@@ -139,8 +116,8 @@ def main():
    raw=pd.read_csv(Path(a.raw_bars)/f"{symbol}.csv",parse_dates=["date"])
    raw=raw.sort_values("date").drop_duplicates("date").reset_index(drop=True)
    if len(raw)<260:raise RuntimeError(f"insufficient raw history {len(raw)}")
-   ev,cashdiv,ref=read_events(a.actions,symbol)
-   limits=build_limits(raw,ref,symbol)
+   ev,cashdiv,ref,event_limits=read_events(a.actions,symbol)
+   limits=build_limits(raw,ref,event_limits,symbol)
    d=make_features(raw,ev)
    low,high,risk=build_candidate_signals(d)
    hold=hold_gate(d)
