@@ -1,0 +1,66 @@
+name: Collect MOPS Official Dividend Components
+
+on:
+  push:
+    branches: [research/top10-official-ohlcv-baseline-audit]
+    paths:
+      - .github/workflows/mops-dividend-component-collection.yml
+      - collect_mops_dividend_components.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pandas lxml requests
+      - name: Download official TWT49U and TPEx corporate-action checkpoint
+        uses: actions/download-artifact@v4
+        with:
+          name: top10-official-corporate-actions-with-terms
+          repository: ian930719-bot/tw-stock-paper-trader
+          run-id: 43394241266
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: data/top10_actions_twt49u
+      - name: Collect and reconcile official MOPS dividend components
+        run: |
+          python -m py_compile collect_mops_dividend_components.py
+          python collect_mops_dividend_components.py \
+            --actions-dir data/top10_actions_twt49u \
+            --overrides data/official_dividend_component_overrides.csv \
+            --output-dir data/mops_dividend_reconciliation \
+            --pause 0.5
+      - name: Validate every new MOPS override against official TWSE reference prices
+        run: |
+          python - <<'PY'
+          import json,pandas as pd
+          from pathlib import Path
+          m=json.loads(Path("data/mops_dividend_reconciliation/manifest.json").read_text(encoding="utf-8"))
+          d=pd.read_csv("data/official_dividend_component_overrides.csv",dtype={"symbol":str})
+          print(json.dumps({
+            "twt49u_unresolved_events":m["twt49u_unresolved_events"],
+            "new_overrides_reconciled":m["new_overrides_reconciled"],
+            "unresolved_after_mops":m["unresolved_after_mops"],
+            "override_rows":len(d),
+            "source_types":d.source_type.value_counts().to_dict()
+          },ensure_ascii=False,indent=2))
+          assert m["new_overrides_reconciled"]>0, "No official MOPS dividend components reconciled"
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mops-official-dividend-component-overrides
+          path: |
+            data/official_dividend_component_overrides.csv
+            data/mops_dividend_reconciliation/
+          if-no-files-found: error
+          retention-days: 30
