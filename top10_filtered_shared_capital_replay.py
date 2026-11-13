@@ -62,8 +62,8 @@ def main():
             raw_full=raw_full.sort_values("date").drop_duplicates("date").reset_index(drop=True)
             if raw_full.empty: raise RuntimeError("empty official raw history")
             ev,cashdiv,refs,event_limits,share_adjustments=read_events(
-                a.actions,sym,stock_map[sym],market_map[sym])
-            limits=build_limits(raw_full,refs,event_limits,sym)
+                a.actions,sym,stock_map[sym],market_map[sym],accounting_start_date="2022-01-01")
+            limits=build_limits(raw_full,refs,event_limits,sym,strict_from="2022-01-01")
             raw=raw_full.dropna(subset=["open","high","low","close"]).copy()
             raw=raw[raw.volume>0].reset_index(drop=True)
             if raw.empty: raise RuntimeError("no traded raw history")
@@ -102,8 +102,11 @@ def main():
     pd.DataFrame(rows).to_csv(out/"shared_capital_entry_filter_metrics.csv",index=False)
     manifest_path=Path(a.universe_file).parent/"manifest.json"
     manifest=json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
+    baseline_10bps=report_filters["baseline"].get("10bps",{})
+    coverage=float(baseline_10bps.get("complete_universe_day_ratio",0.0) or 0.0)
+    complete=(len(prepared)==len(symbols) and coverage>=1.0)
     report={
-        "status":"COMPLETE",
+        "status":"COMPLETE" if complete else "COMPLETE_WITH_INCOMPLETE_UNIVERSE_COVERAGE",
         "classification":"FROZEN_TRAINING_THRESHOLD_OUT_OF_TIME_SHARED_CAPITAL_ENTRY_FILTER_REPLAY",
         "initial_capital":INITIAL_CAPITAL,
         "signal_timing":"signal at close t; fill at next session open",
@@ -119,6 +122,9 @@ def main():
         "universe_manifest":manifest,
         "symbols_expected":len(symbols),"symbols_prepared":len(prepared),
         "blocked_symbols":blocked,
+        "blocked_reason_counts":{reason:sum(1 for item in blocked if reason in item["reason"]) for reason in sorted({part for item in blocked for part in [item["reason"].split(": ",1)[-1].split(" on ")[0]]})},
+        "historical_action_policy":"For dates before 2022-01-01, use exchange-published adjustment ratios for indicator warm-up only; no pre-test cash dividend or share entitlement is credited because the shared account starts flat on 2022-01-01.",
+        "official_price_limit_validation_start":"2022-01-01; earlier prices are indicator warm-up only and cannot execute orders.",
         "filters":report_filters,
         "interpretation":"This is the actual one-position shared NT$100,000 account. A filter is not approved unless its out-of-time portfolio results improve risk without unacceptable return/trade-frequency loss. No threshold is reselected on 2022+ data.",
     }
