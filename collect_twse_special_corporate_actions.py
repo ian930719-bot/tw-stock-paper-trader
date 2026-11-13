@@ -108,6 +108,8 @@ def main():
   schemas[dataset]=schema
   allrows.extend(rows)
   print(f"[DONE] {dataset}: {len(rows)} special events",flush=True)
+ if not any(r["symbol"]=="2327" and r["date"]=="2025-08-25" for r in allrows):
+  raise RuntimeError("Known 2327 2025-08-25 TWSE special resumption marker was not reconciled to TWTAUU/TWTB8U.")
  out=Path(a.output);out.mkdir(parents=True,exist_ok=True)
  frame=pd.DataFrame(allrows,columns=["symbol","date","event_type","previous_close","reference_price","limit_up","limit_down","reason","source"])
  frame.to_csv(out/"special_events.csv",index=False)
