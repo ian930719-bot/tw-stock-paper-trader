@@ -25,7 +25,8 @@ def rocdate(value):
     if not s: return None
     m=re.search(r"(\d{2,3})[./-](\d{1,2})[./-](\d{1,2})",s)
     if not m: return None
-    year=int(m.group(1))+1911
+    year=int(m.group(1))
+    if year<1911: year+=1911
     return f"{year:04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
 
 def number(value):
@@ -48,61 +49,72 @@ def fetch_year(session, roc_year, symbols, raw_dir, raw_cache_dir=None, retries=
       "b_date":"","e_date":"","type":"1","rulesubmit2":"搜尋"
     }
     last_error=None
-    cache_path=(Path(raw_cache_dir)/f"mops_t108sb27_sii_{roc_year}.html") if raw_cache_dir else None
-    cached_html=cache_path.read_text(encoding="utf-8") if cache_path and cache_path.exists() else None
     for attempt in range(retries):
         try:
-            if cached_html is not None:
-                html=cached_html
-                source_url=URL+"?"+urlencode(params)
-            else:
-                response=session.get(URL,params=params,timeout=(10,90))
-                response.raise_for_status()
-                response.encoding="utf-8"
-                html=response.text
-                source_url=response.url
+            response=session.get(URL,params=params,timeout=(10,90))
+            response.raise_for_status()
+            response.encoding="utf-8"
+            html=response.text
+            source_url=response.url
             if "FOR SECURITY REASONS" in html or "因為安全性考量" in html:
                 raise RuntimeError("MOPS security interstitial")
-            tables=pd.read_html(io.StringIO(html), encoding="utf-8")
-            frame=next((t for t in tables if any(last_level(c)=="公司代號" for c in t.columns)),None)
-            if frame is None: raise RuntimeError(f"MOPS t108sb27 data table missing for ROC year {roc_year}")
+            filename_match=re.search(r"name=['\\\"]filename['\\\"]\\s+value=['\\\"]([^'\\\"]+)",html,re.I)
+            if not filename_match:
+                raise RuntimeError(f"MOPS t108sb27 export filename missing for ROC year {roc_year}")
+            filename=filename_match.group(1)
+            csv_response=session.post(
+                "https://mopsov.twse.com.tw/server-java/t105sb02",
+                data={"firstin":"true","step":"10","filename":filename},
+                headers={"Referer":source_url},
+                timeout=(10,120)
+            )
+            csv_response.raise_for_status()
+            if "text/csv" not in str(csv_response.headers.get("content-type","")).lower():
+                raise RuntimeError(f"MOPS CSV export did not return text/csv for ROC year {roc_year}: {csv_response.headers.get('content-type')}")
+            if len(csv_response.content)<100 or b"FOR SECURITY REASONS" in csv_response.content:
+                raise RuntimeError(f"MOPS CSV export empty or blocked for ROC year {roc_year}")
+            # MOPS t108sb27 CSV is Big5/CP950, even when the response header says ISO-8859-1.
+            frame=pd.read_csv(io.BytesIO(csv_response.content),encoding="cp950",dtype=str,keep_default_na=False)
             raw_dir.mkdir(parents=True,exist_ok=True)
             (raw_dir/f"mops_t108sb27_sii_{roc_year}.html").write_text(html,encoding="utf-8")
-            def col(label,required=True):
-                matches=[c for c in frame.columns if last_level(c)==label]
-                if matches:return matches[0]
-                if required:raise RuntimeError(f"MOPS year {roc_year} missing column {label}; got {[last_level(c) for c in frame.columns]}")
-                return None
-            code_c=col("公司代號")
-            right_c=col("除權交易日",False)
-            div_c=col("除息交易日",False)
-            rights_ratio_c=col("現金增資認股比率(%)",False)
-            rights_price_c=col("現金增資認購價(元/股)",False)
-            rights_shares_c=col("現金增資總股數(股)",False)
-            stock_c1=col("盈餘轉增資配股(元/股)",False)
-            stock_c2=col("法定盈餘公積、資本公積轉增資配股(元/股)",False)
-            cash_c1=col("盈餘分配之股東現金股利(元/股)",False)
-            cash_c2=col("法定盈餘公積、資本公積發放之現金(元/股)",False)
-            par_c=col("普通股每股面額",False)
-            year_c=col("股利所屬年度",False)
+            (raw_dir/f"mops_t108sb27_sii_{roc_year}_full.csv").write_bytes(csv_response.content)
+            cols=[str(c).strip() for c in frame.columns]
+            def find_col(predicate):
+                return next((c for c in frame.columns if predicate(str(c).strip())),None)
+            code_c=find_col(lambda x:x=="公司代號")
+            if code_c is None:
+                raise RuntimeError(f"MOPS full CSV missing 公司代號 for ROC year {roc_year}; columns={cols}")
+            right_c=find_col(lambda x:"除權交易日" in x)
+            div_c=find_col(lambda x:"除息交易日" in x)
+            rights_ratio_c=find_col(lambda x:"現金增資認股比率(%)" in x)
+            rights_price_c=find_col(lambda x:"現金增資認購價(元/股)" in x)
+            rights_shares_c=find_col(lambda x:"現金增資總股數(股)" in x)
+            stock_cols=[c for c in frame.columns if "轉增資配股(元/股)" in str(c) and "員工" not in str(c)]
+            cash_cols=[c for c in frame.columns if "(元/股)" in str(c)
+                and ("股東現金股利" in str(c) or "發放之現金" in str(c))
+                and not any(k in str(c) for k in ("特別股","員工","現金增資"))]
+            par_c=find_col(lambda x:"普通股每股面額" in x)
+            year_c=find_col(lambda x:"股利所屬年度" in x or "股利所屬期間" in x)
             out=[]
             for _,row in frame.iterrows():
                 symbol=str(row[code_c]).strip()
                 if symbol.endswith(".0"):symbol=symbol[:-2]
                 if symbol not in symbols:continue
-                stock=number(row[stock_c1] if stock_c1 else 0)+number(row[stock_c2] if stock_c2 else 0)
-                cash=number(row[cash_c1] if cash_c1 else 0)+number(row[cash_c2] if cash_c2 else 0)
+                stock=sum(number(row[c]) for c in stock_cols)
+                cash=sum(number(row[c]) for c in cash_cols)
                 rights_pct=number(row[rights_ratio_c]) if rights_ratio_c else 0.0
                 rights_price=number(row[rights_price_c]) if rights_price_c else 0.0
                 rights_shares=number(row[rights_shares_c]) if rights_shares_c else 0.0
                 par=par_value(row[par_c]) if par_c else None
                 ex_right=rocdate(row[right_c]) if right_c else None
                 ex_div=rocdate(row[div_c]) if div_c else None
-                dividend_year=str(row[year_c]) if year_c else ""
+                dividend_year=str(row[year_c]).strip() if year_c else ""
                 common={"symbol":symbol,"par_value_per_share":par,"dividend_year":dividend_year,
                   "mops_year":roc_year,"ex_right_date":ex_right,"ex_dividend_date":ex_div,
-                  "rights_issue_ratio_pct":rights_pct,"rights_subscription_price":rights_price if rights_pct>0 else None,
-                  "rights_issue_total_shares":rights_shares,"source_url":source_url}
+                  "rights_issue_ratio_pct":rights_pct,
+                  "rights_subscription_price":rights_price if rights_pct>0 else None,
+                  "rights_issue_total_shares":rights_shares,
+                  "source_url":source_url+" | official CSV export "+csv_response.url}
                 if ex_right and ex_div and ex_right==ex_div:
                     if cash>0 or stock>0 or rights_pct>0:
                         out.append({**common,"event_date":ex_right,"cash_dividend_per_share":cash,
@@ -115,7 +127,11 @@ def fetch_year(session, roc_year, symbols, raw_dir, raw_cache_dir=None, retries=
                         out.append({**common,"event_date":ex_div,"cash_dividend_per_share":cash,
                           "stock_dividend_per_share":0.0,"rights_issue_ratio_pct":0.0,
                           "rights_subscription_price":None,"rights_issue_total_shares":0.0})
-            return out,{"roc_year":roc_year,"url":source_url,"table_rows":len(frame),"matched_symbols":int(frame[code_c].astype(str).isin(symbols).sum()),"component_event_rows":len(out)}
+            return out,{"roc_year":roc_year,"url":source_url,"csv_export_url":csv_response.url,
+              "csv_filename":filename,"csv_content_type":csv_response.headers.get("content-type"),
+              "csv_sha256":hashlib.sha256(csv_response.content).hexdigest(),
+              "table_rows":len(frame),"matched_symbols":int(frame[code_c].astype(str).str.strip().isin(symbols).sum()),
+              "component_event_rows":len(out),"html_source":"MOPS ajax_t108sb27","csv_encoding":"cp950"}
         except Exception as exc:
             last_error=exc
             if attempt+1<retries:time.sleep(2**attempt+1)
