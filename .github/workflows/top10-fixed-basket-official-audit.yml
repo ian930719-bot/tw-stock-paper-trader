@@ -6,6 +6,7 @@ on:
     paths:
       - .github/workflows/top10-fixed-basket-official-audit.yml
       - top10_frozen_high_hold_transfer_audit.py
+      - analyze_top10_false_signals.py
       - tsmc_2330_4019_replication.py
       - corporate_action_adjustments.py
       - collect_twse_twt49u_corporate_actions.py
@@ -82,6 +83,12 @@ jobs:
           if r["symbols_completed"] == 0:
               raise SystemExit("No fixed-basket symbol passed the official-data gates.")
           PY
+      - name: Analyze causal false-signal features with chronological holdout
+        run: |
+          python -m py_compile analyze_top10_false_signals.py
+          python analyze_top10_false_signals.py \
+            --trades artifacts/top10_fixed_basket/trade_feature_diagnostics_10bps.csv \
+            --output artifacts/top10_fixed_basket/false_signal_analysis
       - name: Upload fixed-basket official audit outputs
         uses: actions/upload-artifact@v4
         with:
