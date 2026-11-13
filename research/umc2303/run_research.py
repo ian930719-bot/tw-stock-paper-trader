@@ -30,7 +30,11 @@ def fetch_month(year: int, month: int):
     rows = []
     for row in payload.get("data", []):
         try:
-            parts = row[0].split("/")\n            if len(parts[0]) == 3:\n                d = datetime(int(parts[0]) + 1911, int(parts[1]), int(parts[2])).date().isoformat()\n            else:\n                d = datetime.strptime(row[0].replace("/", ""), "%Y%m%d").date().isoformat()
+            parts = row[0].split("/")
+            if len(parts[0]) == 3:
+                d = datetime(int(parts[0]) + 1911, int(parts[1]), int(parts[2])).date().isoformat()
+            else:
+                d = datetime.strptime(row[0].replace("/", ""), "%Y%m%d").date().isoformat()
             nums = [float(x.replace(",", "")) for x in row[1:6]]
             volume, turnover, opn, high, low = nums
             close = float(row[6].replace(",", ""))
