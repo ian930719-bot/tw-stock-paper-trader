@@ -106,11 +106,11 @@ def main():
  man={"source":"TWSE official MI_INDEX daily market-wide closing report","endpoint":URL,
       "dates_requested":len(dates),"dates_completed":len(summary),"complete":len(summary)==len(dates),
       "first_date":dates[0],"last_date":dates[-1],"rows":len(frame),"point_in_time_union_symbols":len(union),"symbol_bar_files":len(union),
-      "sha256":hashlib.sha256((out/"historical_daily_top10_by_turnover.csv").read_bytes()).hexdigest(),
+      "sha256":hashlib.sha256((out/"historical_daily_top10_by_volume.csv").read_bytes()).hexdigest(),
       "method":"rank all listed common-stock rows by official daily traded shares; top 10 per date; turnover rank and value retained as secondary fields",
-      "limitations":["Market-wide endpoint includes securities that must be classified; script filters four-digit numeric codes only.",
+      "limitations":["Market-wide endpoint includes securities that must be classified; script retains four-digit numeric codes and excludes 00xx ETF and 91xx TDR classes; remaining security-type edge cases require review.",
                      "Historical universe categories and special security types require separate classification audit.",
-                     "Daily top ten is ranked on same-day close turnover and can only be used to choose next-session trades, never same-day entries."]}
+                     "Daily top ten is ranked on same-day close traded shares and can only be used to choose next-session trades, never same-day entries."]}
  (out/"manifest.json").write_text(json.dumps(man,ensure_ascii=False,indent=2),encoding="utf-8")
  print(json.dumps(man,ensure_ascii=False,indent=2))
 if __name__=="__main__":main()
