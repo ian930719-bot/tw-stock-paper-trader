@@ -63,7 +63,7 @@ def fetch_year(session, roc_year, symbols, raw_dir, raw_cache_dir=None, retries=
                 source_url=response.url
             if "FOR SECURITY REASONS" in html or "因為安全性考量" in html:
                 raise RuntimeError("MOPS security interstitial")
-            tables=pd.read_html(io.StringIO(html))
+            tables=pd.read_html(io.StringIO(html), encoding="utf-8")
             frame=next((t for t in tables if any(last_level(c)=="公司代號" for c in t.columns)),None)
             if frame is None: raise RuntimeError(f"MOPS t108sb27 data table missing for ROC year {roc_year}")
             raw_dir.mkdir(parents=True,exist_ok=True)
