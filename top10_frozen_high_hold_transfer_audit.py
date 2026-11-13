@@ -12,9 +12,39 @@ import numpy as np
 import pandas as pd
 from corporate_action_adjustments import apply_back_adjustments
 from tsmc_swing_research import build_causal_features
-from tsmc_2330_4019_replication import RULES,build_candidate_signals,simulate,annual_metrics,INITIAL_CAPITAL,SLIPPAGE_BPS
+from tsmc_2330_4019_replication import RULES,build_candidate_signals,simulate as _frozen_simulate,annual_metrics,INITIAL_CAPITAL,SLIPPAGE_BPS
 from tsmc_2330_price_limits import limit_price as official_limit_price
 from tsmc_2330_trend_reentry_annual_oof import adverse_fill, commission, sell_tax
+
+
+def simulate(*args,**kwargs):
+ result=_frozen_simulate(*args,**kwargs)
+ curve=result.get("equity_curve")
+ if not curve:return result
+ c=pd.DataFrame(curve)
+ if "close" not in c or "cash" not in c or "shares" not in c:return result
+ observed=pd.to_numeric(c["close"],errors="coerce")
+ if not observed.isna().any():return result
+ mark=observed.ffill()
+ cash_values=pd.to_numeric(c["cash"],errors="coerce")
+ share_values=pd.to_numeric(c["shares"],errors="coerce").fillna(0.0)
+ held=share_values>0
+ if bool((held & mark.isna()).any()):
+  raise RuntimeError("Held position has no prior valid close for mark-to-market")
+ equity=cash_values.copy()
+ equity.loc[held]=cash_values.loc[held]+share_values.loc[held]*mark.loc[held]
+ if equity.isna().any():raise RuntimeError("Missing cash/equity values after stale-close mark repair")
+ c["observed_close"]=observed
+ c["close"]=mark
+ c["equity"]=equity
+ result["equity_curve"]=c.to_dict("records")
+ final=float(equity.iloc[-1])
+ days=max(1,(pd.Timestamp(c.date.iloc[-1])-pd.Timestamp(c.date.iloc[0])).days)
+ result["final_equity_mark_to_market"]=final
+ result["cagr_mark_to_market"]=(final/INITIAL_CAPITAL)**(365.25/days)-1 if final>0 else None
+ result["max_drawdown"]=float((equity/equity.cummax()-1).min())
+ result["stale_close_mark_days"]=int(observed.isna().sum())
+ return result
 
 DEFAULT_SYMBOLS=["2330","2454","1303","2327","2408","2308","3037","3008","2383","2303"]
 NAMES={"2330":"台積電","2454":"聯發科","1303":"南亞","2327":"國巨","2408":"南亞科","2308":"台達電","3037":"欣興","3008":"大立光","2383":"台光電","2303":"聯電"}
@@ -115,6 +145,23 @@ def read_events(action_root,symbol_key,stock_id,market,accounting_start_date="20
  ev["adjustment_ratio"]=pd.to_numeric(ev.adjustment_ratio,errors="coerce")
  ev=ev.dropna(subset=["date","adjustment_ratio"])
  cash={};refs={};limits={};share_adjustments={}
+ override_share_multiplier=None
+ mops_lookup={}
+ mops_path=Path(__file__).resolve().parent/"data"/"mops_dividend_reconciliation"/"mops_dividend_components.csv"
+ if market.upper()=="TWSE" and mops_path.exists():
+  mops_df=pd.read_csv(mops_path,dtype={"symbol":str})
+  mops_df=mops_df[mops_df.symbol.astype(str).str.strip()==stock_id].copy()
+  if not mops_df.empty:
+   mops_df["event_date"]=pd.to_datetime(mops_df.event_date,errors="coerce").dt.strftime("%Y-%m-%d")
+   mops_lookup={str(x.event_date):x for x in mops_df.itertuples(index=False) if pd.notna(x.event_date)}
+ override_path=Path(__file__).resolve().parent/"data"/"official_dividend_component_overrides.csv"
+ override_lookup={}
+ if override_path.exists():
+  override_df=pd.read_csv(override_path,dtype={"symbol":str})
+  override_df=override_df[override_df.symbol.astype(str).str.strip()==stock_id].copy()
+  if not override_df.empty:
+   override_df["event_date"]=pd.to_datetime(override_df.event_date,errors="coerce").dt.strftime("%Y-%m-%d")
+   override_lookup={str(x.event_date):x for x in override_df.itertuples(index=False) if pd.notna(x.event_date)}
  # Ex-dividend entitlements are applied to the position held before the ex-date open.
  for r in ev.itertuples(index=False):
   day=pd.Timestamp(r.date).strftime("%Y-%m-%d")
@@ -125,25 +172,50 @@ def read_events(action_root,symbol_key,stock_id,market,accounting_start_date="20
   rights_value=getattr(r,"rights_issue_shares",np.nan)
   stock_value=getattr(r,"stock_dividend",np.nan)
   cash_value=getattr(r,"cash_dividend",np.nan)
-  # Explicitly sourced component override for a mixed TWT49U row. The
-  # override is accepted only when its cash/stock terms independently
-  # reconcile to the exchange-published ex-rights reference price.
-  override_path=Path(__file__).resolve().parent/"data"/"official_dividend_component_overrides.csv"
-  if status!="resolved" and override_path.exists():
-   _ov=pd.read_csv(override_path,dtype={"symbol":str})
-   _ov=_ov[(_ov.symbol.astype(str).str.strip()==stock_id) & (_ov.event_date.astype(str)==day)]
-   if len(_ov)==1:
-    _o=_ov.iloc[0]
+  if not pre_strategy and market.upper()=="TWSE":
+   mops_row=mops_lookup.get(day)
+   if mops_row is not None and not bool(getattr(mops_row,"par_value_conflict",True)) and pd.notna(getattr(mops_row,"par_value_per_share",np.nan)):
+    _cash=float(mops_row.cash_dividend_per_share)
+    _stock=float(mops_row.stock_dividend_per_share)
+    _par=float(mops_row.par_value_per_share)
+    _rights_pct=float(getattr(mops_row,"rights_issue_ratio_pct",0.0) or 0.0)
+    if not np.isfinite(_rights_pct):_rights_pct=0.0
+    _rights_ratio=_rights_pct/100.0
+    _rights_price=getattr(mops_row,"rights_subscription_price",None)
+    _rights_price=float(_rights_price) if _rights_price is not None and pd.notna(_rights_price) else 0.0
+    if _rights_ratio>0 and (not np.isfinite(_rights_price) or _rights_price<=0):
+     raise RuntimeError(f"{symbol_key}: MOPS cash-rights issue has no valid subscription price on {day}")
+    if status=="resolved":
+     if pd.notna(cash_value) and abs(float(cash_value)-_cash)>0.03:
+      raise RuntimeError(f"{symbol_key}: MOPS/TWT49U cash dividend conflict on {day}: MOPS {_cash}, TWT49U {cash_value}")
+     if pd.notna(stock_value) and abs(float(stock_value)-_stock)>0.03:
+      raise RuntimeError(f"{symbol_key}: MOPS/TWT49U stock dividend conflict on {day}: MOPS {_stock}, TWT49U {stock_value}")
+    prev=float(r.previous_close);ref=float(r.reference_price)
+    expected=(prev-_cash+_rights_ratio*_rights_price)/(1.0+_stock/_par+_rights_ratio)
+    if not np.isfinite(expected) or abs(expected-ref)>0.03:
+     raise RuntimeError(f"{symbol_key}: MOPS cash/stock/rights terms fail official TWT49U reference reconciliation on {day}: expected {expected}, official {ref}")
+    cash_value=_cash;stock_value=_stock;status="resolved"
+    rights_value=_rights_ratio if _rights_ratio>0 else np.nan
+    if _stock>0:override_share_multiplier=1.0+_stock/_par
+  if not pre_strategy and status!="resolved":
+   _o=override_lookup.get(day)
+   if _o is not None:
     _cash=float(_o.cash_dividend_per_share)
     _stock=float(_o.stock_dividend_per_share)
     _par=float(_o.par_value_per_share)
-    _expected=(float(r.previous_close)-_cash)/(1.0+_stock/_par)
-    if abs(_expected-float(r.reference_price))>0.03:
+    _rights_pct=getattr(_o,"rights_issue_ratio_pct",0.0)
+    _rights_pct=float(_rights_pct) if pd.notna(_rights_pct) else 0.0
+    _rights_ratio=_rights_pct/100.0
+    _rights_price=getattr(_o,"rights_subscription_price",0.0)
+    _rights_price=float(_rights_price) if pd.notna(_rights_price) else 0.0
+    if _rights_ratio>0 and _rights_price<=0:
+     raise RuntimeError(f"{symbol_key}: sourced MOPS rights issue lacks subscription price on {day}")
+    _expected=(float(r.previous_close)-_cash+_rights_ratio*_rights_price)/(1.0+_stock/_par+_rights_ratio)
+    if not np.isfinite(_expected) or abs(_expected-float(r.reference_price))>0.03:
      raise RuntimeError(f"{symbol_key}: sourced dividend override fails official reference-price reconciliation on {day}: expected {_expected}, official {r.reference_price}")
     cash_value=_cash;stock_value=_stock;status="resolved"
-    # Use the explicitly documented stock-dividend ratio, not a ratio inferred
-    # from the exchange reference price rounded to the legal tick.
-    override_share_multiplier=1.0+_stock/_par
+    rights_value=_rights_ratio if _rights_ratio>0 else np.nan
+    if _stock>0:override_share_multiplier=1.0+_stock/_par
   ref=float(r.reference_price)
   up=getattr(r,"limit_up",np.nan);down=getattr(r,"limit_down",np.nan)
   if pd.Timestamp(r.date).normalize()<accounting_start:
@@ -160,13 +232,12 @@ def read_events(action_root,symbol_key,stock_id,market,accounting_start_date="20
    has_cash_rights_issue=pd.notna(rights_value) and float(rights_value)>0
    if "權" in action_type:
     if pd.isna(stock_value) or (float(stock_value)<=0 and not has_cash_rights_issue):
-     raise RuntimeError(f"{symbol_key}: post-2015 rights/stock event lacks a verified stock-dividend component {day} ({action_type})")
+     raise RuntimeError(f"{symbol_key}: post-2015 rights/stock event lacks verified MOPS stock-dividend or cash-rights terms {day} ({action_type})")
     if float(stock_value)>0:
      prev=float(r.previous_close);ref=float(r.reference_price)
      cd=float(cash_value) if pd.notna(cash_value) else 0.0
-     # TPEx reports free stock dividends as shares per 1,000 old shares.
-     # TWSE TWT49U reports a combined price value, so its share multiplier
-     # remains reconciled to the official reference price.
+     # MOPS par-value terms give the exact stock-dividend multiplier. Cash-rights
+     # shares are deliberately not subscribed; they do not increase this account's shares.
      multiplier=(override_share_multiplier if override_share_multiplier is not None else ((1.0+float(stock_value)/1000.0) if market.upper()=="TPEX" else (prev-cd)/ref))
      if not np.isfinite(multiplier) or multiplier<=1.0:
       raise RuntimeError(f"{symbol_key}: invalid stock-dividend share multiplier {day}: {multiplier}")
@@ -243,7 +314,7 @@ def read_events(action_root,symbol_key,stock_id,market,accounting_start_date="20
  return ev,cash,refs,limits,share_adjustments
 
 def build_limits(bars,ref_prices,event_limits,symbol,strict_from="2015-01-01"):
- out={};prev_close=None;missing=[];conflicts=[];seen=False
+ out={};prev_close=None;missing=[];conflicts=[]
  prior_official_limits=None
  is_tpex=str(symbol).startswith("TPEX_")
  bar_days=set(pd.to_datetime(bars.date,errors="coerce").dropna().dt.strftime("%Y-%m-%d"))
@@ -253,76 +324,74 @@ def build_limits(bars,ref_prices,event_limits,symbol,strict_from="2015-01-01"):
    if next_day is not None:
     event_limits.setdefault(next_day,event_limits[event_day])
     ref_prices.setdefault(next_day,ref_prices[event_day])
- for session_i,r in enumerate(bars.itertuples(index=False)):
+ for r in bars.itertuples(index=False):
   day=pd.Timestamp(r.date).strftime("%Y-%m-%d")
   note=str(getattr(r,"note","")).strip()
-  ohlc=[getattr(r,x,np.nan) for x in ("open","high","low","close")]
-  volume=float(getattr(r,"volume",0) or 0)
+  volume_value=pd.to_numeric(getattr(r,"volume",0),errors="coerce")
+  volume=float(volume_value) if pd.notna(volume_value) else 0.0
+  vals={k:pd.to_numeric(getattr(r,k,np.nan),errors="coerce") for k in ("open","high","low","close")}
+  ohlc_valid=all(pd.notna(v) and np.isfinite(float(v)) for v in vals.values())
   next_up=pd.to_numeric(getattr(r,"next_day_limit_up",np.nan),errors="coerce")
   next_down=pd.to_numeric(getattr(r,"next_day_limit_down",np.nan),errors="coerce")
   current_next_limits=(float(next_up),float(next_down)) if (
    pd.notna(next_up) and pd.notna(next_down) and np.isfinite(float(next_up))
    and np.isfinite(float(next_down)) and float(next_up)>0 and float(next_down)>0
   ) else None
+  twse_up=pd.to_numeric(getattr(r,"official_limit_up",np.nan),errors="coerce")
+  twse_down=pd.to_numeric(getattr(r,"official_limit_down",np.nan),errors="coerce")
+  twse_ref=pd.to_numeric(getattr(r,"official_reference_price",np.nan),errors="coerce")
+  current_twse_limits=(float(twse_up),float(twse_down),float(twse_ref) if pd.notna(twse_ref) else None) if (
+   pd.notna(twse_up) and pd.notna(twse_down) and np.isfinite(float(twse_up))
+   and np.isfinite(float(twse_down)) and float(twse_up)>0 and float(twse_down)>0
+  ) else None
   if note in {"**","＊＊"} and day not in event_limits:
    raise RuntimeError(f"{symbol}: official raw-bar special resumption marker without a matching official event {day}")
-  if volume<=0:
-   # No-trade sessions still carry TPEx's official next-session limit fields.
-   if day in event_limits:
-    prev_close=float(ref_prices[day])
-   prior_official_limits=current_next_limits
-   seen=True
-   continue
-  if not all(np.isfinite(float(x)) for x in ohlc):
-   if day>=strict_from:missing.append(day)
-   prior_official_limits=current_next_limits
-   seen=True
-   continue
-  if session_i<5 or day<"2014-01-01":
-   seen=True;prev_close=float(r.close);prior_official_limits=current_next_limits;continue
-  if day in event_limits:
-   up,down=event_limits[day];src="official exchange ex-rights/ex-dividend or special-event limit"
-   ref=ref_prices[day]
+  event_pair=event_limits.get(day)
+  up=down=ref=None;src=""
+  if event_pair is not None:
+   up,down=map(float,event_pair)
+   ref=ref_prices.get(day,prev_close)
+   src="official exchange corporate-action/special-event reference"
+   comparison=current_next_limits if is_tpex else current_twse_limits[:2] if current_twse_limits else None
+   if comparison is not None and (abs(float(comparison[0])-up)>0.011 or abs(float(comparison[1])-down)>0.011):
+    conflicts.append({"date":day,"type":"event-vs-daily-official-limit-mismatch",
+      "event_up":up,"event_down":down,"daily_up":float(comparison[0]),"daily_down":float(comparison[1])})
   elif is_tpex:
-   # TPEx afterTrading/otc publishes the next session's actual official limits.
-   # Use the prior market-session row, including no-trade rows, rather than
-   # reconstructing limits from a stale last-traded close.
    if prior_official_limits is not None:
     up,down=prior_official_limits;ref=prev_close
     src="TPEx official prior-session next-day limit fields"
-   elif day<strict_from:
-    seen=True;prev_close=float(r.close);prior_official_limits=current_next_limits;continue
-   else:
-    missing.append(day);prior_official_limits=current_next_limits;continue
-  elif prev_close is not None:
-   ref=prev_close;band=.07 if day<"2015-06-01" else .10
-   up=limit_price(ref,band,"UP");down=limit_price(ref,band,"DOWN")
-   src="TWSE official band/tick rules from prior traded close"
-  elif day<strict_from:
-   # Price limits before the OOS execution window are not used for fills;
-   # seed the next reference from the observed close and continue warm-up.
-   seen=True;prev_close=float(r.close);prior_official_limits=current_next_limits;continue
-  else:
-   missing.append(day);prior_official_limits=current_next_limits;continue
-  hi=float(r.high);lo=float(r.low)
-  if day>=strict_from and (hi>up+1e-6 or lo<down-1e-6):
-   conflicts.append({"date":day,"high":hi,"low":lo,"up":up,"down":down,
-                     "reference":ref,"source":src})
+  elif current_twse_limits is not None:
+   up,down,ref=current_twse_limits
+   src="TWSE official TWT84U daily price limits"
+  if up is None or down is None or not np.isfinite(float(up)) or not np.isfinite(float(down)) or float(up)<=0 or float(down)<=0:
+   if day>=strict_from and volume>0:
+    missing.append(day)
+   if volume>0 and pd.notna(vals["close"]) and np.isfinite(float(vals["close"])):
+    prev_close=float(vals["close"])
+   prior_official_limits=current_next_limits
+   continue
+  up=float(up);down=float(down)
+  if day>=strict_from and volume>0 and ohlc_valid:
+   hi=float(vals["high"]);lo=float(vals["low"])
+   if hi>up+1e-6 or lo<down-1e-6:
+    conflicts.append({"date":day,"high":hi,"low":lo,"up":up,"down":down,
+      "reference":ref,"source":src})
+  # Keep official limits even when a row has volume but no usable OHLC.
+  # The execution simulator will refuse a fill without valid open/high/low.
   out[day]=(up,down)
-  seen=True
-  if float(r.volume)>0:prev_close=float(r.close)
-  else:prev_close=None
+  if volume>0 and pd.notna(vals["close"]) and np.isfinite(float(vals["close"])):
+   prev_close=float(vals["close"])
   prior_official_limits=current_next_limits
- if missing:raise RuntimeError(f"{symbol}: missing official price-limit reference on {len(missing)} sessions; first={missing[:5]}")
- if conflicts:raise RuntimeError(f"{symbol}: {len(conflicts)} OHLC/official-rule conflicts; first={conflicts[:5]}")
+ if missing:raise RuntimeError(f"{symbol}: missing official exchange price-limit reference on {len(missing)} traded sessions; first={missing[:5]}")
+ if conflicts:raise RuntimeError(f"{symbol}: {len(conflicts)} official limit/OHLC conflicts; first={conflicts[:5]}")
  return out
 
 def align_action_entitlements_to_traded_sessions(raw_full,cash_dividends,share_adjustments):
  """Move cash/share entitlements to the first traded session on or after ex-date.
  Signal-history adjustment events retain their original official event dates.
  """
- traded=sorted(pd.to_datetime(raw_full.loc[
-  pd.to_numeric(raw_full.volume,errors="coerce").fillna(0)>0,"date"],errors="coerce")
+ valid_trade=(pd.to_numeric(raw_full.volume,errors="coerce").fillna(0)>0) & pd.to_numeric(raw_full.close,errors="coerce").notna()
+ traded=sorted(pd.to_datetime(raw_full.loc[valid_trade,"date"],errors="coerce")
   .dropna().dt.strftime("%Y-%m-%d").unique())
  if not traded:return cash_dividends,share_adjustments
  def next_traded(day):
@@ -466,7 +535,12 @@ def run_shared_capital_portfolio(prepared, universe, slippage_bps=10, initial_ca
     close=position_last_close;stale_mark=True
    else:
     row=prepared[position]["d"].iloc[di]
-    close=float(row.raw_close);position_last_close=close
+    observed_close=float(row.raw_close)
+    if np.isfinite(observed_close):
+     close=observed_close;position_last_close=close
+    else:
+     if position_last_close is None:raise RuntimeError(f"Held position {position} has no prior valid close on {day}")
+     close=position_last_close;stale_mark=True
    equity=cash+shares*close;exposure_days+=1
   else:
    close=None;equity=cash
@@ -563,11 +637,12 @@ def main():
  use_universe_filter=universe_path.exists()
  if use_universe_filter:
   uni=pd.read_csv(universe_path,dtype={"symbol":str,"stock_id":str,"market":str})
-  symbols=sorted(uni.symbol.astype(str).str.strip().unique())
-  name_map=uni.drop_duplicates("symbol").set_index("symbol").name.astype(str).to_dict()
-  stock_id_map=uni.drop_duplicates("symbol").set_index("symbol").stock_id.astype(str).to_dict()
-  market_map=uni.drop_duplicates("symbol").set_index("symbol").market.astype(str).to_dict()
-  active_dates_by_symbol={s:set(g.date.astype(str)) for s,g in uni.groupby("symbol")}
+  oos_uni=uni[pd.to_datetime(uni.date,errors="coerce")>=pd.Timestamp("2015-01-01")].copy()
+  symbols=sorted(oos_uni.symbol.astype(str).str.strip().unique())
+  name_map=oos_uni.drop_duplicates("symbol").set_index("symbol").name.astype(str).to_dict()
+  stock_id_map=oos_uni.drop_duplicates("symbol").set_index("symbol").stock_id.astype(str).to_dict()
+  market_map=oos_uni.drop_duplicates("symbol").set_index("symbol").market.astype(str).to_dict()
+  active_dates_by_symbol={s:set(g.date.astype(str)) for s,g in oos_uni.groupby("symbol")}
  else:
   symbols=sorted(p.stem for p in Path(a.raw_bars).glob("*.csv")) or DEFAULT_SYMBOLS
   name_map={}
@@ -767,6 +842,32 @@ def main():
  for label,filename in (("twse_twt49u","manifest.json"),("twse_tpex_special_events","special_events_manifest.json")):
   mp=Path(a.actions)/filename
   if mp.exists():data_provenance[label]=json.loads(mp.read_text(encoding="utf-8"))
+ data_root=Path(__file__).resolve().parent/"data"
+ for label,rel in (
+  ("twse_official_daily_limits","twse_official_limits/manifest.json"),
+  ("tpex_official_next_day_limits","tpex_next_day_limits/manifest.json"),
+  ("mops_dividend_reconciliation","mops_dividend_reconciliation/manifest.json"),
+ ):
+  mp=data_root/rel
+  if mp.exists():data_provenance[label]=json.loads(mp.read_text(encoding="utf-8"))
+ overrides_path=data_root/"official_dividend_component_overrides.csv"
+ if overrides_path.exists():
+  import hashlib
+  od=pd.read_csv(overrides_path,dtype={"symbol":str})
+  data_provenance["dividend_component_overrides"]={
+   "rows":int(len(od)),
+   "sha256":hashlib.sha256(overrides_path.read_bytes()).hexdigest(),
+   "source_types":od.source_type.value_counts(dropna=False).to_dict() if "source_type" in od else {},
+  }
+ mops_components_path=data_root/"mops_dividend_reconciliation"/"mops_dividend_components.csv"
+ if mops_components_path.exists():
+  import hashlib
+  md=pd.read_csv(mops_components_path,dtype={"symbol":str})
+  data_provenance["mops_dividend_components"]={
+   "rows":int(len(md)),
+   "sha256":hashlib.sha256(mops_components_path.read_bytes()).hexdigest(),
+   "symbols":int(md.symbol.nunique()),
+  }
  result={"classification":"FIXED_TSMC_RULE_TRANSFER_AUDIT_DAILY_TOP10_VOLUME_UNIVERSE",
   "period":"2015 onward through last official raw bar","symbols_expected":len(symbols),
   "symbols_completed":len(set(x["symbol"] for x in rows)),"blocked":blocked,
@@ -776,10 +877,11 @@ def main():
   "data_provenance":data_provenance,"cross_validation":{"parameters_frozen_from_TSMC":True,"no_reoptimization_on_transfer_universe":True,"annual_performance_decomposition":"annual_metrics_10bps_by_symbol.csv","interpretation":"Year-by-year stability report using unchanged frozen rules; this is not a retuned annual OOF strategy."},"metrics":rows,"entry_filter_oos_replay_2022plus":filter_replay_rows,"entry_filter_threshold_provenance":{"training_period":"2015-01-01 through 2021-12-31","test_period":"2022-01-01 through final official raw bar","sma50_slope_10_min":0.006062,"distance_sma_200_min":0.073873,"thresholds_selected_from_training_trades_only":True},"tsmc_2330_universe_free_reproduction":tsmc_reproduction,"shared_capital_portfolio":shared_portfolio,"shared_capital_portfolios_by_slippage":shared_portfolios,"target_assessment":target_assessment,"rules":RULES,
   "notes":["No per-symbol parameter tuning; frozen TSMC rule family only.",
    "Entry eligibility uses the official same-day closing traded-share top ten; signals are known after close and orders execute no earlier than the next session.",
-   "Raw official TWSE MI_INDEX and TPEx afterTrading/otc OHLC used for fills; exchange-specific corporate-action back-adjustment used for signal indicators.",
+   "Raw official TWSE MI_INDEX and TPEx afterTrading/otc OHLC used for fills; TWSE fills require official TWT84U daily limits and TPEx fills require prior-session official next-day limit fields; no reconstructed TWSE limit prices are used.",
+   "A positive-volume row without usable OHLC is not a fill opportunity; it remains in the raw audit, is excluded from traded-session entitlement alignment when close is absent, and any held position is marked at the last valid close without using that stale mark as a signal.",
    "TWSE TWT49U covers ex-rights/ex-dividend events from 2010 and TPEx exDailyQ from 2014 (the required 200-session warmup window); TWSE TWTAUU/TWTB8U and TPEx revivt cover special resumption events from 2011/2013; performance measurement begins 2015.",
    "Any missing action data, missing limit reference, or OHLC-limit conflict blocks that symbol. The shared-capital portfolio also skips new entries when any daily top-ten constituent is unaudited.",
-  "Post-2015 stock dividends are modeled as share multipliers derived from official prior close, cash dividend, and ex-right reference price; fractional share entitlements are rounded down conservatively. Post-2015 loss-recovery capital reductions and par-value changes use official reference-price-derived share ratios. Documented Yageo cash-refund reductions use issuer-notice share ratios and refunds, reconciled to TWSE reference prices; unsupported cash-refund events remain blocked.",
+  "Post-2015 TWSE dividend components and par value are cross-checked against official MOPS t108sb27 and TWSE TWT49U reference prices; stock-dividend shares use the exact MOPS stock/par ratio, cash-rights subscriptions are not exercised, and fractional share entitlements are rounded down conservatively. Post-2015 loss-recovery capital reductions and par-value changes use official reference-price-derived share ratios. Documented Yageo cash-refund reductions use issuer-notice share ratios and refunds, reconciled to TWSE reference prices; unsupported cash-refund events remain blocked.",
    "Single-symbol results are independent NT$100,000 per-stock transfer tests; shared_capital_portfolio is a separate one-position shared-NT$100,000 account."]}
  (out/"report.json").write_text(json.dumps(result,ensure_ascii=False,indent=2,default=float),encoding="utf-8")
  pd.DataFrame(rows).to_csv(out/"metrics.csv",index=False)
