@@ -122,17 +122,23 @@ def read_events(action_root,symbol_key,stock_id,market,accounting_start_date="20
   if not pre_strategy:
    if status!="resolved":
     raise RuntimeError(f"{symbol_key}: unresolved official cash-dividend component {day}")
-   if pd.notna(rights_value) and float(rights_value)>0:
-    raise RuntimeError(f"{symbol_key}: post-2015 rights-issue subscription event requires a rights valuation model {day}")
+   has_cash_rights_issue=pd.notna(rights_value) and float(rights_value)>0
    if "權" in action_type:
-    if pd.isna(stock_value) or float(stock_value)<=0:
+    if pd.isna(stock_value) or (float(stock_value)<=0 and not has_cash_rights_issue):
      raise RuntimeError(f"{symbol_key}: post-2015 rights/stock event lacks a verified stock-dividend component {day} ({action_type})")
-    prev=float(r.previous_close);ref=float(r.reference_price)
-    cd=float(cash_value) if pd.notna(cash_value) else 0.0
-    multiplier=(prev-cd)/ref
-    if not np.isfinite(multiplier) or multiplier<=1.0:
-     raise RuntimeError(f"{symbol_key}: invalid stock-dividend share multiplier {day}: {multiplier}")
-    share_adjustments[day]=multiplier
+    if float(stock_value)>0:
+     prev=float(r.previous_close);ref=float(r.reference_price)
+     cd=float(cash_value) if pd.notna(cash_value) else 0.0
+     # TPEx reports free stock dividends as shares per 1,000 old shares.
+     # TWSE TWT49U reports a combined price value, so its share multiplier
+     # remains reconciled to the official reference price.
+     multiplier=(1.0+float(stock_value)/1000.0) if market.upper()=="TPEX" else (prev-cd)/ref
+     if not np.isfinite(multiplier) or multiplier<=1.0:
+      raise RuntimeError(f"{symbol_key}: invalid stock-dividend share multiplier {day}: {multiplier}")
+     share_adjustments[day]=multiplier
+   # Cash-capital-increase rights are deliberately not exercised. The official
+   # ex-right adjustment ratio still adjusts indicator history; no new shares
+   # or subscription cash are added to the all-in/all-out account.
    if pd.notna(cash_value) and float(cash_value)>0:cash[day]=float(cash_value)
   if not np.isfinite(float(up)) or not np.isfinite(float(down)):
    raise RuntimeError(f"{symbol_key}: missing official event-day limit price {day}")
