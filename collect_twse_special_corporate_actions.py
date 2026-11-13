@@ -45,6 +45,17 @@ def get(session,dataset,year,start,end):
     errors.append({"url":r.url,"payload":str(j)[:300]});continue
    if not j["fields"] and not j["data"]:
     return j
+   if j["data"]:
+    h=[str(x).strip() for x in j["fields"]]
+    di=ix(h,"恢復買賣日期","恢復買賣日","資料日期","日期")
+    found=False
+    for row in j["data"]:
+     try:
+      day=rocdate(row[di])
+      if start<=day<=end:found=True;break
+     except:pass
+    if not found:
+     errors.append({"url":r.url,"sample":j["data"][:1]});continue
    return j
   except Exception as e:errors.append({"params":params,"error":str(e)})
  raise RuntimeError(f"{dataset} {year} query failed; attempts={errors}")
