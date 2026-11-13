@@ -42,6 +42,13 @@ def read_events(action_root,symbol_key,stock_id,market):
  special=special[(special.market.astype(str).str.upper()==market.upper()) &
                  (special.symbol.astype(str).str.strip()==stock_id) &
                  (special.date>=pd.Timestamp("2014-01-01"))]
+ invalid_special_path=root/"special_events_invalid_rows.csv"
+ if invalid_special_path.exists():
+  invalid_special=pd.read_csv(invalid_special_path,dtype={"symbol":str})
+  bad_special=invalid_special[(invalid_special.market.astype(str).str.upper()==market.upper()) &
+                              (invalid_special.symbol.astype(str).str.strip()==stock_id)]
+  if not bad_special.empty:
+   raise RuntimeError(str(symbol_key)+": invalid official special-event references require manual reconciliation: "+str(bad_special.to_dict("records")[:3]))
  if not special.empty:
   raise RuntimeError(f"{symbol_key}: official capital-reduction/par-value events require a share-count/cash-refund model: {special.to_dict('records')[:3]}")
  if market.upper()=="TWSE":
