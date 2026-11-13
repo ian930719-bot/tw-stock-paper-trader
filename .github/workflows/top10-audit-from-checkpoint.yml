@@ -5,6 +5,9 @@ on:
     branches: [research/top10-official-ohlcv-baseline-audit]
     paths:
       - .github/workflows/top10-audit-from-checkpoint.yml
+      - top10_frozen_high_hold_transfer_audit.py
+      - tsmc_2330_4019_replication.py
+      - corporate_action_adjustments.py
   workflow_dispatch:
 
 permissions:
@@ -13,7 +16,7 @@ permissions:
 
 concurrency:
   group: top10-audit-from-checkpoint
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   audit:
