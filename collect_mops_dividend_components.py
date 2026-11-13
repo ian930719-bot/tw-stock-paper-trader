@@ -23,7 +23,7 @@ def rocdate(value):
     if value is None or pd.isna(value): return None
     s=str(value).strip()
     if not s: return None
-    m=re.search(r"(\d{2,3})[./-](\d{1,2})[./-](\d{1,2})",s)
+    m=re.search(r"(\d{2,4})[./-](\d{1,2})[./-](\d{1,2})",s)
     if not m: return None
     year=int(m.group(1))
     if year<1911: year+=1911
