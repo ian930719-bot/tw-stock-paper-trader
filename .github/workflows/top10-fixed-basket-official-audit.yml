@@ -1,0 +1,82 @@
+name: Fixed Ten-Stock Official Baseline Transfer Audit
+
+on:
+  push:
+    branches: [research/top10-official-ohlcv-baseline-audit]
+    paths:
+      - .github/workflows/top10-fixed-basket-official-audit.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: top10-fixed-basket-official-audit
+  cancel-in-progress: false
+
+jobs:
+  fixed-basket:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/top10-official-ohlcv-baseline-audit
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - run: pip install -r requirements.txt
+      - name: Download official raw OHLCV for ten fixed symbols
+        uses: actions/download-artifact@v4
+        with:
+          name: top10-official-raw-ohlcv
+          repository: ian930719-bot/tw-stock-paper-trader
+          run-id: 43225571777
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: data/top10_official_raw
+      - name: Download verified official corporate-action and special-event data
+        uses: actions/download-artifact@v4
+        with:
+          name: tpex-official-data-smoke
+          repository: ian930719-bot/tw-stock-paper-trader
+          run-id: 43342707340
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: data/top10_actions_twt49u
+      - name: Collect complete official TWSE TWT49U dividend reference data
+        run: |
+          python -m py_compile collect_twse_twt49u_corporate_actions.py
+          python collect_twse_twt49u_corporate_actions.py --start-date 2010-01-04 --end-date 2026-11-12 --output data/top10_actions_twt49u
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          m=json.loads(Path("data/top10_actions_twt49u/manifest.json").read_text(encoding="utf-8"))
+          assert m["complete"] and m["rows"] > 10000
+          s=json.loads(Path("data/top10_actions_twt49u/special_events_manifest.json").read_text(encoding="utf-8"))
+          assert s["complete"]
+          print("TWT49U rows",m["rows"],"special events",s["rows"],"TPEx events",s["tpex"]["exDailyQ_rows"])
+          PY
+      - name: Run frozen high-hold strategy on the ten-stock fixed basket
+        run: |
+          python -m py_compile top10_frozen_high_hold_transfer_audit.py
+          python top10_frozen_high_hold_transfer_audit.py --raw-bars data/top10_official_raw/bars --actions data/top10_actions_twt49u --output artifacts/top10_fixed_basket
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path("artifacts/top10_fixed_basket/report.json").read_text(encoding="utf-8"))
+          print("STATUS",r["status"],"COMPLETED",r["symbols_completed"],"EXPECTED",r["symbols_expected"],"BLOCKED",len(r["blocked"]))
+          print("TSMC_REPRODUCTION",json.dumps(r["tsmc_2330_universe_free_reproduction"],ensure_ascii=False))
+          if r["symbols_completed"] == 0:
+              raise SystemExit("No fixed-basket symbol passed the official-data gates.")
+          PY
+      - name: Upload fixed-basket official audit outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: top10-fixed-basket-official-audit
+          path: |
+            data/top10_actions_twt49u/
+            artifacts/top10_fixed_basket/
+          if-no-files-found: error
+          retention-days: 30
