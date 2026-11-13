@@ -50,6 +50,12 @@ def read_events(action_root,symbol_key,stock_id,market):
   p=root/"tpex_exdailyq_all.csv"
   if not p.exists():raise RuntimeError("Missing global official TPEx exDailyQ event table")
   all_events=pd.read_csv(p,dtype={"symbol":str})
+  invalid_path=root/"tpex_exdailyq_invalid_rows.csv"
+  if invalid_path.exists():
+   invalid=pd.read_csv(invalid_path,dtype={"symbol":str})
+   bad=invalid[invalid.symbol.astype(str).str.strip()==stock_id]
+   if not bad.empty:
+    raise RuntimeError(f"{symbol_key}: invalid official TPEx corporate-action reference rows require manual reconciliation: {bad.to_dict('records')[:3]}")
  ev=all_events[all_events.symbol.astype(str).str.strip()==stock_id].copy()
  if ev.empty:return pd.DataFrame(columns=["symbol","date","adjustment_ratio"]),{}, {}, {}
  ev["date"]=pd.to_datetime(ev.date,errors="coerce").dt.normalize()
