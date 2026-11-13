@@ -69,14 +69,13 @@ jobs:
       - name: Download verified official corporate-action and special-event sources
         uses: actions/download-artifact@v4
         with:
-          name: tpex-official-data-smoke
+          name: top10-fixed-basket-corporate-actions
           repository: ian930719-bot/tw-stock-paper-trader
-          run-id: 43343154492
+          run-id: 43344297044
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: data/top10_actions_twt49u
-      - name: Collect official TWSE TWT49U dividend and stock-dividend results
+      - name: Validate downloaded corporate-action and point-in-time universe checkpoints
         run: |
-          python collect_twse_twt49u_corporate_actions.py --start-date 2014-01-01 --end-date 2026-11-12 --output data/top10_actions_twt49u
           python - <<'PY'
           import json
           from pathlib import Path
