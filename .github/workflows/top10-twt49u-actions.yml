@@ -29,9 +29,23 @@ jobs:
         run: |
           python -m py_compile collect_twse_twt49u_corporate_actions.py
           python collect_twse_twt49u_corporate_actions.py --start-date 2010-01-04 --end-date 2026-11-12 --output data/top10_actions_twt49u
+      - name: Download official raw OHLCV artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: top10-official-raw-ohlcv
+          repository: ian930719-bot/tw-stock-paper-trader
+          run-id: 43225571777
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: data/top10_official_raw
+      - name: Run frozen high-hold transfer audit with official data
+        run: |
+          python -m py_compile top10_frozen_high_hold_transfer_audit.py
+          python top10_frozen_high_hold_transfer_audit.py --raw-bars data/top10_official_raw/bars --actions data/top10_actions_twt49u --output artifacts/top10_frozen_high_hold
       - uses: actions/upload-artifact@v4
         with:
-          name: top10-official-twt49u-corporate-actions
-          path: data/top10_actions_twt49u/
+          name: top10-official-corporate-actions-and-frozen-high-hold-audit
+          path: |
+            data/top10_actions_twt49u/
+            artifacts/top10_frozen_high_hold/
           if-no-files-found: error
           retention-days: 30
