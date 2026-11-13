@@ -42,9 +42,9 @@ def last_level(column):
     if isinstance(column,tuple): return str(column[-1]).strip()
     return str(column).strip()
 
-def fetch_year(session, roc_year, symbols, raw_dir, raw_cache_dir=None, retries=3):
+def fetch_year(session, roc_year, symbols, raw_dir, raw_cache_dir=None, retries=3, market_type="sii"):
     params={
-      "step":"1","firstin":"true","off":"1","TYPEK":"sii",
+      "step":"1","firstin":"true","off":"1","TYPEK":market_type,
       "co_id_1":"","co_id_2":"","year":str(roc_year),"month":"",
       "b_date":"","e_date":"","type":"1","rulesubmit2":"搜尋"
     }
@@ -76,8 +76,8 @@ def fetch_year(session, roc_year, symbols, raw_dir, raw_cache_dir=None, retries=
             # MOPS t108sb27 CSV is Big5/CP950, even when the response header says ISO-8859-1.
             frame=pd.read_csv(io.BytesIO(csv_response.content),encoding="cp950",dtype=str,keep_default_na=False)
             raw_dir.mkdir(parents=True,exist_ok=True)
-            (raw_dir/f"mops_t108sb27_sii_{roc_year}.html").write_text(html,encoding="utf-8")
-            (raw_dir/f"mops_t108sb27_sii_{roc_year}_full.csv").write_bytes(csv_response.content)
+            (raw_dir/f"mops_t108sb27_{market_type}_{roc_year}.html").write_text(html,encoding="utf-8")
+            (raw_dir/f"mops_t108sb27_{market_type}_{roc_year}_full.csv").write_bytes(csv_response.content)
             cols=[str(c).strip() for c in frame.columns]
             def find_col(predicate):
                 return next((c for c in frame.columns if predicate(str(c).strip())),None)
@@ -127,7 +127,7 @@ def fetch_year(session, roc_year, symbols, raw_dir, raw_cache_dir=None, retries=
                         out.append({**common,"event_date":ex_div,"cash_dividend_per_share":cash,
                           "stock_dividend_per_share":0.0,"rights_issue_ratio_pct":0.0,
                           "rights_subscription_price":None,"rights_issue_total_shares":0.0})
-            return out,{"roc_year":roc_year,"url":source_url,"csv_export_url":csv_response.url,
+            return out,{"roc_year":roc_year,"market_type":market_type,"url":source_url,"csv_export_url":csv_response.url,
               "csv_filename":filename,"csv_content_type":csv_response.headers.get("content-type"),
               "csv_sha256":hashlib.sha256(csv_response.content).hexdigest(),
               "table_rows":len(frame),"matched_symbols":int(frame[code_c].astype(str).str.strip().isin(symbols).sum()),
@@ -135,7 +135,7 @@ def fetch_year(session, roc_year, symbols, raw_dir, raw_cache_dir=None, retries=
         except Exception as exc:
             last_error=exc
             if attempt+1<retries:time.sleep(2**attempt+1)
-    raise RuntimeError(f"MOPS t108sb27 ROC year {roc_year}: {last_error}")
+    raise RuntimeError(f"MOPS t108sb27 {market_type} ROC year {roc_year}: {last_error}")
 
 def main():
     p=argparse.ArgumentParser()
@@ -162,11 +162,12 @@ def main():
       "Origin":"https://mopsov.twse.com.tw",
     })
     components=[];year_meta=[]
-    for i,year in enumerate(years,1):
-        rows,meta=fetch_year(session,year,symbols,raw_dir,raw_cache_dir=a.raw_dir)
+    jobs=[(market_type,year) for market_type in ("sii","otc") for year in years]
+    for i,(market_type,year) in enumerate(jobs,1):
+        rows,meta=fetch_year(session,year,symbols,raw_dir,raw_cache_dir=a.raw_dir,market_type=market_type)
         components.extend(rows);year_meta.append(meta)
-        print(f"MOPS ROC {year}: table_rows={meta['table_rows']} components={len(rows)}",flush=True)
-        if i<len(years):time.sleep(a.pause)
+        print(f"MOPS {market_type.upper()} ROC {year}: table_rows={meta['table_rows']} components={len(rows)}",flush=True)
+        if i<len(jobs):time.sleep(a.pause)
     comp=pd.DataFrame(components)
     if comp.empty:raise RuntimeError("MOPS returned no matching dividend component rows")
     # Collapse multiple MOPS distributions for the same issuer and ex-date.
@@ -246,7 +247,7 @@ def main():
     unresolved_df.to_csv(Path(a.output_dir)/"mops_unresolved.csv",index=False)
     manifest={
       "source":"Official MOPS t108sb27",
-      "query_type":"listed companies (TYPEK=sii)",
+      "query_types":["listed companies (TYPEK=sii)","OTC companies (TYPEK=otc)"],
       "roc_years_queried":years,
       "twt49u_unresolved_events":int(len(unresolved)),
       "mops_component_event_rows":int(len(comp)),
@@ -256,8 +257,8 @@ def main():
       "mops_year_metadata":year_meta,
       "unresolved_examples":unmatched[:100],
       "overrides_sha256":hashlib.sha256(Path(a.overrides).read_bytes()).hexdigest(),
-      "complete":True,
-      "acceptance_rule":"A MOPS component row is accepted only when exact issuer/date match and cash/stock/par/cash-rights formula reproduces the official TWSE TWT49U reference price within NT$0.03.",
+      "collection_completed":True,"all_events_reconciled":len(unmatched)==0,
+      "acceptance_rule":"A MOPS component row is accepted only when exact issuer/date match and cash/stock/par/cash-rights formula reproduces the official TWSE TWT49U reference price within NT$0.03. Unmatched events remain unresolved and are never guessed.",
       "rights_issue_terms_included":True,
       "raw_html_reused":bool(a.raw_dir)
     }
