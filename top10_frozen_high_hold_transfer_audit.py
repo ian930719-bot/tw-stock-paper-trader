@@ -32,6 +32,8 @@ def read_events(action_root,symbol_key,stock_id,market):
  if not special_manifest_path.exists():raise RuntimeError("Missing official TWSE/TPEx special-action coverage manifest")
  special_manifest=json.loads(special_manifest_path.read_text(encoding="utf-8"))
  if not special_manifest.get("complete"):raise RuntimeError(f"Official special-action history incomplete: {special_manifest.get('skipped_periods')}")
+ if market.upper()=="TPEX" and not special_manifest.get("tpex",{}).get("exDailyQ_rows"):
+  raise RuntimeError("Missing verified TPEx exDailyQ coverage")
  special_path=root/"special_events.csv"
  if not special_path.exists():raise RuntimeError("Missing official TWSE/TPEx special-action event table")
  special=pd.read_csv(special_path,dtype={"symbol":str})
