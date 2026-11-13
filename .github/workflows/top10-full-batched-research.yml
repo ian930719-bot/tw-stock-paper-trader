@@ -15,7 +15,7 @@ permissions:
 
 concurrency:
   group: top10-full-batched-research
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   collect-year:
