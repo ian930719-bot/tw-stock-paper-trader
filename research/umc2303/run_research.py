@@ -110,11 +110,17 @@ def build_signals(rows):
 
 def run_backtest(rows, signal, start_idx, end_idx, stop_atr=2.5):
     cash=INITIAL_CASH; qty=0; entry=0.0; stop=None; highwater=0.0
-    equity=[]; trades=[]; pending=False
+    equity=[]; trades=[]
     for i in range(start_idx,end_idx):
         r=rows[i]
-        # execute prior close signal at today's open, with adverse slippage
-        if pending and qty==0:
+        # A signal confirmed at yesterday's close can only trade at today's open.
+        prior_signal = signal[i-1] if i > start_idx else False
+        if qty and not prior_signal:
+            px=r["open"]*(1-SLIPPAGE); gross=qty*px
+            cash+=gross-gross*(FEE_RATE+SELL_TAX)
+            trades[-1].update({"exit_date":r["date"],"exit_price":px,"return_pct":(px/entry-1)*100})
+            qty=0; entry=0.0; stop=None; highwater=0.0
+        if qty==0 and prior_signal:
             px=r["open"]*(1+SLIPPAGE)
             buy_qty=int(cash/(px*(1+FEE_RATE))//1000)*1000
             if buy_qty>0:
@@ -123,42 +129,23 @@ def run_backtest(rows, signal, start_idx, end_idx, stop_atr=2.5):
                 prev_atr=atr_values[i-1] if i>0 else None
                 stop=px-stop_atr*prev_atr if prev_atr else None
                 trades.append({"entry_date":r["date"],"entry_price":px,"qty":qty})
-            pending=False
-        if qty:
+        # Stop known before today's session; gap-through fills at open, otherwise at stop.
+        if qty and stop is not None and r["low"]<=stop:
+            fill=min(r["open"],stop)*(1-SLIPPAGE)
+            gross=qty*fill; cash+=gross-gross*(FEE_RATE+SELL_TAX)
+            trades[-1].update({"exit_date":r["date"],"exit_price":fill,"return_pct":(fill/entry-1)*100,"stop_exit":True})
+            qty=0; entry=0.0; stop=None; highwater=0.0
+        elif qty:
             highwater=max(highwater,r["high"])
-            if stop is not None:
-                stop=max(stop, highwater-stop_atr*(atr_values[i] or (entry*0.04)))
-            exit_px=None
-            if stop is not None and r["low"]<=stop:
-                exit_px=min(r["open"],stop) if r["open"]<stop else stop
-            elif not signal[i]:
-                # close-based exit is scheduled at next open
-                pass
-            if exit_px is not None:
-                px=exit_px*(1-SLIPPAGE); gross=qty*px
-                cash+=gross-gross*(FEE_RATE+SELL_TAX)
-                trades[-1].update({"exit_date":r["date"],"exit_price":px,"return_pct":(px/entry-1)*100})
-                qty=0; entry=0; stop=None; highwater=0
-            elif i+1<end_idx and not signal[i]:
-                pending_exit=True
-            else:
-                pending_exit=False
-        # prior-day close signal triggers next open; exit signals also next open
-        if qty and locals().get("pending_exit",False):
-            if i+1<end_idx:
-                nx=rows[i+1]
-                px=nx["open"]*(1-SLIPPAGE); gross=qty*px
-                cash+=gross-gross*(FEE_RATE+SELL_TAX)
-                trades[-1].update({"exit_date":nx["date"],"exit_price":px,"return_pct":(px/entry-1)*100})
-                qty=0; entry=0; stop=None; highwater=0; pending_exit=False
-        if qty==0 and i+1<end_idx and signal[i]:
-            pending=True
-        mark=cash+qty*r["close"]
-        equity.append((r["date"],mark))
+            a=atr_values[i] if atr_values[i] is not None else entry*0.04
+            # Updated at today's close; the new stop is effective from next session.
+            stop=max(stop or 0.0,highwater-stop_atr*a)
+        equity.append((r["date"],cash+qty*r["close"]))
     if qty:
-        r=rows[end_idx-1]; px=r["close"]*(1-SLIPPAGE); gross=qty*px
+        r=rows[end_idx-1]; fill=r["close"]*(1-SLIPPAGE); gross=qty*fill
         cash+=gross-gross*(FEE_RATE+SELL_TAX)
-        trades[-1].update({"exit_date":r["date"],"exit_price":px,"return_pct":(px/entry-1)*100,"forced_end":True})
+        trades[-1].update({"exit_date":r["date"],"exit_price":fill,"return_pct":(fill/entry-1)*100,"forced_end":True})
+        if equity: equity[-1]=(equity[-1][0],cash)
     return equity,trades,cash
 
 def metrics(equity,trades):
@@ -180,35 +167,34 @@ def metrics(equity,trades):
             "ending_equity":round(vals[-1],2)}
 
 def main():
+    global atr_values
     rows=load_data()
-    # discard malformed/zero price rows and enforce unique ascending dates
     rows=[r for r in rows if r["close"]>0 and r["open"]>0 and r["high"]>0 and r["low"]>0]
     signals, atr_values=build_signals(rows)
-    # Each calendar year is an untouched test segment; fixed candidates are compared, not optimized on test data.
+    # Fixed, predeclared strategies; one continuous out-of-sample window from 2013 onward.
+    first=next((i for i,r in enumerate(rows) if r["date"]>="2013-01-01"),None)
+    if first is None: raise RuntimeError("No 2013+ observations")
     results=[]
     for name, sig in signals.items():
-        all_eq=[]; all_tr=[]
-        for year in range(2013, datetime.now().year+1):
-            lo=next((i for i,r in enumerate(rows) if r["date"]>=f"{year}-01-01"),None)
-            hi=next((i for i,r in enumerate(rows) if r["date"]>=f"{year+1}-01-01"),len(rows))
-            if lo is None or lo>=hi: continue
-            warm=max(0,lo-250)
-            eq,tr,_=run_backtest(rows,sig,warm,hi)
-            # retain only the test-year slice; warmup starts flat, so no lookback state leakage.
-            all_eq.extend([x for x in eq if x[0]>=f"{year}-01-01"])
-            all_tr.extend([t for t in tr if t.get("exit_date","")>=f"{year}-01-01" and t.get("entry_date","")>=f"{year}-01-01"])
-        m=metrics(all_eq,all_tr)
-        results.append({"strategy":name,**m})
+        eq,tr,_=run_backtest(rows,sig,first,len(rows))
+        results.append({"strategy":name,**metrics(eq,tr)})
+    # Buy-and-hold benchmark uses whole 1,000-share lots and the same cost assumptions.
+    bh_signal=[False]*len(rows); bh_signal[first]=True
+    eq,tr,_=run_backtest(rows,bh_signal,first,len(rows),stop_atr=1e9)
+    # For benchmark, disable trend exits by keeping signal true after first entry.
+    bh_signal=[i>=first for i in range(len(rows))]
+    eq,tr,_=run_backtest(rows,bh_signal,first,len(rows),stop_atr=1e9)
+    results.append({"strategy":"buy_and_hold_2013+" ,**metrics(eq,tr)})
     report={"symbol":SYMBOL,"source":"TWSE official STOCK_DAY raw daily OHLCV","source_url":"https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY",
             "generated_utc":datetime.utcnow().isoformat()+"Z","first_date":rows[0]["date"],"last_date":rows[-1]["date"],
-            "rows":len(rows),"initial_cash":INITIAL_CASH,"fee_rate_each_side":FEE_RATE,"sell_tax":SELL_TAX,
-            "slippage_each_side":SLIPPAGE,"corporate_action_adjustment":"NOT IMPLEMENTED; raw prices only; split/dividend distortions may affect results",
-            "method":"close signal, next-session open execution; fixed indicator families; annual segment report is exploratory and not a clean continuous walk-forward account",
+            "rows":len(rows),"test_start":rows[first]["date"],"initial_cash":INITIAL_CASH,"fee_rate_each_side":FEE_RATE,
+            "sell_tax":SELL_TAX,"slippage_each_side":SLIPPAGE,
+            "corporate_action_adjustment":"NOT IMPLEMENTED; raw prices only; dividend/split distortions can affect indicators and returns",
+            "method":"fixed predeclared signals; close-confirmed signal executed at next open; one continuous account from 2013; integer 1,000-share lots; estimated fee, sell tax and slippage",
+            "limitations":["No point-in-time fundamentals or institutional flow in this run","No official corporate-action adjustment / dividends; do not interpret as total-return performance","No queue, partial fills, limit-up/down or market-impact model","Parameter candidates are fixed, not optimized on this test interval"],
             "results":results}
     (OUT/"umc2303_research_report.json").write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding="utf-8")
     with (OUT/"umc2303_strategy_summary.csv").open("w",newline="",encoding="utf-8-sig") as f:
         w=csv.DictWriter(f,fieldnames=sorted({k for r in results for k in r})); w.writeheader(); w.writerows(results)
     print(json.dumps(report,ensure_ascii=False,indent=2))
 
-if __name__=="__main__":
-    main()
