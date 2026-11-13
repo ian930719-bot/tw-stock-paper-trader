@@ -13,23 +13,13 @@ import pandas as pd
 from corporate_action_adjustments import apply_back_adjustments
 from tsmc_swing_research import build_causal_features
 from tsmc_2330_4019_replication import RULES,build_candidate_signals,simulate,annual_metrics,INITIAL_CAPITAL,SLIPPAGE_BPS
-from tsmc_2330_trend_reentry_annual_oof import tick_size
+from tsmc_2330_price_limits import limit_price as official_limit_price
 
 DEFAULT_SYMBOLS=["2330","2454","1303","2327","2408","2308","3037","3008","2383","2303"]
 NAMES={"2330":"台積電","2454":"聯發科","1303":"南亞","2327":"國巨","2408":"南亞科","2308":"台達電","3037":"欣興","3008":"大立光","2383":"台光電","2303":"聯電"}
 
 def limit_price(ref,band,side):
- if not np.isfinite(ref) or ref<=0:raise ValueError("invalid reference price")
- raw=ref*(1+band if side=="UP" else 1-band)
- rounding=math.floor if side=="UP" else math.ceil
- candidate=raw
- for _ in range(12):
-  tick=tick_size(candidate)
-  units=rounding((raw-1e-12)/tick if side=="UP" else (raw+1e-12)/tick)
-  rounded=round(units*tick,2)
-  if abs(tick_size(rounded)-tick)<1e-9:return rounded
-  candidate=rounded
- raise RuntimeError(f"tick rounding did not converge: {ref=} {band=} {side=}")
+ return official_limit_price(ref,band,side)
 
 def read_events(action_root,symbol):
  root=Path(action_root)
