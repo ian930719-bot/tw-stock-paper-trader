@@ -50,6 +50,8 @@ def read_events(action_root,symbol):
  limits={}
  for r in ev.itertuples(index=False):
   day=pd.Timestamp(r.date).strftime("%Y-%m-%d")
+  if str(getattr(r,"cash_dividend_status","resolved"))!="resolved":
+   raise RuntimeError(f"{symbol}: mixed rights/dividend event needs separate official cash component {day}")
   cd=getattr(r,"cash_dividend",np.nan)
   if pd.notna(cd) and float(cd)>0:cash[day]=float(cd)
   ref=float(r.reference_price);up=float(r.limit_up);down=float(r.limit_down)
