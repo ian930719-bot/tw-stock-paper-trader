@@ -88,6 +88,7 @@ def simulate(
     high_hold_signal: np.ndarray | None = None,
     high_exit_policy: str = "handoff_or",
     low_entry_policy: str = "immediate",
+    share_adjustments: dict[str, float] | None = None,
 ) -> dict:
     if risk_exit_policy not in {"per_position", "per_regime_latched", "recovery_required"}:
         raise ValueError(f"Unknown risk_exit_policy: {risk_exit_policy}")
@@ -97,6 +98,8 @@ def simulate(
         raise ValueError(f"Unknown low_entry_policy: {low_entry_policy}")
     if reentry_cooldown < 0:
         raise ValueError("reentry_cooldown must be non-negative")
+    if share_adjustments is None:
+        share_adjustments = {}
     if reentry_signal is None:
         reentry_signal = np.zeros(len(d), dtype=bool)
     if len(reentry_signal) != len(d):
@@ -149,6 +152,11 @@ def simulate(
             cash += credit
             trade_dividend += credit
             total_dividend += credit
+        if shares > 0 and day in share_adjustments:
+            multiplier = float(share_adjustments[day])
+            if not np.isfinite(multiplier) or multiplier <= 0:
+                raise ValueError(f"Invalid share adjustment on {day}: {multiplier}")
+            shares = int(math.floor(shares * multiplier + 1e-9))
 
         if pending is not None:
             side = pending["side"]
