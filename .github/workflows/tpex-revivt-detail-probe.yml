@@ -1,0 +1,64 @@
+name: TPEx Capital-Reduction Detail Probe
+
+on:
+  push:
+    branches: [research/top10-official-ohlcv-baseline-audit]
+    paths:
+      - .github/workflows/tpex-revivt-detail-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests beautifulsoup4
+      - name: Read TPEx official capital-reduction detail tables
+        run: |
+          python - <<'PY'
+          import json, re
+          from pathlib import Path
+          import requests
+          from bs4 import BeautifulSoup
+          url="https://www.tpex.org.tw/www/zh-tw/bulletin/revivt"
+          params={"startDate":"2014/01/01","endDate":"2026/11/12","response":"json"}
+          s=requests.Session()
+          r=s.get(url,params=params,timeout=120,headers={"User-Agent":"Mozilla/5.0","Accept":"application/json"})
+          r.raise_for_status();j=r.json()
+          tables=j.get("tables") or []
+          table=next((t for t in tables if t.get("fields") and isinstance(t.get("data"),list)),None)
+          if table is None and isinstance(j.get("fields"),list):
+            table={"fields":j["fields"],"data":j.get("data",[])}
+          if table is None: raise RuntimeError("TPEx revivt table missing")
+          fields=[re.sub(r"\\s+","",BeautifulSoup(str(x),"html.parser").get_text(" ",strip=True)) for x in table["fields"]]
+          code_i=next(i for i,x in enumerate(fields) if x in ("股票代號","代號","證券代號"))
+          detail_i=next(i for i,x in enumerate(fields) if x=="詳細資料")
+          targets={"1584","3105","3141","3234","3615","4303","5371","6148","6167","6173"}
+          out=[]
+          for row in table["data"]:
+            code=re.sub(r"\\s+","",BeautifulSoup(str(row[code_i]),"html.parser").get_text(" ",strip=True))
+            if code not in targets: continue
+            raw=str(row[detail_i])
+            soup=BeautifulSoup(raw,"html.parser")
+            parsed=[]
+            for tr in soup.find_all("tr"):
+              cells=[c.get_text(" ",strip=True) for c in tr.find_all(["th","td"])]
+              if cells: parsed.append(cells)
+            out.append({"symbol":code,"row":row,"detail_raw":raw,"detail_tables":parsed})
+          result={"url":r.url,"fields":fields,"rows":out,"target_rows":len(out)}
+          Path("tpex_revivt_detail_probe.json").write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding="utf-8")
+          print(json.dumps(result,ensure_ascii=False,indent=2)[:30000])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tpex-revivt-detail-probe
+          path: tpex_revivt_detail_probe.json
+          retention-days: 30
