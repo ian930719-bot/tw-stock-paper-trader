@@ -1,11 +1,6 @@
-name: Point-in-Time Top 10 Turnover Universe
+name: Standalone Point-in-Time Top 10 Universe (Manual Only)
 
 on:
-  push:
-    branches: [research/top10-official-ohlcv-baseline-audit]
-    paths:
-      - collect_twse_historical_daily_top10.py
-      - .github/workflows/top10-point-in-time-universe.yml
   workflow_dispatch:
 
 permissions:
