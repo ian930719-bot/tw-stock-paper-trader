@@ -84,7 +84,8 @@ def collect_revivt(session,start,end):
  ri=idx(f,"減資恢復買賣開始日參考價格","減資恢復買賣開始日參考價")
  ui=idx(f,"漲停價格","漲停價",required=False);li=idx(f,"跌停價格","跌停價",required=False)
  reason_i=idx(f,"減資原因","原因",required=False)
- out=[]
+ detail_i=idx(f,"詳細資料",required=False)
+ out=[];detail_missing=0;detail_reconciled=0
  for raw in rows:
   sym=clean(raw[si])
   try:day=rocdate(raw[di])
@@ -92,14 +93,44 @@ def collect_revivt(session,start,end):
   if not start<=day<=end:continue
   prev=num(raw[pi]);ref=num(raw[ri])
   if not prev or not ref or prev<=0 or ref<=0:raise RuntimeError(f"Invalid TPEx revivt reference {sym} {day}: {raw}")
+  detail={}
+  if detail_i is not None and len(raw)>detail_i:
+   soup=BeautifulSoup(str(raw[detail_i]),"html.parser")
+   for tr in soup.find_all("tr"):
+    cells=[clean(x.get_text(" ",strip=True)) for x in tr.find_all(["th","td"])]
+    if len(cells)>=2:detail[cells[0].rstrip(":：")]=cells[1]
+  def detail_number(label):
+   value=detail.get(label)
+   if value is None:return None
+   match=re.search(r"[-+]?\d+(?:\.\d+)?",str(value).replace(",",""))
+   return float(match.group(0)) if match else None
+  new_shares=detail_number("每壹仟股換發新股票")
+  refund=detail_number("每股退還股款")
+  multiplier=(new_shares/1000.0) if new_shares is not None else None
+  stop_date_raw=detail.get("停止買賣日期")
+  try:stop_date=rocdate(stop_date_raw) if stop_date_raw else None
+  except Exception:stop_date=None
+  reconciled=None
+  if multiplier is not None and refund is not None and multiplier>0:
+   expected=(prev-refund)/multiplier
+   reconciled=abs(expected-ref)<=0.03
+   if reconciled:detail_reconciled+=1
+  else:detail_missing+=1
   out.append({"market":"TPEX","symbol":sym,"date":day,"event_type":"capital_reduction",
    "previous_close":prev,"reference_price":ref,
    "limit_up":num(raw[ui]) if ui is not None else None,
    "limit_down":num(raw[li]) if li is not None else None,
    "reason":clean(raw[reason_i]) if reason_i is not None else "",
-   "source":"TPEx bulletin/revivt"})
+   "stop_trading_date":stop_date,
+   "new_shares_per_1000":new_shares,
+   "share_multiplier":multiplier,
+   "cash_refund_per_old_share":refund,
+   "detail_terms_reconciled":reconciled,
+   "source":"TPEx bulletin/revivt official detailed terms"})
  if not out:raise RuntimeError("TPEx revivt returned zero dated capital-reduction events; coverage cannot be verified")
- return out,{"url":url,"fields":[clean(x) for x in f],"rows":len(out)}
+ return out,{"url":url,"fields":[clean(x) for x in f],"rows":len(out),
+             "rows_with_reconciled_detail_terms":detail_reconciled,
+             "rows_missing_detail_terms":detail_missing}
 def main():
  p=argparse.ArgumentParser()
  p.add_argument("--start-date",default="2014-01-01")
@@ -139,7 +170,7 @@ def main():
  manifest={**previous,"complete":complete,"tpex":tpex_meta,
   "sources":list(set(previous.get("sources",[])+["TPEx bulletin/exDailyQ","TPEx bulletin/revivt"])),
   "coverage":{"tpex_exdailyq":[a.start_date,a.end_date],"tpex_revivt":[a.special_start_date,a.end_date]},
-  "note":"TPEx exDailyQ supplies official reference prices, cash/stock dividend components and event-day limits. TPEx revivt supplies capital-reduction resumption events; affected symbols are blocked until share/cash-refund mechanics are modeled."}
+  "note":"TPEx exDailyQ supplies official reference prices, cash/stock dividend components and event-day limits. TPEx revivt detailed HTML tables supply new-shares-per-1000 and cash-refund-per-old-share; each pair is reconciled to the official resumption reference price before use."}
  mp.write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding="utf-8")
  print(json.dumps({"exDailyQ_rows":len(ex),"revivt_rows":len(rev),"special_manifest_complete":complete},ensure_ascii=False,indent=2))
 if __name__=="__main__":main()

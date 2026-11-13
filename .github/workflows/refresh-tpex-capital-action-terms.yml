@@ -1,0 +1,73 @@
+name: Refresh TPEx Official Capital-Reduction Terms
+
+on:
+  push:
+    branches: [research/top10-official-ohlcv-baseline-audit]
+    paths:
+      - .github/workflows/refresh-tpex-capital-action-terms.yml
+      - collect_tpex_corporate_actions.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - run: pip install -r requirements.txt
+      - name: Download verified TWSE TWT49U and special-action base checkpoint
+        uses: actions/download-artifact@v4
+        with:
+          name: top10-fixed-basket-corporate-actions
+          repository: ian930719-bot/tw-stock-paper-trader
+          run-id: 43376383063
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: data/top10_actions_twt49u
+      - name: Parse official TPEx capital-reduction detailed terms
+        run: |
+          python -m py_compile collect_tpex_corporate_actions.py
+          python collect_tpex_corporate_actions.py \
+            --start-date 2014-01-01 \
+            --end-date 2026-11-12 \
+            --special-start-date 2013-01-01 \
+            --output data/top10_actions_twt49u
+      - name: Validate official detailed terms and reference-price reconciliation
+        run: |
+          python - <<'PY'
+          import json
+          import pandas as pd
+          from pathlib import Path
+          root=Path("data/top10_actions_twt49u")
+          m=json.loads((root/"special_events_manifest.json").read_text(encoding="utf-8"))
+          d=pd.read_csv(root/"special_events.csv",dtype={"symbol":str})
+          t=d[d.market.astype(str).str.upper()=="TPEX"]
+          detail=t[t.share_multiplier.notna() & t.cash_refund_per_old_share.notna()]
+          failed=detail[detail.detail_terms_reconciled.fillna(False)==False]
+          print(json.dumps({
+            "manifest_complete":m.get("complete"),
+            "tpex_revivt_rows":m.get("tpex",{}).get("revivt_rows"),
+            "tpex_rows_with_detail_terms":len(detail),
+            "detail_reconciliation_failures":len(failed),
+            "detail_missing_rows":int(t.share_multiplier.isna().sum()+t.cash_refund_per_old_share.isna().sum()),
+            "sample":detail[["symbol","date","share_multiplier","cash_refund_per_old_share","detail_terms_reconciled"]].head(15).to_dict("records")
+          },ensure_ascii=False,indent=2))
+          if not m.get("complete"): raise SystemExit("Official TPEx corporate-action manifest incomplete")
+          if len(failed): raise SystemExit("TPEx detailed terms fail official reference-price reconciliation")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: top10-official-corporate-actions-with-terms
+          path: data/top10_actions_twt49u/
+          if-no-files-found: error
+          retention-days: 30
