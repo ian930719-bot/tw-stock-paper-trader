@@ -91,6 +91,7 @@ def simulate(
     low_entry_policy: str = "immediate",
     share_adjustments: dict[str, float] | None = None,
     trailing_atr_multiple: float | None = None,
+    atr_activation_profit_pct: float = 0.0,
 ) -> dict:
     if risk_exit_policy not in {"per_position", "per_regime_latched", "recovery_required"}:
         raise ValueError(f"Unknown risk_exit_policy: {risk_exit_policy}")
@@ -104,6 +105,8 @@ def simulate(
         share_adjustments = {}
     if trailing_atr_multiple is not None and (not np.isfinite(trailing_atr_multiple) or trailing_atr_multiple <= 0):
         raise ValueError("trailing_atr_multiple must be a positive finite number or None")
+    if not np.isfinite(atr_activation_profit_pct) or not 0.0 <= atr_activation_profit_pct < 1.0:
+        raise ValueError("atr_activation_profit_pct must be in [0, 1)")
     if reentry_signal is None:
         reentry_signal = np.zeros(len(d), dtype=bool)
     if len(reentry_signal) != len(d):
@@ -128,6 +131,7 @@ def simulate(
     suppressed_high_signal_count = 0
     high_wait_start = None
     high_water_mark = None
+    atr_activation_entry_price = None
     atr_stop_exit_count = 0
     prior5_low = d.raw_low.shift(1).rolling(5, min_periods=5).min().to_numpy()
     prev_close = d.raw_close.shift(1).to_numpy(float)
@@ -202,6 +206,7 @@ def simulate(
                             entry_signal_date = pending.get("signal_date")
                             entry_reason = reason
                             high_water_mark = float(fill)
+                            atr_activation_entry_price = float(fill)
                             if reason == "trend_reentry":
                                 trend_reentry_count += 1
                             trend_reentry_allowed = False
@@ -258,6 +263,7 @@ def simulate(
                         trade_dividend = 0.0
                         high_wait_start = None
                         high_water_mark = None
+                        atr_activation_entry_price = None
                         low_alert_start = None
                         low_alert_high = None
                         pending = None
@@ -321,9 +327,11 @@ def simulate(
                     pending = {"side": "SELL", "reason": "sma200_risk_exit", "signal_date": day}
                 elif trailing_atr_multiple is not None:
                     high_water_mark = max(float(high_water_mark or row.raw_high), float(row.raw_high))
+                    activated = (atr_activation_entry_price is not None and
+                                 high_water_mark >= atr_activation_entry_price * (1.0 + atr_activation_profit_pct))
                     atr_pct = float(row.atr_pct14) if pd.notna(row.get("atr_pct14", np.nan)) else np.nan
                     atr_value = close * atr_pct if np.isfinite(atr_pct) and atr_pct > 0 else np.nan
-                    if np.isfinite(atr_value) and close <= high_water_mark - trailing_atr_multiple * atr_value:
+                    if activated and np.isfinite(atr_value) and close <= high_water_mark - trailing_atr_multiple * atr_value:
                         high_wait_start = None
                         pending = {"side": "SELL", "reason": "atr_trailing_stop", "signal_date": day}
                 if pending is None and high_wait_start is None and high[i]:
@@ -385,6 +393,7 @@ def simulate(
         "risk_exit_count": risk_exit_count,
         "atr_trailing_stop_exit_count": atr_stop_exit_count,
         "trailing_atr_multiple": trailing_atr_multiple,
+        "atr_activation_profit_pct": atr_activation_profit_pct,
         "high_confirm_exit_count": high_exit_count,
         "trend_reentry_count": trend_reentry_count,
         "trend_reentry_cooldown_sessions": reentry_cooldown,
