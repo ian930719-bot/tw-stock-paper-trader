@@ -315,7 +315,12 @@ def main():
    for slip in SLIPPAGE_BPS:
     sim=simulate(d,low,high,risk,limits,cashdiv,slip,start,end,high_hold_signal=hold)
     m={k:v for k,v in sim.items() if k not in {"trades","equity_curve"}}
-    rows.append({"symbol":symbol,"name":name_map.get(symbol,NAMES.get(symbol,str(raw.name.iloc[0]) if "name" in raw else symbol)),"variant":"frozen_high_hold_dynamic_top10_entry_filter","slippage_bps":slip,"top10_active_days":int(active_mask.sum()),"low_signal_days_after_universe_filter":int(low.sum()),**m})
+    row_out={"symbol":symbol,"name":name_map.get(symbol,NAMES.get(symbol,str(raw.name.iloc[0]) if "name" in raw else symbol)),"variant":"frozen_high_hold_dynamic_top10_entry_filter","slippage_bps":slip,"top10_active_days":int(active_mask.sum()),"low_signal_days_after_universe_filter":int(low.sum()),**m}
+    row_out["cagr_pass_50pct"]=bool(row_out.get("cagr") is not None and row_out["cagr"]>=.50)
+    row_out["win_rate_pass_floor"]=bool(row_out.get("win_rate") is not None and row_out["win_rate"]>=.8695652173913043)
+    row_out["drawdown_pass_25pct"]=bool(row_out.get("max_drawdown") is not None and row_out["max_drawdown"]>=-.25)
+    row_out["all_targets_pass"]=row_out["cagr_pass_50pct"] and row_out["win_rate_pass_floor"] and row_out["drawdown_pass_25pct"]
+    rows.append(row_out)
     if slip==10:
      pd.DataFrame(sim["trades"]).to_csv(out/f"trades_{symbol}_10bps.csv",index=False)
      pd.DataFrame(sim["equity_curve"]).to_csv(out/f"equity_{symbol}_10bps.csv",index=False)
@@ -332,13 +337,21 @@ def main():
   if portfolio.get("equity_curve"):
    pd.DataFrame(annual_metrics(portfolio["equity_curve"],portfolio["trades"],INITIAL_CAPITAL)).to_csv(out/"shared_capital_annual_10bps.csv",index=False)
   shared_portfolio={k:v for k,v in portfolio.items() if k not in {"trades","equity_curve"}}
+ target_assessment=None
+ if shared_portfolio:
+  target_assessment={
+   "cagr_50pct_pass":bool(shared_portfolio.get("cagr_mark_to_market") is not None and shared_portfolio["cagr_mark_to_market"]>=.50),
+   "win_rate_86_9565pct_pass":bool(shared_portfolio.get("win_rate_completed_only") is not None and shared_portfolio["win_rate_completed_only"]>=.8695652173913043),
+   "max_drawdown_25pct_pass":bool(shared_portfolio.get("max_drawdown") is not None and shared_portfolio["max_drawdown"]>=-.25),
+   "universe_coverage_99pct_pass":bool(shared_portfolio.get("complete_universe_day_ratio",0)>=.99)}
+  target_assessment["all_targets_and_coverage_pass"]=all(target_assessment.values())
  result={"classification":"FIXED_TSMC_RULE_TRANSFER_AUDIT_DAILY_TOP10_VOLUME_UNIVERSE",
   "period":"2015 onward through last official raw bar","symbols_expected":len(symbols),
   "symbols_completed":len(set(x["symbol"] for x in rows)),"blocked":blocked,
   "costs":{"commission_per_side":.001425,"minimum_commission_ntd":20,"sell_tax":.003,"slippage_bps":list(SLIPPAGE_BPS)},
   "target":{"cagr_min":.50,"win_rate_min":.8695652173913043,"max_drawdown_floor":-.25},
   "status":"COMPLETE" if len(set(x["symbol"] for x in rows))==len(symbols) and not blocked else "BLOCKED_OR_PARTIAL",
-  "metrics":rows,"shared_capital_portfolio":shared_portfolio,"rules":RULES,
+  "metrics":rows,"shared_capital_portfolio":shared_portfolio,"target_assessment":target_assessment,"rules":RULES,
   "notes":["No per-symbol parameter tuning; frozen TSMC rule family only.",
    "Entry eligibility uses the official same-day closing traded-share top ten; signals are known after close and orders execute no earlier than the next session.",
    "Raw official TWSE OHLC used for fills; corporate-action back-adjustment used for signal indicators.",
