@@ -120,6 +120,7 @@ def read_events(action_root,symbol_key,stock_id,market,accounting_start_date="20
   day=pd.Timestamp(r.date).strftime("%Y-%m-%d")
   pre_strategy=pd.Timestamp(r.date)<strategy_start
   status=str(getattr(r,"cash_dividend_status","resolved"))
+  override_share_multiplier=None
   action_type=str(getattr(r,"action_type",""))
   rights_value=getattr(r,"rights_issue_shares",np.nan)
   stock_value=getattr(r,"stock_dividend",np.nan)
@@ -140,6 +141,9 @@ def read_events(action_root,symbol_key,stock_id,market,accounting_start_date="20
     if abs(_expected-float(r.reference_price))>0.03:
      raise RuntimeError(f"{symbol_key}: sourced dividend override fails official reference-price reconciliation on {day}: expected {_expected}, official {r.reference_price}")
     cash_value=_cash;stock_value=_stock;status="resolved"
+    # Use the explicitly documented stock-dividend ratio, not a ratio inferred
+    # from the exchange reference price rounded to the legal tick.
+    override_share_multiplier=1.0+_stock/_par
   ref=float(r.reference_price)
   up=getattr(r,"limit_up",np.nan);down=getattr(r,"limit_down",np.nan)
   if pd.Timestamp(r.date).normalize()<accounting_start:
@@ -163,7 +167,7 @@ def read_events(action_root,symbol_key,stock_id,market,accounting_start_date="20
      # TPEx reports free stock dividends as shares per 1,000 old shares.
      # TWSE TWT49U reports a combined price value, so its share multiplier
      # remains reconciled to the official reference price.
-     multiplier=(1.0+float(stock_value)/1000.0) if market.upper()=="TPEX" else (prev-cd)/ref
+     multiplier=(override_share_multiplier if override_share_multiplier is not None else ((1.0+float(stock_value)/1000.0) if market.upper()=="TPEX" else (prev-cd)/ref))
      if not np.isfinite(multiplier) or multiplier<=1.0:
       raise RuntimeError(f"{symbol_key}: invalid stock-dividend share multiplier {day}: {multiplier}")
      share_adjustments[day]=multiplier
@@ -658,8 +662,8 @@ def main():
     row_out={"symbol":symbol,"stock_id":stock_id_map[symbol],"market":market_map[symbol],"name":name_map.get(symbol,NAMES.get(stock_id_map[symbol],str(raw.name.iloc[0]) if "name" in raw else symbol)),"variant":"frozen_high_hold_dynamic_top10_entry_filter","slippage_bps":slip,"share_adjustment_events":int(len(share_adjustments)),"top10_active_days":int(active_mask.sum()),"low_signal_days_after_universe_filter":int(low.sum()),**m}
     row_out["cagr_pass_50pct"]=bool(row_out.get("cagr_mark_to_market") is not None and row_out["cagr_mark_to_market"]>=.50)
     row_out["win_rate_pass_floor"]=bool(row_out.get("win_rate_completed_only") is not None and row_out["win_rate_completed_only"]>=.8695652173913043)
-    row_out["drawdown_pass_25pct"]=bool(row_out.get("max_drawdown") is not None and row_out["max_drawdown"]>=-.25)
-    row_out["all_targets_pass"]=row_out["cagr_pass_50pct"] and row_out["win_rate_pass_floor"] and row_out["drawdown_pass_25pct"]
+    row_out["drawdown_pass_10pct"]=bool(row_out.get("max_drawdown") is not None and row_out["max_drawdown"]>=-.10)
+    row_out["all_targets_pass"]=row_out["cagr_pass_50pct"] and row_out["win_rate_pass_floor"] and row_out["drawdown_pass_10pct"]
     rows.append(row_out)
     if slip==10:
      date_index={pd.Timestamp(dt).strftime("%Y-%m-%d"):i for i,dt in enumerate(d.date)}
@@ -734,7 +738,7 @@ def main():
   target_assessment={
    "cagr_50pct_pass":bool(shared_portfolio.get("cagr_mark_to_market") is not None and shared_portfolio["cagr_mark_to_market"]>=.50),
    "win_rate_86_9565pct_pass":bool(shared_portfolio.get("win_rate_completed_only") is not None and shared_portfolio["win_rate_completed_only"]>=.8695652173913043),
-   "max_drawdown_25pct_pass":bool(shared_portfolio.get("max_drawdown") is not None and shared_portfolio["max_drawdown"]>=-.25),
+   "max_drawdown_10pct_pass":bool(shared_portfolio.get("max_drawdown") is not None and shared_portfolio["max_drawdown"]>=-.10),
    "universe_coverage_99pct_pass":bool(shared_portfolio.get("complete_universe_day_ratio",0)>=.99),
    "tsmc_baseline_reproduction_pass":bool(tsmc_reproduction and tsmc_reproduction.get("matches_benchmark_within_tolerance"))}
   target_assessment["all_targets_and_coverage_pass"]=all(target_assessment.values())
@@ -749,7 +753,7 @@ def main():
   "period":"2015 onward through last official raw bar","symbols_expected":len(symbols),
   "symbols_completed":len(set(x["symbol"] for x in rows)),"blocked":blocked,
   "costs":{"commission_per_side":.001425,"minimum_commission_ntd":20,"sell_tax":.003,"slippage_bps":list(SLIPPAGE_BPS)},
-  "target":{"cagr_min":.50,"win_rate_min":.8695652173913043,"max_drawdown_floor":-.25},
+  "target":{"cagr_min":.50,"win_rate_min":.8695652173913043,"max_drawdown_floor":-.10},
   "status":"COMPLETE" if len(set(x["symbol"] for x in rows))==len(symbols) and not blocked else "BLOCKED_OR_PARTIAL",
   "data_provenance":data_provenance,"cross_validation":{"parameters_frozen_from_TSMC":True,"no_reoptimization_on_transfer_universe":True,"annual_performance_decomposition":"annual_metrics_10bps_by_symbol.csv","interpretation":"Year-by-year stability report using unchanged frozen rules; this is not a retuned annual OOF strategy."},"metrics":rows,"entry_filter_oos_replay_2022plus":filter_replay_rows,"entry_filter_threshold_provenance":{"training_period":"2015-01-01 through 2021-12-31","test_period":"2022-01-01 through final official raw bar","sma50_slope_10_min":0.006062,"distance_sma_200_min":0.073873,"thresholds_selected_from_training_trades_only":True},"tsmc_2330_universe_free_reproduction":tsmc_reproduction,"shared_capital_portfolio":shared_portfolio,"shared_capital_portfolios_by_slippage":shared_portfolios,"target_assessment":target_assessment,"rules":RULES,
   "notes":["No per-symbol parameter tuning; frozen TSMC rule family only.",
