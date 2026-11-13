@@ -53,6 +53,9 @@ jobs:
                 result={"name":name,"url":r.url,"status":r.status_code,"content_type":r.headers.get("content-type"),"length":len(text),"contains_1727":"1727" in text,"html_start":text[:1800],"tables":parsed}
                 print(json.dumps(result,ensure_ascii=False))
                 tests.append(result)
+                if "FOR SECURITY REASONS" in text or "因為安全性考量" in text:
+                  errors.append({"url":r.url,"error":"MOPS security interstitial; trying alternate host"})
+                  continue
                 return
               except Exception as e: errors.append({"url":url,"error":str(e)})
             tests.append({"name":name,"errors":errors})
@@ -72,6 +75,25 @@ jobs:
             "step":"1","firstin":"true","off":"1","TYPEK":"otc","co_id_1":"","co_id_2":"",
             "year":"104","month":"","b_date":"","e_date":"","type":"1","rulesubmit2":"搜尋"
           })
+          for name,url in [
+            ("twse_openapi_json","https://openapi.twse.com.tw/v1/opendata/t187ap45_L"),
+            ("mopsfin_csv","https://mopsfin.twse.com.tw/opendata/t187ap45_L.csv"),
+          ]:
+            try:
+              response=session.get(url,timeout=90);response.raise_for_status()
+              if "json" in response.headers.get("content-type","").lower():
+                frame=pd.DataFrame(response.json())
+              else:
+                frame=pd.read_csv(io.BytesIO(response.content),encoding="utf-8-sig",dtype={"公司代號":str})
+              years=sorted(frame.get("股利年度",pd.Series(dtype=str)).astype(str).unique().tolist())
+              rows=frame[frame.get("公司代號",pd.Series(dtype=str)).astype(str).str.strip()=="1727"]
+              result={"name":name,"url":response.url,"status":response.status_code,"content_type":response.headers.get("content-type"),
+                      "rows":len(frame),"years":years,"1727_rows":rows.fillna("").to_dict("records")[:20],
+                      "columns":list(frame.columns)}
+              print(json.dumps(result,ensure_ascii=False))
+              tests.append(result)
+            except Exception as e:
+              tests.append({"name":name,"url":url,"error":str(e)})
           Path("mops_dividend_probe.json").write_text(json.dumps(tests,ensure_ascii=False,indent=2),encoding="utf-8")
           PY
       - uses: actions/upload-artifact@v4
