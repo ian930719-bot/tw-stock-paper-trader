@@ -50,7 +50,7 @@ jobs:
       - name: Run frozen high-hold transfer audit across point-in-time top-ten constituents
         run: |
           python -m py_compile top10_frozen_high_hold_transfer_audit.py
-          python top10_frozen_high_hold_transfer_audit.py --raw-bars data/twse_marketwide_turnover/symbol_bars --universe-file data/twse_marketwide_turnover/historical_daily_top10_by_turnover.csv --actions data/top10_actions_twt49u --output artifacts/top10_frozen_high_hold
+          python top10_frozen_high_hold_transfer_audit.py --raw-bars data/twse_marketwide_turnover/symbol_bars --universe-file data/twse_marketwide_turnover/historical_daily_top10_by_volume.csv --actions data/top10_actions_twt49u --output artifacts/top10_frozen_high_hold
           python - <<'PY'
           import json
           from pathlib import Path
@@ -65,7 +65,7 @@ jobs:
           name: top10-complete-official-research-audit
           path: |
             data/twse_marketwide_turnover/manifest.json
-            data/twse_marketwide_turnover/historical_daily_top10_by_turnover.csv
+            data/twse_marketwide_turnover/historical_daily_top10_by_volume.csv
             data/twse_marketwide_turnover/symbol_bars/
             data/top10_actions_twt49u/
             artifacts/top10_frozen_high_hold/
