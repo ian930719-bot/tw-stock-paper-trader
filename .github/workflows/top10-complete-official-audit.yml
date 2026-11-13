@@ -43,7 +43,7 @@ jobs:
       - name: Collect all official TWT49U corporate actions
         run: |
           python -m py_compile collect_twse_twt49u_corporate_actions.py
-          python collect_twse_twt49u_corporate_actions.py --start-date 2010-01-01 --end-date 2026-11-12 --output data/top10_actions_twt49u
+          python collect_twse_twt49u_corporate_actions.py --start-date 2014-01-01 --end-date 2026-11-12 --output data/top10_actions_twt49u
       - name: Collect all official TWTAUU and TWTB8U special events
         run: |
           python -m py_compile collect_twse_special_corporate_actions.py
@@ -51,7 +51,7 @@ jobs:
       - name: Collect all official TPEx ex-rights and capital-reduction events
         run: |
           python -m py_compile collect_tpex_corporate_actions.py
-          python collect_tpex_corporate_actions.py --start-date 2010-01-01 --end-date 2026-11-12 --special-start-date 2013-01-01 --output data/top10_actions_twt49u
+          python collect_tpex_corporate_actions.py --start-date 2014-01-01 --end-date 2026-11-12 --special-start-date 2013-01-01 --output data/top10_actions_twt49u
       - name: Run frozen high-hold transfer audit across point-in-time top-ten constituents
         run: |
           python -m py_compile top10_frozen_high_hold_transfer_audit.py
