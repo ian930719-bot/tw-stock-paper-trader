@@ -42,17 +42,14 @@ def main():
  p.add_argument("--end-date",default="2026-11-12")
  p.add_argument("--output",default="data/top10_actions_twt49u")
  a=p.parse_args()
- params={"response":"csv","strDate":pd.Timestamp(a.start_date).strftime("%Y%m%d"),"endDate":pd.Timestamp(a.end_date).strftime("%Y%m%d")}
+ params={"response":"json","strDate":pd.Timestamp(a.start_date).strftime("%Y%m%d"),"endDate":pd.Timestamp(a.end_date).strftime("%Y%m%d")}
  r=requests.get(URL,params=params,timeout=(15,120),headers={"User-Agent":"Mozilla/5.0"})
  r.raise_for_status()
- raw=r.content
- try:txt=raw.decode("utf-8-sig")
- except UnicodeDecodeError:txt=raw.decode("big5",errors="replace")
- lines=txt.splitlines()
- header_line=next((i for i,line in enumerate(lines) if ("股票代號" in line or "證券代號" in line) and ("漲停價" in line or "除權" in line)),None)
- if header_line is None:raise RuntimeError("TWT49U CSV header not found; body="+txt[:1200])
- table=list(csv.reader(lines[header_line:]))
- headers=[x.strip() for x in table[0]]
+ payload=r.json()
+ if not isinstance(payload,dict) or not isinstance(payload.get("fields"),list) or not isinstance(payload.get("data"),list):
+  raise RuntimeError(f"Invalid official TWT49U JSON response: {str(payload)[:1000]}")
+ headers=[str(x).strip() for x in payload["fields"]]
+ table=[headers]+payload["data"]
  date_i=pick(headers,"除權息日期","除權日期","日期")
  sym_i=pick(headers,"股票代號","證券代號")
  name_i=pick(headers,"股票名稱","證券名稱")
