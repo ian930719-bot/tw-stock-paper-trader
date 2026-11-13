@@ -25,9 +25,14 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install pandas numpy requests
-      - name: Collect official raw prices for ten seed symbols
-        run: |
-          python top10_official_raw_collector.py --output data/top10_official_raw --start-date 2010-01-04 --end-date 2026-11-12 --pause-seconds 0.2
+      - name: Download completed official raw-price artifact from prior run
+        uses: actions/download-artifact@v4
+        with:
+          name: top10-official-raw-ohlcv
+          repository: ian930719-bot/tw-stock-paper-trader
+          run-id: 43225571777
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: data/top10_official_raw
       - name: Build daily top ten from the full TWSE turnover universe
         run: |
           python -m py_compile collect_twse_historical_daily_top10.py
