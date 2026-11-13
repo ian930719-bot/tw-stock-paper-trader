@@ -98,7 +98,7 @@ def collect_revivt(session,start,end):
  return out,{"url":url,"fields":[clean(x) for x in f],"rows":len(out)}
 def main():
  p=argparse.ArgumentParser()
- p.add_argument("--start-date",default="2010-01-01")
+ p.add_argument("--start-date",default="2014-01-01")
  p.add_argument("--end-date",default="2026-11-12")
  p.add_argument("--special-start-date",default="2013-01-01")
  p.add_argument("--output",default="data/top10_actions_twt49u")
