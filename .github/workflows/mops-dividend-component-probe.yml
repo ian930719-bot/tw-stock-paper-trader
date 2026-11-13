@@ -46,13 +46,24 @@ jobs:
                 r.raise_for_status()
                 r.encoding="utf-8"
                 text=r.text
-                try:
-                  tables=pd.read_html(io.StringIO(text))
-                  parsed=[{"shape":list(t.shape),"columns":[str(x) for x in t.columns],"rows":t.head(15).fillna("").astype(str).values.tolist()} for t in tables[:8]]
-                except Exception as e: parsed=[{"parse_error":str(e)}]
-                result={"name":name,"url":r.url,"status":r.status_code,"content_type":r.headers.get("content-type"),"length":len(text),"contains_1727":"1727" in text,"html_start":text[:1800],"tables":parsed}
+                soup=BeautifulSoup(text,"html.parser")
+                parsed=[]
+                for table in soup.find_all("table")[:12]:
+                  rows=[]
+                  for tr in table.find_all("tr"):
+                    cells=[cell.get_text(" ",strip=True) for cell in tr.find_all(["th","td"])]
+                    if cells: rows.append(cells)
+                  if rows: parsed.append({"class":table.get("class"),"rows":rows[:100]})
+                hidden={node.get("name"):node.get("value") for node in soup.find_all("input") if node.get("name") in {"filename","year","co_id","TYPEK"}}
+                result={"name":name,"url":r.url,"status":r.status_code,"content_type":r.headers.get("content-type"),"length":len(text),"contains_1727":"1727" in text,"html_start":text[:1800],"hidden":hidden,"tables":parsed}
                 print(json.dumps(result,ensure_ascii=False))
                 tests.append(result)
+                if name=="t05st09_company_1727_dividend_year_103":
+                  Path("mops_t05st09_1727_103.html").write_text(text,encoding="utf-8")
+                elif name=="t108sb27_all_listed_2015":
+                  Path("mops_t108sb27_sii_2015.html").write_text(text,encoding="utf-8")
+                elif name=="t108sb27_all_otc_2015":
+                  Path("mops_t108sb27_otc_2015.html").write_text(text,encoding="utf-8")
                 if "FOR SECURITY REASONS" in text or "因為安全性考量" in text:
                   errors.append({"url":r.url,"error":"MOPS security interstitial; trying alternate host"})
                   continue
@@ -99,5 +110,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: mops-official-dividend-probe
-          path: mops_dividend_probe.json
+          path: |
+            mops_dividend_probe.json
+            mops_t05st09_1727_103.html
+            mops_t108sb27_sii_2015.html
+            mops_t108sb27_otc_2015.html
           retention-days: 30
