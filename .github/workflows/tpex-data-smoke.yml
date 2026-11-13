@@ -45,7 +45,7 @@ jobs:
           PY
       - name: Collect official TPEx corporate actions
         run: |
-          python collect_tpex_corporate_actions.py --start-date 2010-01-01 --end-date 2026-11-12 --special-start-date 2013-01-01 --output data/top10_actions_twt49u
+          python collect_tpex_corporate_actions.py --start-date 2014-01-01 --end-date 2026-11-12 --special-start-date 2013-01-01 --output data/top10_actions_twt49u
           python - <<'PY'
           import json
           from pathlib import Path
