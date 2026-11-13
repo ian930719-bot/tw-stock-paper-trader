@@ -21,6 +21,10 @@ FILTERS = {
     "sma50_slope_ge_0.006062": ("sma50_slope_10", 0.006062),
     "distance_sma200_ge_0.073873": ("distance_sma_200", 0.073873),
     "sma50_and_sma200": (("sma50_slope_10", 0.006062), ("distance_sma_200", 0.073873)),
+    # Exploratory single-feature thresholds selected on 2015-2021 trade data only;
+    # evaluated separately in the actual 2022+ shared-capital account.
+    "distance_sma200_ge_0.087840": ("distance_sma_200", 0.087840),
+    "rsi14_ge_38.590565": ("rsi14", 38.590565),
 }
 
 def entry_mask(d: pd.DataFrame, spec):
