@@ -114,15 +114,35 @@ def read_events(action_root,symbol_key,stock_id,market,accounting_start_date="20
  strategy_start=pd.Timestamp("2015-01-01")
  special_pre=special[special.date<strategy_start].copy()
  special_post=special[special.date>=strategy_start].copy()
+ # TPEx revivt detailed terms are stored in the same official special-event
+ # table as the resumption reference prices. Consume those verified columns
+ # directly; otherwise the collector has the data but the audit still blocks
+ # the corresponding cash reductions.
+ special_terms={}
+ detail_cols={"share_multiplier","cash_refund_per_old_share"}
+ if detail_cols.issubset(special.columns):
+  for term_row in special.itertuples(index=False):
+   mult=pd.to_numeric(getattr(term_row,"share_multiplier",np.nan),errors="coerce")
+   refund=pd.to_numeric(getattr(term_row,"cash_refund_per_old_share",np.nan),errors="coerce")
+   if pd.notna(mult) and pd.notna(refund):
+    if not np.isfinite(float(mult)) or float(mult)<=0 or not np.isfinite(float(refund)) or float(refund)<0:
+     raise RuntimeError(f"{symbol_key}: invalid official special-event share/refund terms on {pd.Timestamp(term_row.date).strftime('%Y-%m-%d')}")
+    day=pd.Timestamp(term_row.date).strftime("%Y-%m-%d")
+    special_terms[day]={"share_multiplier":float(mult),"cash_refund":float(refund),
+      "source_url":str(getattr(term_row,"source","TPEx official revivt detailed terms"))}
  terms_path=Path(__file__).resolve().parent/"data"/"official_special_action_terms.csv"
  if terms_path.exists():
   terms=pd.read_csv(terms_path,dtype={"symbol":str})
   terms=terms[terms.symbol.astype(str).str.strip()==stock_id].copy()
   terms["event_date"]=pd.to_datetime(terms.event_date,errors="coerce").dt.strftime("%Y-%m-%d")
-  special_terms={r.event_date:{"share_multiplier":float(r.share_multiplier),
-    "cash_refund":float(r.cash_refund_per_old_share),"source_url":str(r.source_url)}
-    for r in terms.itertuples(index=False)}
- else:special_terms={}
+  for term_row in terms.itertuples(index=False):
+   day=str(term_row.event_date)
+   candidate={"share_multiplier":float(term_row.share_multiplier),
+     "cash_refund":float(term_row.cash_refund_per_old_share),"source_url":str(term_row.source_url)}
+   existing=special_terms.get(day)
+   if existing and (abs(existing["share_multiplier"]-candidate["share_multiplier"])>1e-8 or abs(existing["cash_refund"]-candidate["cash_refund"])>1e-8):
+    raise RuntimeError(f"{symbol_key}: supplemental and exchange-published special-action terms conflict on {day}")
+   special_terms[day]=candidate
  if market.upper()=="TWSE":
   p=root/"twt49u_all.csv"
   if not p.exists():raise RuntimeError("Missing global official TWSE TWT49U event table")
