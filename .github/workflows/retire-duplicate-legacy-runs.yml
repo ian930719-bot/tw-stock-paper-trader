@@ -1,0 +1,27 @@
+name: Retire Duplicate Legacy Research Runs
+
+on:
+  push:
+    branches: [research/top10-official-ohlcv-baseline-audit]
+    paths:
+      - .github/workflows/retire-duplicate-legacy-runs.yml
+
+permissions:
+  contents: read
+
+jobs:
+  retire-legacy-universe-scan:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: top10-point-in-time-universe
+      cancel-in-progress: true
+    steps:
+      - run: echo "Retired duplicate legacy universe scans; current official audit uses the shared v2 workflow."
+
+  retire-legacy-full-audit:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: top10-complete-official-audit
+      cancel-in-progress: true
+    steps:
+      - run: echo "Retired duplicate legacy full audits; current official audit uses the shared v2 workflow."
