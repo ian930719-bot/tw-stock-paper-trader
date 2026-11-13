@@ -5,6 +5,10 @@ on:
     branches: [research/top10-official-ohlcv-baseline-audit]
     paths:
       - .github/workflows/top10-fixed-basket-official-audit.yml
+      - top10_frozen_high_hold_transfer_audit.py
+      - tsmc_2330_4019_replication.py
+      - corporate_action_adjustments.py
+      - collect_twse_twt49u_corporate_actions.py
   workflow_dispatch:
 
 permissions:
@@ -12,7 +16,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: top10-fixed-basket-official-audit-v2
+  group: top10-fixed-basket-official-audit-v3
   cancel-in-progress: false
 
 jobs:
