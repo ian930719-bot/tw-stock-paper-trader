@@ -78,7 +78,7 @@ def read_events(action_root,symbol_key,stock_id,market):
 
 def build_limits(bars,ref_prices,event_limits,symbol):
  out={};prev_close=None;missing=[];conflicts=[];seen=False
- for r in bars.itertuples(index=False):
+ for session_i,r in enumerate(bars.itertuples(index=False)):
   day=pd.Timestamp(r.date).strftime("%Y-%m-%d")
   note=str(getattr(r,"note","")).strip()
   ohlc=[getattr(r,x,np.nan) for x in ("open","high","low","close")]
@@ -88,13 +88,15 @@ def build_limits(bars,ref_prices,event_limits,symbol):
    prev_close=None;seen=True
    continue
   if note in {"**","＊＊"} and day not in event_limits:
-   raise RuntimeError(f"{symbol}: official raw-bar special resumption marker without TWT49U event {day}")
+   raise RuntimeError(f"{symbol}: official raw-bar special resumption marker without a matching official event {day}")
+  if session_i<5:
+   seen=True;prev_close=float(r.close);continue
   if day in event_limits:
-   up,down=event_limits[day];src="TWSE TWT49U official event limit"
+   up,down=event_limits[day];src="official exchange ex-rights/ex-dividend event limit"
    ref=ref_prices[day]
   elif prev_close is not None:
    ref=prev_close;band=.07 if day<"2015-06-01" else .10
-   up=limit_price(ref,band,"UP");down=limit_price(ref,band,"DOWN");src="TWSE official band/tick rules from prior traded close"
+   up=limit_price(ref,band,"UP");down=limit_price(ref,band,"DOWN");src="TWSE/TPEx official band/tick rules from prior traded close"
   elif not seen or day<"2015-01-01":
    seen=True
    prev_close=float(r.close)
