@@ -129,7 +129,7 @@ def hold_gate(d):
 def main():
  p=argparse.ArgumentParser()
  p.add_argument("--raw-bars",default="data/twse_marketwide_turnover/symbol_bars")
- p.add_argument("--universe-file",default="data/twse_marketwide_turnover/historical_daily_top10_by_turnover.csv")
+ p.add_argument("--universe-file",default="data/twse_marketwide_turnover/historical_daily_top10_by_volume.csv")
  p.add_argument("--actions",default="data/top10_actions_twt49u")
  p.add_argument("--output",default="artifacts/top10_frozen_high_hold")
  a=p.parse_args()
