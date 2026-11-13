@@ -57,7 +57,11 @@ def collect_exdailyq(session,start,end):
   cash=num(raw[cash_i]) if cash_i is not None else None
   stock=num(raw[stock_i]) if stock_i is not None else None
   kind=clean(raw[ti]) if ti is not None else ""
-  status="resolved" if cash_i is not None else "unresolved_cash_component"
+  status="resolved"
+  if cash is None and ("息" in kind or kind not in {"權"}):status="unresolved_cash_component"
+  if stock is None and "權" in kind:status="unresolved_stock_component"
+  if cash is None and kind=="權":cash=0.0
+  if stock is None and kind=="息":stock=0.0
   out.append({"market":"TPEX","symbol":sym,"date":day,"action_type":kind,
    "previous_close":prev,"reference_price":ref,"adjustment_ratio":ref/prev,
    "cash_dividend":cash,"stock_dividend":stock,"cash_dividend_status":status,
