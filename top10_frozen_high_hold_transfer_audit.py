@@ -41,7 +41,7 @@ def read_events(action_root,symbol):
  p=root/"by_symbol"/f"{symbol}.csv"
  if not p.exists():raise RuntimeError(f"Missing corporate-action file for {symbol}")
  div=pd.read_csv(p,dtype={"stock_id":str})
- if div.empty:return pd.DataFrame(),{}
+ if div.empty:return pd.DataFrame(),{},{}
  div["date"]=pd.to_datetime(div.date,errors="coerce").dt.normalize()
  refmap={}
  for r in div.itertuples(index=False):
@@ -92,7 +92,8 @@ def build_limits(bars,ref_prices,symbol):
   if day in ref_prices:ref=ref_prices[day];src="verified_corporate_action_reference"
   elif prev_close is not None:ref=prev_close;src="prior_traded_close"
   else:
-   missing.append(day);continue
+   if day >= "2015-01-01": missing.append(day)
+   continue
   band=.07 if day<"2015-06-01" else .10
   up=limit_price(ref,band,"UP");down=limit_price(ref,band,"DOWN")
   hi=float(r.high);lo=float(r.low)
