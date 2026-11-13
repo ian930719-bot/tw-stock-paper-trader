@@ -45,13 +45,15 @@ jobs:
       - name: Download verified official corporate-action and special-event data
         uses: actions/download-artifact@v4
         with:
-          name: top10-fixed-basket-corporate-actions
+          name: tpex-official-data-smoke
           repository: ian930719-bot/tw-stock-paper-trader
-          run-id: 43344297044
+          run-id: 43343154492
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: data/top10_actions_twt49u
-      - name: Validate downloaded official corporate-action checkpoint
+      - name: Collect corrected official TWT49U cash and stock dividend components
         run: |
+          python -m py_compile collect_twse_twt49u_corporate_actions.py
+          python collect_twse_twt49u_corporate_actions.py --start-date 2014-01-01 --end-date 2026-11-12 --output data/top10_actions_twt49u
           python - <<'PY'
           import json
           from pathlib import Path
@@ -59,7 +61,8 @@ jobs:
           s=json.loads(Path("data/top10_actions_twt49u/special_events_manifest.json").read_text(encoding="utf-8"))
           assert m["complete"] and m["rows"] > 10000
           assert s["complete"] and s["tpex"]["exDailyQ_rows"] > 0
-          print("TWT49U rows",m["rows"],"special events",s["rows"],"TPEx events",s["tpex"]["exDailyQ_rows"])
+          print("TWT49U rows",m["rows"],"unresolved mixed actions",m["unresolved_action_component_events"],
+                "special events",s["rows"],"TPEx events",s["tpex"]["exDailyQ_rows"])
           PY
       - name: Upload official dividend and corporate-action checkpoint
         uses: actions/upload-artifact@v4
