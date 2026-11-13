@@ -5,7 +5,6 @@ on:
     branches: [research/top10-official-ohlcv-baseline-audit]
     paths:
       - .github/workflows/mops-dividend-component-collection.yml
-      - collect_mops_dividend_components.py
   workflow_dispatch:
 
 permissions:
@@ -14,6 +13,7 @@ permissions:
 
 jobs:
   collect:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
