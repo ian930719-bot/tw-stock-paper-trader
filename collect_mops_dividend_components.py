@@ -164,7 +164,7 @@ def main():
       "Origin":"https://mopsov.twse.com.tw",
     })
     components=[];year_meta=[]
-    jobs=[(market_type,year) for market_type in ("sii","otc") for year in years]
+    jobs=[("sii",year) for year in years]
     for i,(market_type,year) in enumerate(jobs,1):
         rows,meta=fetch_year(session,year,symbols,raw_dir,raw_cache_dir=a.raw_dir,market_type=market_type)
         components.extend(rows);year_meta.append(meta)
@@ -256,7 +256,7 @@ def main():
     unresolved_df.to_csv(Path(a.output_dir)/"mops_unresolved.csv",index=False)
     manifest={
       "source":"Official MOPS t108sb27",
-      "query_types":["listed companies (TYPEK=sii)","OTC companies (TYPEK=otc)"],
+      "query_type":"listed companies (TYPEK=sii)",
       "roc_years_queried":years,
       "twt49u_unresolved_events":int(len(unresolved)),
       "mops_component_event_rows":int(len(comp)),

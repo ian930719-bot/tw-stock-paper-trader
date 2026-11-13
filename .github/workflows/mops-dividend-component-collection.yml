@@ -12,6 +12,10 @@ permissions:
   contents: read
   actions: read
 
+concurrency:
+  group: mops-dividend-component-collection
+  cancel-in-progress: true
+
 jobs:
   collect:
     runs-on: ubuntu-latest
@@ -48,6 +52,8 @@ jobs:
           m=json.loads(Path("data/mops_dividend_reconciliation/manifest.json").read_text(encoding="utf-8"))
           d=pd.read_csv("data/official_dividend_component_overrides.csv",dtype={"symbol":str})
           print(json.dumps({
+            "collection_completed":m.get("collection_completed",m.get("complete",False)),
+            "all_events_reconciled":m.get("all_events_reconciled",False),
             "twt49u_unresolved_events":m["twt49u_unresolved_events"],
             "new_overrides_reconciled":m["new_overrides_reconciled"],
             "unresolved_after_mops":m["unresolved_after_mops"],
