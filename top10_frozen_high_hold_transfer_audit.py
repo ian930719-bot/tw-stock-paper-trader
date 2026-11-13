@@ -22,49 +22,56 @@ NAMES={"2330":"台積電","2454":"聯發科","1303":"南亞","2327":"國巨","24
 def limit_price(ref,band,side):
  return official_limit_price(ref,band,side)
 
-def read_events(action_root,symbol):
+def read_events(action_root,symbol_key,stock_id,market):
  root=Path(action_root)
  manifest=root/"manifest.json"
- if not manifest.exists():raise RuntimeError("Missing official TWT49U manifest")
+ if not manifest.exists():raise RuntimeError("Missing official TWSE TWT49U manifest")
  m=json.loads(manifest.read_text(encoding="utf-8"))
  if not m.get("complete"):raise RuntimeError(f"Official TWT49U collection incomplete: {m}")
  special_manifest_path=root/"special_events_manifest.json"
- if not special_manifest_path.exists():raise RuntimeError("Missing official special-action coverage manifest")
+ if not special_manifest_path.exists():raise RuntimeError("Missing official TWSE/TPEx special-action coverage manifest")
  special_manifest=json.loads(special_manifest_path.read_text(encoding="utf-8"))
  if not special_manifest.get("complete"):raise RuntimeError(f"Official special-action history incomplete: {special_manifest.get('skipped_periods')}")
  special_path=root/"special_events.csv"
- if not special_path.exists():raise RuntimeError("Missing official TWTAUU/TWTB8U event table")
- if special_path.exists():
-  special=pd.read_csv(special_path,dtype={"symbol":str})
-  special=special[special.symbol.astype(str).str.strip()==symbol]
-  if not special.empty:
-   raise RuntimeError(f"{symbol}: official capital-reduction/par-value events require a share-count/cash-refund model: {special.to_dict('records')[:3]}")
- p=root/"twt49u_all.csv"
- if not p.exists():raise RuntimeError("Missing global official TWT49U event table")
- all_events=pd.read_csv(p,dtype={"symbol":str})
- ev=all_events[all_events.symbol.astype(str).str.strip()==symbol].copy()
+ if not special_path.exists():raise RuntimeError("Missing official TWSE/TPEx special-action event table")
+ special=pd.read_csv(special_path,dtype={"symbol":str})
+ if "market" not in special:special["market"]="TWSE"
+ special=special[(special.market.astype(str).str.upper()==market.upper()) &
+                 (special.symbol.astype(str).str.strip()==stock_id)]
+ if not special.empty:
+  raise RuntimeError(f"{symbol_key}: official capital-reduction/par-value events require a share-count/cash-refund model: {special.to_dict('records')[:3]}")
+ if market.upper()=="TWSE":
+  p=root/"twt49u_all.csv"
+  if not p.exists():raise RuntimeError("Missing global official TWSE TWT49U event table")
+  all_events=pd.read_csv(p,dtype={"symbol":str})
+ else:
+  p=root/"tpex_exdailyq_all.csv"
+  if not p.exists():raise RuntimeError("Missing global official TPEx exDailyQ event table")
+  all_events=pd.read_csv(p,dtype={"symbol":str})
+ ev=all_events[all_events.symbol.astype(str).str.strip()==stock_id].copy()
  if ev.empty:return pd.DataFrame(columns=["symbol","date","adjustment_ratio"]),{}, {}, {}
  ev["date"]=pd.to_datetime(ev.date,errors="coerce").dt.normalize()
- ev["symbol"]=ev.symbol.astype(str).str.strip()
+ ev["symbol"]=symbol_key
  ev["adjustment_ratio"]=pd.to_numeric(ev.adjustment_ratio,errors="coerce")
  ev=ev.dropna(subset=["date","adjustment_ratio"])
- cash={}
- refs={}
- limits={}
+ cash={};refs={};limits={}
  for r in ev.itertuples(index=False):
   day=pd.Timestamp(r.date).strftime("%Y-%m-%d")
   if str(getattr(r,"cash_dividend_status","resolved"))!="resolved":
-   raise RuntimeError(f"{symbol}: mixed rights/dividend event needs separate official cash component {day}")
+   raise RuntimeError(f"{symbol_key}: unresolved official cash-dividend component {day}")
   stock_value=getattr(r,"stock_dividend",np.nan)
   if pd.notna(stock_value) and float(stock_value)>0:
-   raise RuntimeError(f"{symbol}: stock dividend event needs share-count adjustment model {day}")
+   raise RuntimeError(f"{symbol_key}: stock dividend requires share-count adjustment model {day}")
   cd=getattr(r,"cash_dividend",np.nan)
   if pd.notna(cd) and float(cd)>0:cash[day]=float(cd)
-  ref=float(r.reference_price);up=float(r.limit_up);down=float(r.limit_down)
-  if day in refs and abs(refs[day]-ref)>1e-6:raise RuntimeError(f"{symbol} duplicate TWT49U reference conflict {day}")
-  refs[day]=ref
-  limits[day]=(up,down)
- ev["source"]="TWSE TWT49U"
+  ref=float(r.reference_price)
+  up=getattr(r,"limit_up",np.nan);down=getattr(r,"limit_down",np.nan)
+  if not np.isfinite(float(up)) or not np.isfinite(float(down)):
+   raise RuntimeError(f"{symbol_key}: missing official event-day limit price {day}")
+  up=float(up);down=float(down)
+  if day in refs and abs(refs[day]-ref)>1e-6:raise RuntimeError(f"{symbol_key} duplicate corporate-action reference conflict {day}")
+  refs[day]=ref;limits[day]=(up,down)
+ ev["source"]=f"{market.upper()} official ex-rights/ex-dividend calculation"
  return ev,cash,refs,limits
 
 def build_limits(bars,ref_prices,event_limits,symbol):
