@@ -376,7 +376,7 @@ def main():
  p.add_argument("--output",default="artifacts/top10_frozen_high_hold")
  a=p.parse_args()
  out=Path(a.output);out.mkdir(parents=True,exist_ok=True)
- rows=[];blocked=[];prepared={};tsmc_reproduction=None;annual_rows=[]
+ rows=[];blocked=[];prepared={};tsmc_reproduction=None;annual_rows=[];trade_diagnostics=[]
  universe_path=Path(a.universe_file)
  use_universe_filter=universe_path.exists()
  if use_universe_filter:
@@ -447,7 +447,30 @@ def main():
     row_out["all_targets_pass"]=row_out["cagr_pass_50pct"] and row_out["win_rate_pass_floor"] and row_out["drawdown_pass_25pct"]
     rows.append(row_out)
     if slip==10:
-     pd.DataFrame(sim["trades"]).to_csv(out/f"trades_{symbol}_10bps.csv",index=False)
+     date_index={pd.Timestamp(dt).strftime("%Y-%m-%d"):i for i,dt in enumerate(d.date)}
+     feature_cols=[col for col in d.columns if pd.api.types.is_numeric_dtype(d[col]) or pd.api.types.is_bool_dtype(d[col])]
+     enriched=[]
+     for trade in sim["trades"]:
+      entry_signal_date=str(trade.get("entry_signal_date") or trade["entry_date"])
+      exit_signal_date=str(trade.get("exit_signal_date") or trade["exit_date"])
+      entry_i=date_index.get(entry_signal_date);exit_i=date_index.get(exit_signal_date)
+      if entry_i is None or exit_i is None:
+       raise RuntimeError(f"{symbol}: trade signal date missing from causal feature table: {trade}")
+      def snapshot(idx):
+       result={}
+       for col in feature_cols:
+        value=d.iloc[idx][col]
+        if pd.isna(value):result[col]=None
+        elif isinstance(value,(np.bool_,bool)):result[col]=bool(value)
+        elif isinstance(value,(np.integer,np.floating,int,float)):result[col]=float(value)
+        else:result[col]=str(value)
+       return result
+      record={**trade,"symbol":symbol,"stock_id":stock_id_map[symbol],"market":market_map[symbol],
+       "name":name_map.get(symbol,NAMES.get(stock_id_map[symbol],symbol)),
+       "slippage_bps":slip,"entry_features_json":json.dumps(snapshot(entry_i),ensure_ascii=False,separators=(",",":")),
+       "exit_features_json":json.dumps(snapshot(exit_i),ensure_ascii=False,separators=(",",":"))}
+      enriched.append(record);trade_diagnostics.append(record)
+     pd.DataFrame(enriched).to_csv(out/f"trades_{symbol}_10bps.csv",index=False)
      pd.DataFrame(sim["equity_curve"]).to_csv(out/f"equity_{symbol}_10bps.csv",index=False)
      pd.DataFrame(annual_metrics(sim["equity_curve"],sim["trades"],INITIAL_CAPITAL)).to_csv(out/f"annual_{symbol}_10bps.csv",index=False)
    prepared[symbol]={"d":d,"low":low,"high":high,"risk":risk,"hold":hold,"limits":limits,"dividends":cashdiv,"share_adjustments":share_adjustments}
@@ -456,6 +479,7 @@ def main():
    blocked.append({"symbol":symbol,"name":name_map.get(symbol,NAMES.get(symbol,symbol)),"reason":f"{type(e).__name__}: {e}"})
    print(f"[BLOCKED] {symbol}: {e}",flush=True)
  pd.DataFrame(annual_rows).to_csv(out/"annual_metrics_10bps_by_symbol.csv",index=False)
+ pd.DataFrame(trade_diagnostics).to_csv(out/"trade_feature_diagnostics_10bps.csv",index=False)
  shared_portfolio=None;shared_portfolios={}
  if use_universe_filter and prepared:
   for slip in SLIPPAGE_BPS:
