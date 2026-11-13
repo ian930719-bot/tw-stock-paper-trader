@@ -95,8 +95,8 @@ def main():
     (out/"summary.json").write_text(json.dumps(base,ensure_ascii=False,indent=2),encoding="utf-8")
     sep=[]
     for feature in base["features_available"]:
-        w=pd.to_numeric(d.loc[d.win==1,feature],errors="coerce").dropna()
-        l=pd.to_numeric(d.loc[d.win==0,feature],errors="coerce").dropna()
+        w=pd.to_numeric(train.loc[train.win==1,feature],errors="coerce").dropna()
+        l=pd.to_numeric(train.loc[train.win==0,feature],errors="coerce").dropna()
         if len(w)<3 or len(l)<3:continue
         try:pval=float(mannwhitneyu(w,l,alternative="two-sided").pvalue)
         except Exception:pval=None
@@ -127,12 +127,17 @@ def main():
         tr=d[(d.symbol.astype(str)!=heldout)&(d.period=="train_2015_2021")]
         te=d[(d.symbol.astype(str)==heldout)&(d.period=="test_2022_2026")]
         if len(tr)<20 or len(te)<3:continue
+        heldout_baseline=score_mask(te,pd.Series(True,index=te.index))
         for feature in base["features_available"]:
             rule=choose_filter(tr,feature)
             if not rule:continue
             metrics,_=evaluate_filter(te,rule)
-            loso.append({"heldout_symbol":heldout,**rule,"test_n":metrics["n"],
+            loso.append({"heldout_symbol":heldout,"baseline_test_n":heldout_baseline["n"],
+                         "baseline_test_win_rate":heldout_baseline["win_rate"],
+                         **rule,"test_n":metrics["n"],
                          "test_win_rate":metrics["win_rate"],
+                         "test_win_rate_delta_pp":(metrics["win_rate"]-heldout_baseline["win_rate"])*100
+                            if metrics["win_rate"] is not None and heldout_baseline["win_rate"] is not None else None,
                          "test_mean_net_return":metrics["mean_net_return"]})
     pd.DataFrame(loso).to_csv(out/"leave_one_symbol_out.csv",index=False)
     notes=[
