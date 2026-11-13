@@ -20,6 +20,8 @@ jobs:
         run: python research/umc2303/run_research.py
       - name: Run MA5 exit and reclaim re-entry experiments
         run: python research/umc2303/run_exit_reentry_research.py
+      - name: Run chronological robustness checks
+        run: python research/umc2303/run_period_robustness.py
       - name: Upload research outputs
         uses: actions/upload-artifact@v4
         with:
