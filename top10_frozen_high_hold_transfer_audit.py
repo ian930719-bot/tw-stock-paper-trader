@@ -276,7 +276,7 @@ def hold_gate(d):
  return x.fillna(False).to_numpy(bool)
 
 
-def run_shared_capital_portfolio(prepared, universe, slippage_bps=10, initial_capital=INITIAL_CAPITAL, trailing_atr_multiple=None, atr_activation_profit_pct=0.0, trailing_peak_drawdown_pct=None):
+def run_shared_capital_portfolio(prepared, universe, slippage_bps=10, initial_capital=INITIAL_CAPITAL, trailing_atr_multiple=None, atr_activation_profit_pct=0.0, trailing_peak_drawdown_pct=None, require_complete_universe=True):
  """One-position, all-in/all-out portfolio using the frozen TSMC rules.
 
  The top-ten membership is known at signal close; the order executes next
@@ -308,7 +308,9 @@ def run_shared_capital_portfolio(prepared, universe, slippage_bps=10, initial_ca
  total_top10_rows=sum(len(top10_by_date[d]) for d in dates)
  eligible_top10_rows=sum(1 for d in dates for sym,_ in top10_by_date[d] if sym in prepared)
  complete_days=sum(1 for d in dates if all(sym in prepared for sym,_ in top10_by_date[d]))
+ eligible_member_days=sum(1 for d in dates if any(sym in prepared for sym,_ in top10_by_date[d]))
  coverage=complete_days/len(dates) if dates else 0.0
+ eligible_membership_coverage=eligible_top10_rows/total_top10_rows if total_top10_rows else 0.0
 
  cash=float(initial_capital);position=None;shares=0;entry_date=None;entry_reason=None
  entry_cost=0.0;trade_dividend=0.0;pending=None;high_wait_start=None;position_last_close=None
@@ -392,10 +394,12 @@ def run_shared_capital_portfolio(prepared, universe, slippage_bps=10, initial_ca
   if position is None:
    # Fail closed on a day when any member of the daily top ten is not audited.
    members=top10_by_date.get(day,[])
-   if not members or not all(sym in prepared for sym,_ in members):continue
+   if not members:continue
+   if require_complete_universe and not all(sym in prepared for sym,_ in members):continue
    if gi<cooldown_until:continue
    candidates=[]
    for sym,rank in members:
+    if sym not in prepared:continue
     x=prepared[sym];di=index_maps[sym].get(day)
     if di is not None and bool(x["low"][di]):candidates.append((rank,sym))
    if candidates:
@@ -440,7 +444,11 @@ def run_shared_capital_portfolio(prepared, universe, slippage_bps=10, initial_ca
  if position is not None:
   open_position={"symbol":position,"entry_date":entry_date,"shares":shares,"entry_cost":round(entry_cost,2),
                  "cash_dividends":round(trade_dividend,2),"last_close":close,"mark_to_market_equity":final}
- return {"status":"RUN_COMPLETE_WITH_FULL_UNIVERSE_COVERAGE" if coverage>=.99 else "RUN_COMPLETE_WITH_INCOMPLETE_UNIVERSE_COVERAGE",
+ return {"status":("RUN_COMPLETE_WITH_FULL_UNIVERSE_COVERAGE" if coverage>=.99 else "RUN_COMPLETE_WITH_INCOMPLETE_UNIVERSE_COVERAGE") if require_complete_universe else "RUN_COMPLETE_PARTIAL_ELIGIBLE_MEMBERS_ONLY",
+  "coverage_policy":"strict_all_ten_members_required" if require_complete_universe else "eligible_members_only_partial_coverage",
+  "eligible_member_days":eligible_member_days,"eligible_member_day_ratio":eligible_member_days/len(dates) if dates else 0.0,
+  "eligible_membership_coverage":eligible_membership_coverage,
+  "incomplete_universe_days":len(dates)-complete_days,"ineligible_membership_rows":total_top10_rows-eligible_top10_rows,
   "initial_capital":initial_capital,"final_equity_mark_to_market":final,
   "cagr_mark_to_market":(final/initial_capital)**(1/years)-1 if years>0 and final>0 else None,
   "max_drawdown":float(dd.min()),"completed_trades":len(trades),
@@ -457,7 +465,7 @@ def run_shared_capital_portfolio(prepared, universe, slippage_bps=10, initial_ca
   "eligible_symbols":len(prepared),"top10_membership_rows":total_top10_rows,
   "eligible_top10_membership_rows":eligible_top10_rows,"complete_universe_days":complete_days,
   "complete_universe_day_ratio":coverage,"trades":trades,"equity_curve":curve,
-  "method":"one shared NT$100,000 account; one position max; all-in/all-out; daily top-ten by official traded shares; same-day close signal and next-session open execution; skip new entries if any daily top-ten member failed official-data gates"}
+  "method":("one shared NT$100,000 account; one position max; all-in/all-out; daily top-ten by official traded shares; same-day close signal and next-session open execution; skip new entries if any daily top-ten member failed official-data gates" if require_complete_universe else "diagnostic partial-coverage replay: one shared NT$100,000 account; one position max; all-in/all-out; candidates limited to official top-ten members with fully verified data; original volume ranks retained; excluded unverified members and coverage disclosed; same-day close signal and next-session open execution")}
 
 def main():
  p=argparse.ArgumentParser()
