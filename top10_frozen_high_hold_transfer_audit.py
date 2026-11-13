@@ -242,7 +242,7 @@ def hold_gate(d):
  return x.fillna(False).to_numpy(bool)
 
 
-def run_shared_capital_portfolio(prepared, universe, slippage_bps=10, initial_capital=INITIAL_CAPITAL):
+def run_shared_capital_portfolio(prepared, universe, slippage_bps=10, initial_capital=INITIAL_CAPITAL, trailing_atr_multiple=None):
  """One-position, all-in/all-out portfolio using the frozen TSMC rules.
 
  The top-ten membership is known at signal close; the order executes next
@@ -252,6 +252,8 @@ def run_shared_capital_portfolio(prepared, universe, slippage_bps=10, initial_ca
  """
  if universe is None or universe.empty or not prepared:
   return {"status":"NOT_RUN","reason":"Missing point-in-time universe or no eligible symbols"}
+ if trailing_atr_multiple is not None and (not np.isfinite(trailing_atr_multiple) or trailing_atr_multiple<=0):
+  raise ValueError("trailing_atr_multiple must be positive finite or None")
  u=universe.copy()
  u["date"]=pd.to_datetime(u.date,errors="coerce").dt.strftime("%Y-%m-%d")
  u["symbol"]=u.symbol.astype(str).str.strip()
@@ -272,6 +274,7 @@ def run_shared_capital_portfolio(prepared, universe, slippage_bps=10, initial_ca
 
  cash=float(initial_capital);position=None;shares=0;entry_date=None;entry_reason=None
  entry_cost=0.0;trade_dividend=0.0;pending=None;high_wait_start=None;position_last_close=None
+ high_water_mark=None;atr_stop_exit_count=0
  risk_exit_fired=False;cooldown_until=-1;trades=[];curve=[]
  total_commission=total_tax=total_dividend=0.0;total_slippage=0.0
  missing_limit=locked_limit=outside_limit=0;exposure_days=0;suppressed_high=0
@@ -311,7 +314,7 @@ def run_shared_capital_portfolio(prepared, universe, slippage_bps=10, initial_ca
       if qty>0:
        notional=qty*fill;fee=commission(notional);cash-=notional+fee
        shares=qty;position=sym;entry_date=day;entry_reason=pending["reason"]
-       position_last_close=None
+       high_water_mark=float(fill);position_last_close=None
        entry_cost=notional+fee;trade_dividend=0.0;risk_exit_fired=False;high_wait_start=None
        total_commission+=fee;total_slippage+=qty*(fill-op)
       pending=None
@@ -326,8 +329,9 @@ def run_shared_capital_portfolio(prepared, universe, slippage_bps=10, initial_ca
        "net_return":pnl/entry_cost if entry_cost else None})
       total_commission+=fee;total_tax+=tax;total_slippage+=shares*(op-fill)
       if pending["reason"]=="sma200_risk_exit":cooldown_until=gi+RULES["risk_exit_cooldown_sessions"]
+      if pending["reason"]=="atr_trailing_stop":atr_stop_exit_count+=1
       position=None;shares=0;entry_date=None;entry_reason=None;entry_cost=0.0;trade_dividend=0.0
-      position_last_close=None
+      high_water_mark=None;position_last_close=None
       high_wait_start=None;pending=None
   # Mark portfolio equity at the close.
   stale_mark=False
@@ -365,7 +369,14 @@ def run_shared_capital_portfolio(prepared, universe, slippage_bps=10, initial_ca
    if bool(x["risk"][di]) and not risk_exit_fired:
     risk_exit_fired=True;high_wait_start=None
     pending={"side":"SELL","symbol":position,"reason":"sma200_risk_exit"}
-   elif high_wait_start is None and bool(x["high"][di]):
+   elif trailing_atr_multiple is not None:
+    high_water_mark=max(float(high_water_mark or row.raw_high),float(row.raw_high))
+    atr_pct=float(row.atr_pct) if pd.notna(row.get("atr_pct",np.nan)) else np.nan
+    atr_value=float(row.raw_close)*atr_pct if np.isfinite(atr_pct) and atr_pct>0 else np.nan
+    if np.isfinite(atr_value) and float(row.raw_close)<=high_water_mark-trailing_atr_multiple*atr_value:
+     high_wait_start=None
+     pending={"side":"SELL","symbol":position,"reason":"atr_trailing_stop"}
+   if pending is None and high_wait_start is None and bool(x["high"][di]):
     if bool(x["hold"][di]):suppressed_high+=1
     else:
      dist_sma20=float(row.distance_sma_20);rsi=float(row.rsi14)
@@ -389,6 +400,7 @@ def run_shared_capital_portfolio(prepared, universe, slippage_bps=10, initial_ca
   "initial_capital":initial_capital,"final_equity_mark_to_market":final,
   "cagr_mark_to_market":(final/initial_capital)**(1/years)-1 if years>0 and final>0 else None,
   "max_drawdown":float(dd.min()),"completed_trades":len(trades),
+  "atr_trailing_stop_exit_count":atr_stop_exit_count,"trailing_atr_multiple":trailing_atr_multiple,
   "win_rate_completed_only":float((tdf.net_pnl>0).mean()) if len(tdf) else None,
   "exposure_ratio":exposure_days/len(cdf),"total_commission":total_commission,
   "total_sell_tax":total_tax,"estimated_slippage_cost":total_slippage,
@@ -537,6 +549,20 @@ def main():
     pd.DataFrame(annual_metrics(portfolio["equity_curve"],portfolio["trades"],INITIAL_CAPITAL)).to_csv(out/f"shared_capital_annual_{slip}bps.csv",index=False)
    shared_portfolios[f"{slip}bps"]={k:v for k,v in portfolio.items() if k not in {"trades","equity_curve"}}
   shared_portfolio=shared_portfolios.get("10bps")
+  # ATR trailing-stop overlay sensitivity on the same point-in-time top-ten
+  # universe and single shared account; baseline portfolio remains untouched.
+  atr_portfolio_rows=[]
+  for slip in SLIPPAGE_BPS:
+   for atr_multiple in (2.0,2.5,3.0,3.5,4.0,5.0):
+    overlay=run_shared_capital_portfolio(prepared,uni,slippage_bps=slip,
+      initial_capital=INITIAL_CAPITAL,trailing_atr_multiple=atr_multiple)
+    metric={k:v for k,v in overlay.items() if k not in {"trades","equity_curve"}}
+    atr_portfolio_rows.append({"variant":"shared_capital_atr_trailing_stop",
+      "slippage_bps":slip,**metric})
+    if slip==10 and atr_multiple==3.0:
+     pd.DataFrame(overlay.get("trades",[])).to_csv(out/"shared_capital_atr3_trades_10bps.csv",index=False)
+     pd.DataFrame(overlay.get("equity_curve",[])).to_csv(out/"shared_capital_atr3_equity_10bps.csv",index=False)
+  pd.DataFrame(atr_portfolio_rows).to_csv(out/"shared_capital_atr_overlay_metrics.csv",index=False)
  target_assessment=None
  if shared_portfolio:
   target_assessment={
