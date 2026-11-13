@@ -27,14 +27,28 @@ def ix(h,*terms,required=True):
  return None
 def get(session,dataset,year,start,end):
  url=BASE+dataset
- params={"response":"json","strDate":start.replace("-",""),"endDate":end.replace("-","")}
- r=session.get(url,params=params,timeout=(15,120),headers={"User-Agent":"Mozilla/5.0"});r.raise_for_status()
- j=r.json()
- if isinstance(j,dict) and "stat" in j and ("查無資料" in str(j.get("stat")) or "沒有符合條件" in str(j.get("stat"))):
-  return {"fields":[],"data":[],"stat":j.get("stat")}
- if not isinstance(j,dict) or not isinstance(j.get("fields"),list) or not isinstance(j.get("data"),list):
-  raise RuntimeError(f"{dataset} {year} invalid payload {str(j)[:500]}")
- return j
+ lo=pd.Timestamp(start);hi=pd.Timestamp(end)
+ candidates=[
+  {"response":"json","strDate":lo.strftime("%Y%m%d"),"endDate":hi.strftime("%Y%m%d")},
+  {"response":"json","strDate":f"{lo.year-1911:03d}{lo.strftime('%m%d')}","endDate":f"{hi.year-1911:03d}{hi.strftime('%m%d')}"},
+  {"response":"json","startDate":lo.strftime("%Y%m%d"),"endDate":hi.strftime("%Y%m%d")},
+  {"response":"json","strDate":hi.strftime("%Y%m%d"),"endDate":lo.strftime("%Y%m%d")},
+ ]
+ errors=[]
+ for params in candidates:
+  try:
+   r=session.get(url,params=params,timeout=(15,120),headers={"User-Agent":"Mozilla/5.0"});r.raise_for_status()
+   j=r.json()
+   if isinstance(j,dict) and "stat" in j and ("查無資料" in str(j.get("stat")) or "沒有符合條件" in str(j.get("stat"))):
+    return {"fields":[],"data":[],"stat":j.get("stat")}
+   if not isinstance(j,dict) or not isinstance(j.get("fields"),list) or not isinstance(j.get("data"),list):
+    errors.append({"url":r.url,"payload":str(j)[:300]});continue
+   if not j["fields"] and not j["data"]:
+    return j
+   return j
+  except Exception as e:errors.append({"params":params,"error":str(e)})
+ raise RuntimeError(f"{dataset} {year} query failed; attempts={errors}")
+
 def main():
  p=argparse.ArgumentParser();p.add_argument("--start-date",default="2011-01-01");p.add_argument("--end-date",default="2026-11-12");p.add_argument("--output",default="data/top10_actions_twt49u");a=p.parse_args()
  s=requests.Session();allrows=[];schemas={}
