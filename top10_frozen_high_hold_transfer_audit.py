@@ -27,7 +27,12 @@ def read_events(action_root,symbol):
  if not manifest.exists():raise RuntimeError("Missing official TWT49U manifest")
  m=json.loads(manifest.read_text(encoding="utf-8"))
  if not m.get("complete"):raise RuntimeError(f"Official TWT49U collection incomplete: {m}")
+ special_manifest_path=root/"special_events_manifest.json"
+ if not special_manifest_path.exists():raise RuntimeError("Missing official special-action coverage manifest")
+ special_manifest=json.loads(special_manifest_path.read_text(encoding="utf-8"))
+ if not special_manifest.get("complete"):raise RuntimeError(f"Official special-action history incomplete: {special_manifest.get('skipped_periods')}")
  special_path=root/"special_events.csv"
+ if not special_path.exists():raise RuntimeError("Missing official TWTAUU/TWTB8U event table")
  if special_path.exists():
   special=pd.read_csv(special_path,dtype={"symbol":str})
   special=special[special.symbol.astype(str).str.strip()==symbol]
