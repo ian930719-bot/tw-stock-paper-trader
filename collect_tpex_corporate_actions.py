@@ -54,7 +54,7 @@ def collect_exdailyq(session,start,end):
   except:continue
   if not start<=day<=end:continue
   prev=num(raw[pi]);ref=num(raw[ri])
-  if not prev or not ref or prev<=0 or ref<=0:raise RuntimeError(f"Invalid TPEx exDailyQ reference {sym} {day}: {raw}")
+  if not prev or not ref or prev<=0 or ref<=0:raise RuntimeError(f"Invalid TPEx exDailyQ reference {sym} {day}: fields={[clean(x) for x in f]}; row={raw}")
   cash=num(raw[cash_i]) if cash_i is not None else None
   stock=num(raw[stock_i]) if stock_i is not None else None
   rights_shares=sum((num(raw[k]) or 0.0) for k in rights_fields if k is not None)
