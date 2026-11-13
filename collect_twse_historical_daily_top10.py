@@ -123,10 +123,15 @@ def main():
  p.add_argument("--raw-bars",default="data/top10_official_raw/bars")
  p.add_argument("--output",default="data/twse_marketwide_turnover")
  p.add_argument("--pause",type=float,default=.35)
+ p.add_argument("--start-date",default=None)
+ p.add_argument("--end-date",default=None)
  a=p.parse_args()
  files=sorted(Path(a.raw_bars).glob("*.csv"))
  if len(files)!=10:raise RuntimeError(f"Expected 10 official TWSE raw calendar files, got {len(files)}")
  dates=sorted(set().union(*[set(pd.read_csv(f,usecols=["date"]).date.astype(str)) for f in files]))
+ if a.start_date: dates=[d for d in dates if d>=a.start_date]
+ if a.end_date: dates=[d for d in dates if d<=a.end_date]
+ if not dates: raise RuntimeError("No seed-stock trading dates in requested date range")
  out=Path(a.output);out.mkdir(parents=True,exist_ok=True)
  daily=out/"daily";daily.mkdir(exist_ok=True)
  session=requests.Session();summary=[];combined=[]
@@ -173,6 +178,7 @@ def main():
  man={"source":["TWSE official MI_INDEX","TPEx official afterTrading/otc"],
       "endpoints":[TWSE_URL,TPEX_URL],"markets_included":["TWSE","TPEX"],
       "dates_requested":len(dates),"dates_completed":len(summary),"complete":len(summary)==len(dates),
+      "requested_start_date":a.start_date or dates[0],"requested_end_date":a.end_date or dates[-1],
       "first_date":dates[0],"last_date":dates[-1],"top10_rows":len(frame),
       "point_in_time_union_symbols":len(union),"symbol_bar_files":len(union),"top10_rows_by_market":market_counts,
       "sha256":hashlib.sha256(out_file.read_bytes()).hexdigest(),
