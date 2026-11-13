@@ -111,7 +111,7 @@ def main():
  if not any(r["symbol"]=="2327" and r["date"]=="2025-08-25" for r in allrows):
   raise RuntimeError("Known 2327 2025-08-25 TWSE special resumption marker was not reconciled to TWTAUU/TWTB8U.")
  out=Path(a.output);out.mkdir(parents=True,exist_ok=True)
- frame=pd.DataFrame(allrows,columns=["symbol","date","event_type","previous_close","reference_price","limit_up","limit_down","reason","source"])
+ frame=pd.DataFrame(allrows,columns=["market","symbol","date","event_type","previous_close","reference_price","limit_up","limit_down","reason","source"])
  frame.to_csv(out/"special_events.csv",index=False)
  m={"source":"TWSE official TWTAUU/TWTB8U","collected_at_taipei":datetime.now(ZoneInfo("Asia/Taipei")).isoformat(),
   "requested_period":[a.start_date,a.end_date],"rows":len(frame),"events_by_type":frame.event_type.value_counts().to_dict() if len(frame) else {},
