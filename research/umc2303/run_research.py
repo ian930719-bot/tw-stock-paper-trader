@@ -122,7 +122,7 @@ def run_backtest(rows, signal, start_idx, end_idx, stop_atr=2.5):
             qty=0; entry=0.0; stop=None; highwater=0.0
         if qty==0 and prior_signal:
             px=r["open"]*(1+SLIPPAGE)
-            buy_qty=int(cash/(px*(1+FEE_RATE))//1000)*1000
+            buy_qty=int(cash/(px*(1+FEE_RATE)))
             if buy_qty>0:
                 gross=buy_qty*px; fee=gross*FEE_RATE
                 cash-=gross+fee; qty=buy_qty; entry=px; highwater=px
