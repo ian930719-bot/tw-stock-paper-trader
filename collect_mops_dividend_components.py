@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import io
 import json
+import math
 import re
 import time
 from pathlib import Path
@@ -171,9 +172,12 @@ def main():
         stock=float(candidate.stock_dividend_per_share)
         par=float(candidate.par_value_per_share)
         prev=float(r.previous_close);ref=float(r.reference_price)
+        if not math.isfinite(prev) or not math.isfinite(ref) or prev<=0 or ref<=0:
+            unmatched.append({"symbol":key[0],"event_date":key[1],"reason":"missing or invalid official TWT49U previous close/reference price"})
+            continue
         expected=(prev-cash)/(1.0+stock/par)
         diff=abs(expected-ref)
-        if diff>0.03:
+        if not math.isfinite(expected) or expected<=0 or not math.isfinite(diff) or diff>0.03:
             unmatched.append({"symbol":key[0],"event_date":key[1],"reason":"MOPS components do not reconcile to official TWT49U reference price",
               "previous_close":prev,"official_reference_price":ref,"expected_reference_price":expected,"absolute_difference":diff,
               "cash_dividend":cash,"stock_dividend":stock,"par_value":par})
