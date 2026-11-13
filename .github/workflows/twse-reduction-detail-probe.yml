@@ -1,0 +1,35 @@
+name: Probe TWSE Official Capital Reduction Detail Records
+
+on:
+  push:
+    branches: [research/top10-official-ohlcv-baseline-audit]
+    paths:
+      - .github/workflows/twse-reduction-detail-probe.yml
+      - probe_twse_reduction_details.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests beautifulsoup4
+      - name: Query MOPS issuer announcement and TWSE detail pages
+        run: |
+          python -m py_compile probe_twse_reduction_details.py
+          python probe_twse_reduction_details.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: twse-capital-reduction-detail-probe
+          path: artifacts/twse_reduction_detail_probe/
+          if-no-files-found: error
+          retention-days: 30
