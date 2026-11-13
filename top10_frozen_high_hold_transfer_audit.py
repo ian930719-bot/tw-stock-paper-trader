@@ -244,6 +244,8 @@ def read_events(action_root,symbol_key,stock_id,market,accounting_start_date="20
 
 def build_limits(bars,ref_prices,event_limits,symbol,strict_from="2015-01-01"):
  out={};prev_close=None;missing=[];conflicts=[];seen=False
+ prior_official_limits=None
+ is_tpex=str(symbol).startswith("TPEX_")
  bar_days=set(pd.to_datetime(bars.date,errors="coerce").dropna().dt.strftime("%Y-%m-%d"))
  for event_day in list(event_limits):
   if event_day not in bar_days:
@@ -256,46 +258,62 @@ def build_limits(bars,ref_prices,event_limits,symbol,strict_from="2015-01-01"):
   note=str(getattr(r,"note","")).strip()
   ohlc=[getattr(r,x,np.nan) for x in ("open","high","low","close")]
   volume=float(getattr(r,"volume",0) or 0)
+  next_up=pd.to_numeric(getattr(r,"next_day_limit_up",np.nan),errors="coerce")
+  next_down=pd.to_numeric(getattr(r,"next_day_limit_down",np.nan),errors="coerce")
+  current_next_limits=(float(next_up),float(next_down)) if (
+   pd.notna(next_up) and pd.notna(next_down) and np.isfinite(float(next_up))
+   and np.isfinite(float(next_down)) and float(next_up)>0 and float(next_down)>0
+  ) else None
   if note in {"**","＊＊"} and day not in event_limits:
    raise RuntimeError(f"{symbol}: official raw-bar special resumption marker without a matching official event {day}")
   if volume<=0:
-   # A no-trade session has no new close. Preserve the last valid reference
-   # instead of poisoning every later session with prev_close=None. If an
-   # official ex-rights/capital-action reference occurs on this date, it becomes
-   # the next session's reference even when no shares traded.
+   # No-trade sessions still carry TPEx's official next-session limit fields.
    if day in event_limits:
     prev_close=float(ref_prices[day])
+   prior_official_limits=current_next_limits
    seen=True
    continue
   if not all(np.isfinite(float(x)) for x in ohlc):
    if day>=strict_from:missing.append(day)
+   prior_official_limits=current_next_limits
    seen=True
    continue
   if session_i<5 or day<"2014-01-01":
-   seen=True;prev_close=float(r.close);continue
+   seen=True;prev_close=float(r.close);prior_official_limits=current_next_limits;continue
   if day in event_limits:
-   up,down=event_limits[day];src="official exchange ex-rights/ex-dividend event limit"
+   up,down=event_limits[day];src="official exchange ex-rights/ex-dividend or special-event limit"
    ref=ref_prices[day]
+  elif is_tpex:
+   # TPEx afterTrading/otc publishes the next session's actual official limits.
+   # Use the prior market-session row, including no-trade rows, rather than
+   # reconstructing limits from a stale last-traded close.
+   if prior_official_limits is not None:
+    up,down=prior_official_limits;ref=prev_close
+    src="TPEx official prior-session next-day limit fields"
+   elif day<strict_from:
+    seen=True;prev_close=float(r.close);prior_official_limits=current_next_limits;continue
+   else:
+    missing.append(day);prior_official_limits=current_next_limits;continue
   elif prev_close is not None:
    ref=prev_close;band=.07 if day<"2015-06-01" else .10
-   up=limit_price(ref,band,"UP");down=limit_price(ref,band,"DOWN");src="TWSE/TPEx official band/tick rules from prior traded close"
+   up=limit_price(ref,band,"UP");down=limit_price(ref,band,"DOWN")
+   src="TWSE official band/tick rules from prior traded close"
   elif day<strict_from:
    # Price limits before the OOS execution window are not used for fills;
    # seed the next reference from the observed close and continue warm-up.
-   seen=True
-   prev_close=float(r.close)
-   continue
+   seen=True;prev_close=float(r.close);prior_official_limits=current_next_limits;continue
   else:
-   missing.append(day)
-   continue
+   missing.append(day);prior_official_limits=current_next_limits;continue
   hi=float(r.high);lo=float(r.low)
   if day>=strict_from and (hi>up+1e-6 or lo<down-1e-6):
-   conflicts.append({"date":day,"high":hi,"low":lo,"up":up,"down":down,"reference":ref,"source":src})
+   conflicts.append({"date":day,"high":hi,"low":lo,"up":up,"down":down,
+                     "reference":ref,"source":src})
   out[day]=(up,down)
   seen=True
   if float(r.volume)>0:prev_close=float(r.close)
   else:prev_close=None
- if missing:raise RuntimeError(f"{symbol}: missing price-limit reference on {len(missing)} sessions; first={missing[:5]}")
+  prior_official_limits=current_next_limits
+ if missing:raise RuntimeError(f"{symbol}: missing official price-limit reference on {len(missing)} sessions; first={missing[:5]}")
  if conflicts:raise RuntimeError(f"{symbol}: {len(conflicts)} OHLC/official-rule conflicts; first={conflicts[:5]}")
  return out
 
