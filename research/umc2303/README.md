@@ -1,44 +1,49 @@
 # UMC 2303 Swing Research
 
-This is a separate research line. It does not modify the TSMC 2330 experiments.
+This is an independent research line. It does not modify the TSMC 2330 experiments.
 
-## Account facts supplied for the live-position worksheet
+## User-supplied account context
 
-- Existing position: 300 shares at NT$148 average cost (user-reported).
-- Additional cash ceiling: NT$50,000 (user-reported).
-- Earlier reference close: NT$101 on 2026-11-12. Refresh from TWSE before any live decision.
-- Existing position cost basis: NT$44,400 before fees; mark-to-market at NT$101 would be NT$30,300, or -NT$14,100 before fees. This is arithmetic, not a recommendation.
+- Existing position: 300 shares at NT$148 average cost.
+- Additional cash ceiling: NT$50,000.
+- Earlier reference close: NT$101 on 2026-11-12; refresh official data before any live decision.
+- Cost basis is NT$44,400 before fees. Any mark-to-market calculation is arithmetic, not a recommendation.
 
-## Phase 1: price-only reproducible baseline
+## Current research scope: pure MA5 + volume
 
-`run_research.py` downloads monthly batches from the TWSE official STOCK_DAY endpoint and saves the raw daily OHLCV CSV. It compares predeclared moving-average, breakout, trend-pullback, and trend-filtered mean-reversion rules. Signals are formed after the close and earliest execution is the next session's open. Estimated commission, sell-side transaction tax, and slippage are included. Sizing uses integer shares so a sub-NT$100,000 account can trade odd lots.
+The current core comparison uses only:
+- MA5 close crossover for entry (or MA5 rising + close above MA5 in the fifth variant).
+- Current-day volume compared with the prior 20 completed sessions' average, using 1.0x, 1.2x, 1.5x, or 2.0x thresholds.
+- Exit when the close falls below MA5; execute no earlier than the next session's open.
+- No ATR, RSI, MACD, longer moving averages, institutional flow, or fundamentals in core entry/exit rules.
 
-The workflow runs on GitHub Actions and uploads JSON/CSV results as an artifact. It does not require installing Node.js, Python, or software on the user's Windows computer.
+The backtest starts in 2013 after using 2010 onward for indicator warm-up. Initial capital is NT$100,000; integer-share sizing is used. Commission (0.1425% each side), sell-side tax (0.3%), and slippage (0.1% each side) are explicit assumptions, not broker-confirmed actual costs.
 
-## Important limits — do not overstate results
+## Execution and output
 
-- Phase 1 uses raw, unadjusted TWSE prices. Corporate actions and cash dividends are not yet incorporated. Results are price-only research, not total-return results; dividend/split dates can distort indicators.
-- The current strategy comparison is a fixed-rule exploratory out-of-sample run from 2013 onward, not a completed nested walk-forward parameter search.
-- No institutional-flow or point-in-time fundamental features are included yet.
-- Daily OHLC cannot reconstruct intraday path, queue priority, partial fills, limit-up/down execution, or market impact.
-- Do not report a winning strategy, annualized return, win rate, or drawdown until the GitHub Actions artifact has been retrieved and audited.
-- A previously mentioned 36-wave summary (36 reversals, 40.15% mean move, 32.39% median move, 40-session median duration) has no source dataset/code attached in this branch. Treat it as unverified historical context; do not merge it into measured results.
+GitHub Actions runs the Python research script and uploads:
+- `umc2303_research_report.json`
+- `umc2303_strategy_summary.csv`
+- `umc2303_twse_daily_raw.csv`
 
-## Required next research phases
+No local installation is required on the user's Windows computer.
 
-1. Verify data completeness, duplicates, missing sessions, zero prices, and official source dates.
-2. Add corporate-action/dividend handling using event-effective dates only; validate adjusted OHLC continuity around every event.
-3. Add point-in-time institutional buy/sell data only if a complete historical source is available.
-4. Implement causal swing-high/swing-low labeling: a pivot is usable only after its right-side confirmation window has elapsed. Never trade at the retrospectively labeled pivot date.
-5. Compare stop/target, ATR trailing, time stop, and re-entry after stop-out.
-6. Run nested rolling validation: optimize only inside each training window, freeze parameters, test the next non-overlapping period; reserve the latest period as final untouched holdout.
-7. Evaluate CAGR, total return, win rate, profit factor, average win/loss, exposure, turnover, max drawdown, Sharpe/Sortino, trade count, and benchmark-relative performance after costs.
-8. Translate only validated rules into a position plan for the 300-share holding and NT$50,000 cash. Do not assume averaging down is optimal.
+## Critical limitations
 
-## Cost assumptions
+- The downloaded TWSE STOCK_DAY history is raw and unadjusted. Cash dividends, stock dividends, splits, and other corporate actions are not incorporated. Consequently, all long-horizon performance and signals are provisional until a correctly date-aligned adjusted-price series is built.
+- This is a fixed-rule exploratory comparison, not nested walk-forward validation or an untouched final holdout.
+- Daily OHLCV cannot reconstruct queue priority, partial fills, limit-up/down execution, or market impact.
+- No trade should be recommended from these results alone.
 
-Initial research capital NT$100,000; commission 0.1425% each side, sell tax 0.3%, slippage 0.1% each side. These are explicit research assumptions, not the user's broker-specific actual rates. Replace with the actual fee discount/minimum charge before account-level simulation.
+## Next phases
 
-## Data source
+1. Audit source coverage, duplicates, missing sessions, zero values, and corporate-action events.
+2. Add point-in-time corporate-action adjustment and validate price continuity.
+3. Compare one-day vs two-day MA5 breakdown exits and MA5 reclaim + volume re-entry, with parameters fixed before validation.
+4. Run rolling train/validation windows and preserve a final untouched holdout.
+5. Report CAGR, total return, net win rate, profit factor, average win/loss, max drawdown, Sharpe/Sortino, exposure, turnover, trade count, and benchmark-relative results after costs.
+6. Only then evaluate implications for the user's existing 300-share holding and additional cash ceiling.
+
+## Official data source
 
 TWSE historical daily trading data: https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY
