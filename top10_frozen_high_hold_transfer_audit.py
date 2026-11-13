@@ -293,17 +293,21 @@ def main():
   uni=pd.read_csv(universe_path,dtype={"symbol":str})
   symbols=sorted(uni.symbol.astype(str).str.strip().unique())
   name_map=uni.drop_duplicates("symbol").set_index("symbol").name.astype(str).to_dict()
+  stock_id_map=uni.drop_duplicates("symbol").set_index("symbol").stock_id.astype(str).to_dict()
+  market_map=uni.drop_duplicates("symbol").set_index("symbol").market.astype(str).to_dict()
   active_dates_by_symbol={s:set(g.date.astype(str)) for s,g in uni.groupby("symbol")}
  else:
   symbols=sorted(p.stem for p in Path(a.raw_bars).glob("*.csv")) or DEFAULT_SYMBOLS
   name_map={}
+  stock_id_map={s:(s.split("_",1)[1] if "_" in s else s) for s in symbols}
+  market_map={s:(s.split("_",1)[0] if "_" in s else "TWSE") for s in symbols}
   active_dates_by_symbol={}
  for symbol in symbols:
   try:
    raw_full=pd.read_csv(Path(a.raw_bars)/f"{symbol}.csv",parse_dates=["date"])
    raw_full=raw_full.sort_values("date").drop_duplicates("date").reset_index(drop=True)
    if len(raw_full)<260:raise RuntimeError(f"insufficient raw history {len(raw_full)}")
-   ev,cashdiv,ref,event_limits=read_events(a.actions,symbol)
+   ev,cashdiv,ref,event_limits=read_events(a.actions,symbol,stock_id_map[symbol],market_map[symbol])
    limits=build_limits(raw_full,ref,event_limits,symbol)
    raw=raw_full.dropna(subset=["open","high","low","close"]).copy()
    raw=raw[raw.volume>0].reset_index(drop=True)
@@ -321,7 +325,7 @@ def main():
    start_idx=np.flatnonzero((d.date.dt.year>=2015).to_numpy())
    if not len(start_idx):raise RuntimeError("no 2015+ data")
    start=int(start_idx[0]);end=len(d)-1
-   if symbol=="2330":
+   if market_map[symbol]=="TWSE" and stock_id_map[symbol]=="2330":
     rep=simulate(d,low_unfiltered,high,risk,limits,cashdiv,10,start,end,high_hold_signal=hold)
     rep_metrics={k:v for k,v in rep.items() if k not in {"trades","equity_curve"}}
     expected={"cagr":0.376871,"win_rate":0.933333,"trade_count":15,"max_drawdown":-0.254384}
@@ -340,7 +344,7 @@ def main():
    for slip in SLIPPAGE_BPS:
     sim=simulate(d,low,high,risk,limits,cashdiv,slip,start,end,high_hold_signal=hold)
     m={k:v for k,v in sim.items() if k not in {"trades","equity_curve"}}
-    row_out={"symbol":symbol,"name":name_map.get(symbol,NAMES.get(symbol,str(raw.name.iloc[0]) if "name" in raw else symbol)),"variant":"frozen_high_hold_dynamic_top10_entry_filter","slippage_bps":slip,"top10_active_days":int(active_mask.sum()),"low_signal_days_after_universe_filter":int(low.sum()),**m}
+    row_out={"symbol":symbol,"stock_id":stock_id_map[symbol],"market":market_map[symbol],"name":name_map.get(symbol,NAMES.get(stock_id_map[symbol],str(raw.name.iloc[0]) if "name" in raw else symbol)),"variant":"frozen_high_hold_dynamic_top10_entry_filter","slippage_bps":slip,"top10_active_days":int(active_mask.sum()),"low_signal_days_after_universe_filter":int(low.sum()),**m}
     row_out["cagr_pass_50pct"]=bool(row_out.get("cagr_mark_to_market") is not None and row_out["cagr_mark_to_market"]>=.50)
     row_out["win_rate_pass_floor"]=bool(row_out.get("win_rate_completed_only") is not None and row_out["win_rate_completed_only"]>=.8695652173913043)
     row_out["drawdown_pass_25pct"]=bool(row_out.get("max_drawdown") is not None and row_out["max_drawdown"]>=-.25)
