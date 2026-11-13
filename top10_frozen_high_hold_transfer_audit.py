@@ -321,11 +321,11 @@ def main():
      "win_rate_delta_pp":(rep_metrics.get("win_rate")-expected["win_rate"])*100 if rep_metrics.get("win_rate") is not None else None,
      "trade_count_delta":rep_metrics.get("trade_count")-expected["trade_count"] if rep_metrics.get("trade_count") is not None else None,
      "max_drawdown_delta_pp":(rep_metrics.get("max_drawdown")-expected["max_drawdown"])*100 if rep_metrics.get("max_drawdown") is not None else None}
+    deltas=[tsmc_reproduction.get("cagr_delta_pp"),tsmc_reproduction.get("win_rate_delta_pp"),
+            tsmc_reproduction.get("trade_count_delta"),tsmc_reproduction.get("max_drawdown_delta_pp")]
     tsmc_reproduction["matches_benchmark_within_tolerance"]=bool(
-     abs(tsmc_reproduction["cagr_delta_pp"] or 999)<=1.0 and
-     abs(tsmc_reproduction["win_rate_delta_pp"] or 999)<=5.0 and
-     abs(tsmc_reproduction["trade_count_delta"] or 999)<=1 and
-     abs(tsmc_reproduction["max_drawdown_delta_pp"] or 999)<=1.0)
+     all(v is not None for v in deltas) and abs(deltas[0])<=1.0 and
+     abs(deltas[1])<=5.0 and abs(deltas[2])<=1 and abs(deltas[3])<=1.0)
     pd.DataFrame(rep["trades"]).to_csv(out/"tsmc_2330_universe_free_reproduction_trades_10bps.csv",index=False)
     pd.DataFrame(rep["equity_curve"]).to_csv(out/"tsmc_2330_universe_free_reproduction_equity_10bps.csv",index=False)
    for slip in SLIPPAGE_BPS:
