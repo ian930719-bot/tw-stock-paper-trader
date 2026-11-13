@@ -137,6 +137,9 @@ jobs:
               if df.duplicated(["date","stock_id"]).any(): raise RuntimeError(f"Duplicate {name} limit keys")
           twse_lookup=twse.set_index(["date","stock_id"]).to_dict("index")
           tpex_lookup=tpex.set_index(["date","stock_id"]).to_dict("index")
+          no_limit=pd.read_csv("data/tpex_official_no_limit_periods.csv",dtype={"symbol":str})
+          no_limit_periods={str(r.symbol):(str(r.first_no_limit_date),str(r.last_no_limit_date),str(r.source))
+            for r in no_limit.itertuples(index=False)}
           bars=root/"symbol_bars"; bars.mkdir(exist_ok=True)
           handles={}
           try:
@@ -144,7 +147,7 @@ jobs:
                   fh=(bars/f"{sym}.csv").open("w",newline="",encoding="utf-8")
                   wr=csv.writer(fh)
                   wr.writerow(["symbol","stock_id","market","name","date","open","high","low","close","volume","turnover","note","source",
-                    "official_limit_up","official_reference_price","official_limit_down","next_day_limit_up","next_day_limit_down"])
+                    "official_limit_up","official_reference_price","official_limit_down","next_day_limit_up","next_day_limit_down","no_limit_period","no_limit_source"])
                   handles[sym]=(fh,wr)
               for f in sorted(daily.glob("*.csv")):
                   d=pd.read_csv(f,dtype={"symbol":str,"stock_id":str})
@@ -153,12 +156,14 @@ jobs:
                       key=(str(r.date),str(r.stock_id))
                       tw=twse_lookup.get(key,{}) if str(r.market).upper()=="TWSE" else {}
                       tp=tpex_lookup.get(key,{}) if str(r.market).upper()=="TPEX" else {}
+                      period=no_limit_periods.get(str(r.symbol))
+                      in_no_limit=bool(period and period[0]<=str(r.date)<=period[1] and str(r.market).upper()=="TPEX")
                       handles[str(r.symbol)][1].writerow([
                         r.symbol,r.stock_id,r.market,r.name,r.date,r.open,r.high,r.low,r.close,
                         getattr(r,"volume_shares",getattr(r,"volume",0)),getattr(r,"turnover_ntd",getattr(r,"turnover",0)),
                         getattr(r,"note",""),getattr(r,"source",""),
                         tw.get("official_limit_up"),tw.get("official_reference_price"),tw.get("official_limit_down"),
-                        tp.get("next_day_limit_up"),tp.get("next_day_limit_down")
+                        tp.get("next_day_limit_up"),tp.get("next_day_limit_down"),in_no_limit,period[2] if in_no_limit else ""
                       ])
           finally:
               for fh,wr in handles.values(): fh.close()
@@ -170,7 +175,8 @@ jobs:
             "top10_rows_by_market":top.market.value_counts().to_dict(),
             "sha256":hashlib.sha256((root/"historical_daily_top10_by_volume.csv").read_bytes()).hexdigest(),
             "method":"Daily point-in-time top ten ranked across TWSE and TPEx by official traded shares; exact official exchange limit fields joined by market/date/security code.",
-            "limit_rows":{"TWSE":len(twse),"TPEX":len(tpex)}}
+            "limit_rows":{"TWSE":len(twse),"TPEX":len(tpex)},
+            "official_no_limit_periods":no_limit.to_dict("records")}
           assert manifest["complete"], manifest
           (root/"manifest.json").write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding="utf-8")
           print(json.dumps(manifest,ensure_ascii=False,indent=2))
@@ -205,6 +211,7 @@ jobs:
             data/top10_actions_twt49u/
             data/twse_official_limits/
             data/tpex_next_day_limits/
+            data/tpex_official_no_limit_periods.csv
             data/mops_dividend_reconciliation/
             data/official_dividend_component_overrides.csv
             artifacts/top10_reconciled_official_audit/

@@ -376,6 +376,12 @@ def build_limits(bars,ref_prices,event_limits,symbol,strict_from="2015-01-01"):
    if comparison is not None and (abs(float(comparison[0])-up)>0.011 or abs(float(comparison[1])-down)>0.011):
     conflicts.append({"date":day,"type":"event-vs-daily-official-limit-mismatch",
       "event_up":up,"event_down":down,"daily_up":float(comparison[0]),"daily_down":float(comparison[1])})
+  elif is_tpex and str(getattr(r,"no_limit_period","")).strip().lower() in {"true","1","yes"}:
+   # TPEx's official 9995/0.01 pair is a published no-limit sentinel, not
+   # a computed limit. Keep it as an unbounded execution gate for this
+   # specifically documented IPO period; never infer it for other sessions.
+   up,down=9995.0,0.01;ref=None
+   src="TPEx official no-price-limit period metadata"
   elif is_tpex:
    if prior_official_limits is not None:
     up,down=prior_official_limits;ref=prev_close
