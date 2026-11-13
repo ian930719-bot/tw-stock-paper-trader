@@ -50,9 +50,18 @@ def fetch_year(session,year,start_date,end_date):
   try:
    r=session.get(URL,params=params,timeout=(15,150),headers={"User-Agent":"Mozilla/5.0"})
    r.raise_for_status();payload=r.json()
-   if isinstance(payload,dict) and isinstance(payload.get("fields"),list) and isinstance(payload.get("data"),list):
-    return payload,r.url
-   errors.append({"url":r.url,"stat":payload.get("stat") if isinstance(payload,dict) else str(payload)[:200]})
+   if not isinstance(payload,dict) or not isinstance(payload.get("fields"),list) or not isinstance(payload.get("data"),list):
+    errors.append({"url":r.url,"payload":str(payload)[:300]});continue
+   h=[str(x).strip() for x in payload["fields"]]
+   di=next((i for i,x in enumerate(h) if any(t in x for t in ("資料日期","除權息日期","除權日期","日期"))),None)
+   if di is None:errors.append({"url":r.url,"fields":h});continue
+   sample=[]
+   for row in payload["data"][:5]:
+    try:sample.append(rocdate(row[di]))
+    except:pass
+   if not sample or not any(start_date<=d<=end_date for d in sample):
+    errors.append({"url":r.url,"stat":payload.get("stat"),"sample_dates":sample,"row_count":len(payload["data"])});continue
+   return payload,r.url
   except Exception as e:errors.append({"params":params,"error":str(e)})
  raise RuntimeError(f"TWT49U {year} failed; attempts={errors}")
 
