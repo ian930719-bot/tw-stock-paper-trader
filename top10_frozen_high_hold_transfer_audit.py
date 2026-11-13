@@ -14,6 +14,7 @@ from corporate_action_adjustments import apply_back_adjustments
 from tsmc_swing_research import build_causal_features
 from tsmc_2330_4019_replication import RULES,build_candidate_signals,simulate,annual_metrics,INITIAL_CAPITAL,SLIPPAGE_BPS
 from tsmc_2330_price_limits import limit_price as official_limit_price
+from tsmc_2330_trend_reentry_annual_oof import adverse_fill, commission, sell_tax
 
 DEFAULT_SYMBOLS=["2330","2454","1303","2327","2408","2308","3037","3008","2383","2303"]
 NAMES={"2330":"台積電","2454":"聯發科","1303":"南亞","2327":"國巨","2408":"南亞科","2308":"台達電","3037":"欣興","3008":"大立光","2383":"台光電","2303":"聯電"}
@@ -120,6 +121,153 @@ def hold_gate(d):
  action=d.corporate_action_window.fillna(True).astype(bool)
  x=(d.distance_sma_200>=.25)&(d.distance_ema_20>0)&d.rsi14.between(50,65)&(d.plus_di14>d.minus_di14)&~action
  return x.fillna(False).to_numpy(bool)
+
+
+def run_shared_capital_portfolio(prepared, universe, slippage_bps=10, initial_capital=INITIAL_CAPITAL):
+ """One-position, all-in/all-out portfolio using the frozen TSMC rules.
+
+ The top-ten membership is known at signal close; the order executes next
+ session open. If any member of a day's top ten failed the official-data gates,
+ that day's new entries are disabled rather than silently selecting a lower
+ ranked survivor.
+ """
+ if universe is None or universe.empty or not prepared:
+  return {"status":"NOT_RUN","reason":"Missing point-in-time universe or no eligible symbols"}
+ u=universe.copy()
+ u["date"]=pd.to_datetime(u.date,errors="coerce").dt.strftime("%Y-%m-%d")
+ u["symbol"]=u.symbol.astype(str).str.strip()
+ u["rank_by_volume"]=pd.to_numeric(u.rank_by_volume,errors="coerce")
+ top10_by_date={}
+ for day,g in u.groupby("date",sort=True):
+  top10_by_date[day]=[(str(r.symbol),int(r.rank_by_volume) if pd.notna(r.rank_by_volume) else 999)
+                      for r in g.sort_values(["rank_by_volume","turnover_ntd"],ascending=[True,False]).itertuples()]
+ dates=sorted(d for d in top10_by_date if d>="2015-01-01")
+ if len(dates)<260:return {"status":"NOT_RUN","reason":"Insufficient point-in-time top-ten dates"}
+ index_maps={}
+ for sym,x in prepared.items():
+  index_maps[sym]={pd.Timestamp(dt).strftime("%Y-%m-%d"):i for i,dt in enumerate(x["d"].date)}
+ total_top10_rows=sum(len(v) for v in top10_by_date.values())
+ eligible_top10_rows=sum(1 for v in top10_by_date.values() for sym,_ in v if sym in prepared)
+ complete_days=sum(1 for v in top10_by_date.values() if all(sym in prepared for sym,_ in v))
+ coverage=complete_days/len(top10_by_date) if top10_by_date else 0.0
+
+ cash=float(initial_capital);position=None;shares=0;entry_date=None;entry_reason=None
+ entry_cost=0.0;trade_dividend=0.0;pending=None;high_wait_start=None
+ risk_exit_fired=False;cooldown_until=-1;trades=[];curve=[]
+ total_commission=total_tax=total_dividend=0.0;total_slippage=0.0
+ missing_limit=locked_limit=outside_limit=0;exposure_days=0;suppressed_high=0
+ for gi,day in enumerate(dates):
+  # Ex-dividend entitlement belongs to the position held before today's open.
+  if position is not None and day in prepared[position]["dividends"]:
+   credit=shares*prepared[position]["dividends"][day]
+   cash+=credit;trade_dividend+=credit;total_dividend+=credit
+  # Execute any order submitted after the previous close.
+  if pending is not None:
+   sym=pending["symbol"];x=prepared[sym];di=index_maps[sym].get(day)
+   if di is None or day not in x["limits"]:
+    missing_limit+=1
+    if pending["side"]=="BUY":pending=None
+   else:
+    row=x["d"].iloc[di];up,down=x["limits"][day]
+    op=float(row.raw_open);hi=float(row.raw_high);lo=float(row.raw_low)
+    if not all(np.isfinite(v) for v in (op,hi,lo,up,down)):
+     missing_limit+=1
+     if pending["side"]=="BUY":pending=None
+    elif (pending["side"]=="BUY" and op>=up-1e-8) or (pending["side"]=="SELL" and op<=down+1e-8):
+     locked_limit+=1
+     if pending["side"]=="BUY":pending=None
+    else:
+     fill=adverse_fill(op,pending["side"],slippage_bps)
+     if fill>up+1e-8 or fill<down-1e-8:
+      outside_limit+=1
+      if pending["side"]=="BUY":pending=None
+     elif pending["side"]=="BUY" and position is None:
+      qty=int(cash//fill)
+      while qty>0 and qty*fill+commission(qty*fill)>cash+1e-8:qty-=1
+      if qty>0:
+       notional=qty*fill;fee=commission(notional);cash-=notional+fee
+       shares=qty;position=sym;entry_date=day;entry_reason=pending["reason"]
+       entry_cost=notional+fee;trade_dividend=0.0;risk_exit_fired=False;high_wait_start=None
+       total_commission+=fee;total_slippage+=qty*(fill-op)
+      pending=None
+     elif pending["side"]=="SELL" and position==sym and shares>0:
+      notional=shares*fill;fee=commission(notional);tax=sell_tax(notional)
+      proceeds=notional-fee-tax;cash+=proceeds
+      pnl=proceeds+trade_dividend-entry_cost
+      trades.append({"symbol":sym,"entry_date":entry_date,"entry_reason":entry_reason,
+       "exit_date":day,"exit_reason":pending["reason"],"shares":shares,
+       "entry_cost":round(entry_cost,2),"exit_net_proceeds":round(proceeds,2),
+       "cash_dividends":round(trade_dividend,2),"net_pnl":round(pnl,2),
+       "net_return":pnl/entry_cost if entry_cost else None})
+      total_commission+=fee;total_tax+=tax;total_slippage+=shares*(op-fill)
+      if pending["reason"]=="sma200_risk_exit":cooldown_until=gi+RULES["risk_exit_cooldown_sessions"]
+      position=None;shares=0;entry_date=None;entry_reason=None;entry_cost=0.0;trade_dividend=0.0
+      high_wait_start=None;pending=None
+  # Mark portfolio equity at the close.
+  if position is not None:
+   di=index_maps[position].get(day)
+   if di is None:raise RuntimeError(f"Held position {position} missing official bar on {day}")
+   row=prepared[position]["d"].iloc[di]
+   close=float(row.raw_close);equity=cash+shares*close;exposure_days+=1
+  else:
+   close=None;equity=cash
+  curve.append({"date":day,"equity":equity,"cash":cash,"position":position,
+                "shares":shares,"close":close,"pending_order":pending["side"] if pending else None})
+  if pending is not None or gi>=len(dates)-1:continue
+  if position is None:
+   # Fail closed on a day when any member of the daily top ten is not audited.
+   members=top10_by_date.get(day,[])
+   if not members or not all(sym in prepared for sym,_ in members):continue
+   if gi<cooldown_until:continue
+   candidates=[]
+   for sym,rank in members:
+    x=prepared[sym];di=index_maps[sym].get(day)
+    if di is not None and bool(x["low"][di]):candidates.append((rank,sym))
+   if candidates:
+    rank,sym=min(candidates,key=lambda z:z[0])
+    pending={"side":"BUY","symbol":sym,"reason":"base_low_after_filters_top10_volume_rank"}
+  else:
+   x=prepared[position];di=index_maps[position].get(day)
+   if di is None:continue
+   row=x["d"].iloc[di]
+   if bool(x["risk"][di]) and not risk_exit_fired:
+    risk_exit_fired=True;high_wait_start=None
+    pending={"side":"SELL","symbol":position,"reason":"sma200_risk_exit"}
+   elif high_wait_start is None and bool(x["high"][di]):
+    if bool(x["hold"][di]):suppressed_high+=1
+    else:
+     dist_sma20=float(row.distance_sma_20);rsi=float(row.rsi14)
+     if dist_sma20<0.0 or rsi<58.0:
+      pending={"side":"SELL","symbol":position,"reason":"high_confirm_immediate"}
+     else:high_wait_start=gi
+   elif high_wait_start is not None and bool(x["hold"][di]):
+    suppressed_high+=1;high_wait_start=None
+   elif high_wait_start is not None:
+    waited=gi-high_wait_start;rsi=float(row.rsi14)
+    if rsi<48.0 or waited>=14:
+     pending={"side":"SELL","symbol":position,"reason":"high_confirm_rsi_or_timeout"}
+ cdf=pd.DataFrame(curve);eq=cdf.equity.astype(float);dd=eq/eq.cummax()-1
+ years=(pd.Timestamp(cdf.date.iloc[-1])-pd.Timestamp(cdf.date.iloc[0])).days/365.25
+ final=float(eq.iloc[-1]);tdf=pd.DataFrame(trades)
+ open_position=None
+ if position is not None:
+  open_position={"symbol":position,"entry_date":entry_date,"shares":shares,"entry_cost":round(entry_cost,2),
+                 "cash_dividends":round(trade_dividend,2),"last_close":close,"mark_to_market_equity":final}
+ return {"status":"RUN_COMPLETE_WITH_FULL_UNIVERSE_COVERAGE" if coverage>=.99 else "RUN_COMPLETE_WITH_INCOMPLETE_UNIVERSE_COVERAGE",
+  "initial_capital":initial_capital,"final_equity_mark_to_market":final,
+  "cagr_mark_to_market":(final/initial_capital)**(1/years)-1 if years>0 and final>0 else None,
+  "max_drawdown":float(dd.min()),"completed_trades":len(trades),
+  "win_rate_completed_only":float((tdf.net_pnl>0).mean()) if len(tdf) else None,
+  "exposure_ratio":exposure_days/len(cdf),"total_commission":total_commission,
+  "total_sell_tax":total_tax,"estimated_slippage_cost":total_slippage,
+  "total_cash_dividends":total_dividend,"blocked_missing_price_limit":missing_limit,
+  "blocked_locked_limit":locked_limit,"blocked_slippage_outside_limit":outside_limit,
+  "suppressed_high_signal_count":suppressed_high,"open_position":open_position,
+  "daily_top10_dates":len(dates),"daily_top10_union_symbols":len(set(u.symbol)),
+  "eligible_symbols":len(prepared),"top10_membership_rows":total_top10_rows,
+  "eligible_top10_membership_rows":eligible_top10_rows,"complete_universe_days":complete_days,
+  "complete_universe_day_ratio":coverage,"trades":trades,"equity_curve":curve,
+  "method":"one shared NT$100,000 account; one position max; all-in/all-out; daily top-ten by official traded shares; same-day close signal and next-session open execution; skip new entries if any daily top-ten member failed official-data gates"}
 
 def main():
  p=argparse.ArgumentParser()
