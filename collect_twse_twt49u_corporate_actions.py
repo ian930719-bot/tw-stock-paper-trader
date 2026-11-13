@@ -31,10 +31,12 @@ def num(v):
  except:return None
 
 def index(headers,*terms,required=True):
+ def norm(x):
+  return "".join(str(x).replace("　"," ").split()).strip()
+ targets={norm(x) for x in terms}
  for i,h in enumerate(headers):
-  hh=str(h).replace(" ","").strip()
-  if any(t in hh for t in terms):return i
- if required:raise RuntimeError(f"TWT49U missing field {terms}; schema={headers}")
+  if norm(h) in targets:return i
+ if required:raise RuntimeError(f"TWT49U missing exact field {terms}; schema={headers}")
  return None
 
 def fetch_year(session,year,start_date,end_date):
@@ -93,8 +95,10 @@ def main():
   type_i=index(h,"權/息","權息",required=False)
   cash_i=index(h,"息值","現金股利",required=False)
   stock_i=index(h,"權值","股票股利",required=False)
-  total_i=index(h,"權值+息值","權息",required=False)
-  if cash_i is None and total_i is None:raise RuntimeError(f"{year}: neither cash dividend nor combined amount field")
+  total_i=index(h,"權值+息值",required=False)
+  detail_i=index(h,"詳細資料",required=False)
+  if cash_i is None and stock_i is None and total_i is None:
+   raise RuntimeError(f"{year}: no exact cash, stock, or combined dividend amount field")
   for raw in payload["data"]:
    if len(raw)<=max(x for x in [date_i,sym_i,name_i,prev_i,ref_i,up_i,down_i] if x is not None):continue
    sym=str(raw[sym_i]).strip()
@@ -102,20 +106,30 @@ def main():
    except:continue
    if not a.start_date<=day<=a.end_date:continue
    kind=str(raw[type_i]).strip() if type_i is not None and len(raw)>type_i else ""
-   if cash_i is not None:
-    cash=num(raw[cash_i]) or 0.0
-    stock=(num(raw[stock_i]) or 0.0) if stock_i is not None else None
+   total=num(raw[total_i]) if total_i is not None else None
+   cash=num(raw[cash_i]) if cash_i is not None else None
+   stock=num(raw[stock_i]) if stock_i is not None else None
+   if cash_i is not None and stock_i is not None and cash is not None and stock is not None:
+    cash_status="resolved"
+   elif kind=="息":
+    cash=(cash if cash is not None else total)
+    stock=0.0
+    cash_status="resolved" if cash is not None else "unresolved_cash_component"
+   elif kind=="權":
+    cash=0.0
+    stock=(stock if stock is not None else total)
     cash_status="resolved" if stock is not None else "unresolved_stock_component"
    else:
-    total=num(raw[total_i]) or 0.0
-    cash=total if kind=="息" else (0.0 if kind=="權" else None)
-    stock=total if kind=="權" else (0.0 if kind=="息" else None)
-    cash_status="resolved" if kind in {"息","權"} else "unresolved_mixed_action"
+    # The public summary only exposes combined rights+dividend value for mixed events.
+    # Do not invent the cash/stock split; post-start positions will fail closed.
+    cash=None;stock=None;cash_status="unresolved_mixed_action"
    vals={"symbol":sym,"stock_id":sym,"name":str(raw[name_i]).strip() or SYMBOLS.get(sym,sym),
     "date":day,"previous_close":num(raw[prev_i]),"reference_price":num(raw[ref_i]),
     "limit_up":num(raw[up_i]),"limit_down":num(raw[down_i]),
     "cash_dividend":cash,"stock_dividend":stock,"action_type":kind,
-    "cash_dividend_status":cash_status,"source":"TWSE TWT49U"}
+    "cash_dividend_status":cash_status,
+    "detail_text":str(raw[detail_i]).strip() if detail_i is not None and len(raw)>detail_i else "",
+    "combined_dividend_value":total,"source":"TWSE TWT49U"}
    if any(vals[k] is None for k in ("previous_close","reference_price","limit_up","limit_down")):
     raise RuntimeError(f"Missing official event reference/limits: {vals}")
    if vals["previous_close"]<=0 or vals["reference_price"]<=0 or vals["limit_up"]<=0 or vals["limit_down"]<=0:
@@ -140,7 +154,7 @@ def main():
   "requested_period":[a.start_date,a.end_date],"rows":len(frame),
   "symbols_with_events":int(frame.symbol.nunique()),
   "symbols_without_events":[s for s in SYMBOLS if s not in set(frame.symbol)],
-  "unresolved_cash_dividend_events":int((frame.cash_dividend_status!="resolved").sum()),
+  "unresolved_action_component_events":int((frame.cash_dividend_status!="resolved").sum()),
   "complete":True,"schemas":schemas,
   "sha256":hashlib.sha256((out/"twt49u_all.csv").read_bytes()).hexdigest(),
   "limitations":["TWT49U excludes certain cash capital-reduction and split-reduction events; separate TWTAUU/TWTB8U event feeds are required.",
