@@ -42,7 +42,33 @@ jobs:
           run-id: 43225571777
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: data/top10_official_raw
+      - name: Reuse point-in-time universe checkpoint from prior completed run
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: top10-point-in-time-universe-checkpoint
+          repository: ian930719-bot/tw-stock-paper-trader
+          run-id: 43342607119
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: data/twse_marketwide_turnover
+      - name: Validate reusable point-in-time universe checkpoint
+        id: universe_cache
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          p=Path("data/twse_marketwide_turnover")
+          try:
+              m=json.loads((p/"manifest.json").read_text(encoding="utf-8"))
+              ok=bool(m.get("complete")) and set(m.get("markets_included",[]))=={"TWSE","TPEX"} and (p/"historical_daily_top10_by_volume.csv").exists() and (p/"symbol_bars").is_dir()
+          except Exception:
+              ok=False
+          with open(os.environ["GITHUB_OUTPUT"],"a",encoding="utf-8") as f:
+              f.write("hit="+("true" if ok else "false")+"\n")
+          print("Reusable point-in-time universe checkpoint:",ok)
+          PY
       - name: Build full historical daily top ten and constituent raw OHLCV
+        if: steps.universe_cache.outputs.hit != 'true'
         run: |
           python -m py_compile collect_twse_historical_daily_top10.py
           python collect_twse_historical_daily_top10.py --raw-bars data/top10_official_raw/bars --output data/twse_marketwide_turnover --pause 0.2
