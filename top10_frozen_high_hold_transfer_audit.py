@@ -308,7 +308,6 @@ def main():
    else:
     active_mask=np.ones(len(d),dtype=bool)
    hold=hold_gate(d)
-   prepared[symbol]={"d":d,"low":low,"high":high,"risk":risk,"hold":hold,"limits":limits,"dividends":cashdiv}
    start_idx=np.flatnonzero((d.date.dt.year>=2015).to_numpy())
    if not len(start_idx):raise RuntimeError("no 2015+ data")
    start=int(start_idx[0]);end=len(d)-1
@@ -325,6 +324,7 @@ def main():
      pd.DataFrame(sim["trades"]).to_csv(out/f"trades_{symbol}_10bps.csv",index=False)
      pd.DataFrame(sim["equity_curve"]).to_csv(out/f"equity_{symbol}_10bps.csv",index=False)
      pd.DataFrame(annual_metrics(sim["equity_curve"],sim["trades"],INITIAL_CAPITAL)).to_csv(out/f"annual_{symbol}_10bps.csv",index=False)
+   prepared[symbol]={"d":d,"low":low,"high":high,"risk":risk,"hold":hold,"limits":limits,"dividends":cashdiv}
    print(f"[DONE] {symbol} {name_map.get(symbol,NAMES.get(symbol,symbol))}",flush=True)
   except Exception as e:
    blocked.append({"symbol":symbol,"name":name_map.get(symbol,NAMES.get(symbol,symbol)),"reason":f"{type(e).__name__}: {e}"})
