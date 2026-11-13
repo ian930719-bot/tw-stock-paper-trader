@@ -50,28 +50,31 @@ def main():
   raise RuntimeError(f"Invalid official TWT49U JSON response: {str(payload)[:1000]}")
  headers=[str(x).strip() for x in payload["fields"]]
  table=[headers]+payload["data"]
- date_i=pick(headers,"除權息日期","除權日期","日期")
+ date_i=pick(headers,"除權息日期","除權日期","資料日期","日期")
  sym_i=pick(headers,"股票代號","證券代號")
  name_i=pick(headers,"股票名稱","證券名稱")
  prev_i=pick(headers,"前一日收盤價","除權息前收盤價")
  ref_i=pick(headers,"除權息參考價","除權參考價","參考價")
- up_i=pick(headers,"漲停價");down_i=pick(headers,"跌停價")
- cash_i=pick(headers,"息值","現金股利")
- stock_i=pick(headers,"權值","股票股利")
+ up_i=pick(headers,"漲停價","漲停價格");down_i=pick(headers,"跌停價","跌停價格")
+ total_i=pick(headers,"權值+息值","權息","息值","現金股利")
  type_i=next((i for i,h in enumerate(headers) if "權/息" in h or "權息" in h),None)
  rows=[]
  for arow in table[1:]:
-  if len(arow)<=max(date_i,sym_i,name_i,prev_i,ref_i,up_i,down_i,cash_i,stock_i):continue
+  if len(arow)<=max(date_i,sym_i,name_i,prev_i,ref_i,up_i,down_i,total_i):continue
   sym=str(arow[sym_i]).strip()
   if sym not in SYMBOLS:continue
   try:day=rocdate(arow[date_i])
   except:continue
   if not a.start_date<=day<=a.end_date:continue
+  kind=str(arow[type_i]).strip() if type_i is not None and len(arow)>type_i else ""
+  total=num(arow[total_i]) or 0.0
+  cash=total if kind=="息" else (0.0 if kind=="權" else None)
+  stock=total if kind=="權" else (0.0 if kind=="息" else None)
   vals={"symbol":sym,"stock_id":sym,"name":str(arow[name_i]).strip() or SYMBOLS[sym],
    "date":day,"previous_close":num(arow[prev_i]),"reference_price":num(arow[ref_i]),
    "limit_up":num(arow[up_i]),"limit_down":num(arow[down_i]),
-   "cash_dividend":num(arow[cash_i]),"stock_dividend":num(arow[stock_i]),
-   "action_type":str(arow[type_i]).strip() if type_i is not None and len(arow)>type_i else "",
+   "cash_dividend":cash,"stock_dividend":stock,"action_type":kind,
+   "cash_dividend_status":"resolved" if kind in {"息","權"} else "unresolved_mixed_action",
    "source":"TWSE TWT49U"}
   if vals["reference_price"] is None or vals["limit_up"] is None or vals["limit_down"] is None:
    raise RuntimeError(f"Missing official reference/limits for {sym} {day}: {vals}")
