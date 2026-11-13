@@ -1,0 +1,20 @@
+name: Cancel Stale TPEx Limit Collection
+
+on:
+  push:
+    branches: [research/top10-official-ohlcv-baseline-audit]
+    paths:
+      - .github/workflows/cancel-stale-tpex-collector.yml
+
+permissions:
+  actions: write
+
+jobs:
+  cancel-stale:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel collector run with unnormalized TPEx field names
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api --method POST repos/ian930719-bot/tw-stock-paper-trader/actions/runs/43393239097/cancel || true
