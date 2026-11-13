@@ -1,0 +1,23 @@
+name: Retire Stalled Top 10 Collection Attempts
+
+on:
+  push:
+    branches: [research/top10-official-ohlcv-baseline-audit]
+    paths:
+      - .github/workflows/cancel-stalled-top10-collector.yml
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel superseded collector attempts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for run_id in 43357590883 43357127491 43342607119 43356733682; do
+            gh api --method POST "repos/ian930719-bot/tw-stock-paper-trader/actions/runs/${run_id}/cancel" || true
+          done
