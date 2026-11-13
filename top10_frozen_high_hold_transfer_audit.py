@@ -43,9 +43,10 @@ def read_events(action_root,symbol):
   special=special[special.symbol.astype(str).str.strip()==symbol]
   if not special.empty:
    raise RuntimeError(f"{symbol}: official capital-reduction/par-value events require a share-count/cash-refund model: {special.to_dict('records')[:3]}")
- p=root/f"{symbol}.csv"
- if not p.exists():raise RuntimeError(f"Missing official TWT49U event file for {symbol}")
- ev=pd.read_csv(p)
+ p=root/"twt49u_all.csv"
+ if not p.exists():raise RuntimeError("Missing global official TWT49U event table")
+ all_events=pd.read_csv(p,dtype={"symbol":str})
+ ev=all_events[all_events.symbol.astype(str).str.strip()==symbol].copy()
  if ev.empty:return pd.DataFrame(columns=["symbol","date","adjustment_ratio"]),{}, {}, {}
  ev["date"]=pd.to_datetime(ev.date,errors="coerce").dt.normalize()
  ev["symbol"]=ev.symbol.astype(str).str.strip()
