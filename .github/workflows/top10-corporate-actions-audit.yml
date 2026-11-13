@@ -1,0 +1,60 @@
+name: Top 10 Corporate Action Audit Inputs
+
+on:
+  push:
+    branches: [research/top10-official-ohlcv-baseline-audit]
+    paths:
+      - .github/workflows/top10-corporate-actions-audit.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+concurrency:
+  group: top10-corporate-actions-audit
+  cancel-in-progress: false
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/top10-official-ohlcv-baseline-audit
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - run: pip install -r requirements.txt
+      - name: Collect corporate actions and adjustment events
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: |
+          mkdir -p data/top10_actions
+          cat > data/top10_actions/candidate_symbols.csv <<'CSV'
+          symbol,name
+          2330,台積電
+          2454,聯發科
+          1303,南亞
+          2327,國巨
+          2408,南亞科
+          2308,台達電
+          3037,欣興
+          3008,大立光
+          2383,台光電
+          2303,聯電
+          CSV
+          python - <<'PY'
+          import json
+          from historical_data_collector import collect_corporate_actions
+          r=collect_corporate_actions("data/top10_actions","2010-01-04",pause_seconds=6.1)
+          print(json.dumps({k:v for k,v in r.items() if k!="status_rows"},ensure_ascii=False,indent=2))
+          if not r.get("corporate_actions_complete") or r.get("event_conflicts",0):
+              raise SystemExit("Corporate-action inputs incomplete or conflicting; formal backtest blocked.")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: top10-official-corporate-actions
+          path: data/top10_actions/corporate_actions/
+          if-no-files-found: error
+          retention-days: 30
