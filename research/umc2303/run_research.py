@@ -106,6 +106,31 @@ def build_signals(rows):
     sigs["trend_pullback"]=[i>=200 and ma50[i] is not None and ma200[i] is not None and ma50[i]>ma200[i] and c[i]>ma20[i] and c[i-1]<=ma20[i-1] for i in range(len(c))]
     # Mean reversion only when long-term trend is positive; avoid unconditional falling-knife entries.
     sigs["trend_mean_reversion"]=[i>=200 and c[i]<ma20[i]*0.97 and ma50[i]>ma200[i] for i in range(len(c))]
+    # Five-day moving-average + volume systems. Entry is a confirmed close crossover
+    # with relative volume; the position remains open until a close below MA5.
+    ma5=sma(c,5)
+    vol=[r["volume"] for r in rows]
+    vol20=sma(vol,20)
+    for threshold in (1.0,1.2,1.5,2.0):
+        active=False; state=[]
+        for i in range(len(rows)):
+            if i>=20 and ma5[i] is not None and ma5[i-1] is not None and vol20[i] and vol20[i]>0:
+                entry=(c[i]>ma5[i] and c[i-1]<=ma5[i-1] and vol[i]>=vol20[i]*threshold)
+                if entry: active=True
+                elif c[i]<ma5[i]: active=False
+            state.append(active)
+        sigs[f"ma5_cross_volume_{threshold:.1f}x"]=state
+    # More selective trigger: close above MA5, MA5 rising, and volume expansion;
+    # stay invested until close breaks MA5.
+    active=False; state=[]
+    for i in range(len(rows)):
+        if i>=20 and ma5[i] is not None and ma5[i-1] is not None and vol20[i] and vol20[i]>0:
+            if c[i]>ma5[i] and ma5[i]>ma5[i-1] and vol[i]>=vol20[i]*1.5:
+                active=True
+            elif c[i]<ma5[i]:
+                active=False
+        state.append(active)
+    sigs["ma5_rising_volume_1.5x"]=state
     return sigs,a
 
 def run_backtest(rows, signal, start_idx, end_idx, stop_atr=2.5):
@@ -190,7 +215,7 @@ def main():
             "rows":len(rows),"test_start":rows[first]["date"],"initial_cash":INITIAL_CASH,"fee_rate_each_side":FEE_RATE,
             "sell_tax":SELL_TAX,"slippage_each_side":SLIPPAGE,
             "corporate_action_adjustment":"NOT IMPLEMENTED; raw prices only; dividend/split distortions can affect indicators and returns",
-            "method":"fixed predeclared signals; close-confirmed signal executed at next open; one continuous account from 2013; integer 1,000-share lots; estimated fee, sell tax and slippage",
+            "method":"fixed predeclared signals; close-confirmed signal executed at next open; one continuous account from 2013; whole-share sizing for odd-lot-compatible simulation; estimated fee, sell tax and slippage. MA5+volume variants enter on MA5 close crossover with volume threshold vs 20-session average and hold until close below MA5.",
             "limitations":["No point-in-time fundamentals or institutional flow in this run","No official corporate-action adjustment / dividends; do not interpret as total-return performance","No queue, partial fills, limit-up/down or market-impact model","Parameter candidates are fixed, not optimized on this test interval"],
             "results":results}
     (OUT/"umc2303_research_report.json").write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding="utf-8")
