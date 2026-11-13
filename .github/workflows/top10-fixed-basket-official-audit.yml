@@ -50,6 +50,22 @@ jobs:
           run-id: 43343154492
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: data/top10_actions_twt49u
+      - name: Download official TWSE TWT84U daily price limits
+        uses: actions/download-artifact@v4
+        with:
+          name: twse-official-daily-price-limits
+          repository: ian930719-bot/tw-stock-paper-trader
+          run-id: 43394940710
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: data/twse_official_limits
+      - name: Download official MOPS dividend components
+        uses: actions/download-artifact@v4
+        with:
+          name: mops-official-dividend-component-overrides
+          repository: ian930719-bot/tw-stock-paper-trader
+          run-id: 43411229575
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: data/mops_download
       - name: Collect corrected official TWT49U cash and stock dividend components
         run: |
           python -m py_compile collect_twse_twt49u_corporate_actions.py
@@ -63,6 +79,50 @@ jobs:
           assert s["complete"] and s["tpex"]["exDailyQ_rows"] > 0
           print("TWT49U rows",m["rows"],"unresolved mixed actions",m["unresolved_action_component_events"],
                 "special events",s["rows"],"TPEx events",s["tpex"]["exDailyQ_rows"])
+          PY
+      - name: Attach official TWSE price limits and MOPS component checkpoints
+        run: |
+          python - <<'PY'
+          import hashlib,json,shutil
+          from pathlib import Path
+          import pandas as pd
+          root=Path("data/top10_official_raw/bars")
+          limit_path=next(Path("data/twse_official_limits").rglob("twse_twt84u_limits.csv"))
+          limits=pd.read_csv(limit_path,dtype={"stock_id":str})
+          limits["symbol"]=limits.stock_id.astype(str).str.strip()
+          limits["date"]=pd.to_datetime(limits.date,errors="coerce").dt.strftime("%Y-%m-%d")
+          limits=limits[["date","symbol","official_limit_up","official_reference_price","official_limit_down"]]
+          if limits.duplicated(["date","symbol"]).any():
+              raise RuntimeError("Duplicate official TWT84U date/symbol keys")
+          manifest={"source":"TWSE official TWT84U","limits_rows":len(limits),"symbols":int(limits.symbol.nunique()),
+                    "files":[],"missing_traded_rows_after_2015":0}
+          for path in sorted(root.glob("*.csv")):
+              raw=pd.read_csv(path,dtype={"symbol":str})
+              raw["symbol"]=raw.symbol.astype(str).str.strip()
+              raw["date"]=pd.to_datetime(raw.date,errors="coerce").dt.strftime("%Y-%m-%d")
+              if "official_limit_up" in raw:
+                  raw=raw.drop(columns=["official_limit_up","official_reference_price","official_limit_down"])
+              merged=raw.merge(limits,on=["date","symbol"],how="left",validate="one_to_one")
+              volume=pd.to_numeric(merged.volume,errors="coerce").fillna(0)
+              strict=merged.date.ge("2015-01-01") & (volume>0)
+              missing=merged.loc[strict & (merged.official_limit_up.isna() | merged.official_limit_down.isna() | merged.official_reference_price.isna()),"date"].tolist()
+              if missing:
+                  raise RuntimeError(f"{path.stem}: missing official TWT84U limits on {len(missing)} traded sessions; first={missing[:5]}")
+              merged.to_csv(path,index=False)
+              manifest["files"].append({"symbol":path.stem,"rows":len(merged),"sha256":hashlib.sha256(path.read_bytes()).hexdigest()})
+              manifest["missing_traded_rows_after_2015"]+=len(missing)
+          manifest["complete"]=manifest["missing_traded_rows_after_2015"]==0
+          Path("data/twse_official_limits/fixed_basket_join_manifest.json").write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding="utf-8")
+          mops=Path("data/mops_download")
+          override=next(mops.rglob("official_dividend_component_overrides.csv"))
+          shutil.copy2(override,"data/official_dividend_component_overrides.csv")
+          component=next(mops.rglob("mops_dividend_components.csv"))
+          target=Path("data/mops_dividend_reconciliation");target.mkdir(parents=True,exist_ok=True)
+          shutil.copy2(component,target/"mops_dividend_components.csv")
+          mmanifest=next(mops.rglob("manifest.json"))
+          shutil.copy2(mmanifest,target/"manifest.json")
+          print(json.dumps(manifest,ensure_ascii=False,indent=2))
+          print("MOPS official component rows",sum(1 for _ in (target/"mops_dividend_components.csv").open(encoding="utf-8"))-1)
           PY
       - name: Upload official dividend and corporate-action checkpoint
         uses: actions/upload-artifact@v4
@@ -96,6 +156,9 @@ jobs:
           name: top10-fixed-basket-official-audit
           path: |
             data/top10_actions_twt49u/
+            data/twse_official_limits/
+            data/official_dividend_component_overrides.csv
+            data/mops_dividend_reconciliation/
             artifacts/top10_fixed_basket/
           if-no-files-found: error
           retention-days: 30
