@@ -23,14 +23,14 @@ def rocdate(value):
     if value is None or pd.isna(value): return None
     s=str(value).strip()
     if not s: return None
-    m=re.search(r"(\\d{2,3})[./-](\\d{1,2})[./-](\\d{1,2})",s)
+    m=re.search(r"(\d{2,3})[./-](\d{1,2})[./-](\d{1,2})",s)
     if not m: return None
     year=int(m.group(1))+1911
     return f"{year:04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
 
 def number(value):
     if value is None or pd.isna(value): return 0.0
-    m=re.search(r"[-+]?\\d+(?:\\.\\d+)?",str(value).replace(",",""))
+    m=re.search(r"[-+]?\d+(?:\.\d+)?",str(value).replace(",",""))
     return float(m.group(0)) if m else 0.0
 
 def par_value(value):
