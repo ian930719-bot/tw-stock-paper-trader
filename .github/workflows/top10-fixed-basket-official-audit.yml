@@ -12,7 +12,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: top10-fixed-basket-official-audit
+  group: top10-fixed-basket-official-audit-v2
   cancel-in-progress: false
 
 jobs:
@@ -48,7 +48,7 @@ jobs:
       - name: Collect complete official TWSE TWT49U dividend reference data
         run: |
           python -m py_compile collect_twse_twt49u_corporate_actions.py
-          python collect_twse_twt49u_corporate_actions.py --start-date 2010-01-04 --end-date 2026-11-12 --output data/top10_actions_twt49u
+          python collect_twse_twt49u_corporate_actions.py --start-date 2014-01-01 --end-date 2026-11-12 --output data/top10_actions_twt49u
           python - <<'PY'
           import json
           from pathlib import Path
