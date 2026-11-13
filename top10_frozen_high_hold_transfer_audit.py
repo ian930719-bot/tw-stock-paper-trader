@@ -467,6 +467,20 @@ def main():
      abs(deltas[1])<=5.0 and abs(deltas[2])<=1 and abs(deltas[3])<=1.0)
     pd.DataFrame(rep["trades"]).to_csv(out/"tsmc_2330_universe_free_reproduction_trades_10bps.csv",index=False)
     pd.DataFrame(rep["equity_curve"]).to_csv(out/"tsmc_2330_universe_free_reproduction_equity_10bps.csv",index=False)
+   # Drawdown overlay experiment: baseline is retained unchanged; each ATR
+   # trail is close-confirmed and filled no earlier than the next session open.
+   if not use_universe_filter or stock_id_map[symbol]=="2330":
+    for atr_multiple in (2.0,2.5,3.0,3.5,4.0,5.0):
+     overlay=simulate(d,low,high,risk,limits,cashdiv,10,start,end,
+       high_hold_signal=hold,share_adjustments=share_adjustments,
+       trailing_atr_multiple=atr_multiple)
+     om={k:v for k,v in overlay.items() if k not in {"trades","equity_curve"}}
+     rows.append({"symbol":symbol,"stock_id":stock_id_map[symbol],"market":market_map[symbol],
+       "name":name_map.get(symbol,NAMES.get(stock_id_map[symbol],symbol)),
+       "variant":"atr_trailing_stop_overlay","slippage_bps":10,**om})
+     if atr_multiple==3.0:
+      pd.DataFrame(overlay["trades"]).to_csv(out/f"trades_{symbol}_atr3_10bps.csv",index=False)
+      pd.DataFrame(overlay["equity_curve"]).to_csv(out/f"equity_{symbol}_atr3_10bps.csv",index=False)
    for slip in SLIPPAGE_BPS:
     sim=simulate(d,low,high,risk,limits,cashdiv,slip,start,end,high_hold_signal=hold,share_adjustments=share_adjustments)
     if slip==10:
