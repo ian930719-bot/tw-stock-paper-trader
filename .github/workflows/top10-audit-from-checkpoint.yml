@@ -6,6 +6,7 @@ on:
     paths:
       - .github/workflows/top10-audit-from-checkpoint.yml
       - top10_frozen_high_hold_transfer_audit.py
+      - analyze_top10_false_signals.py
       - tsmc_2330_4019_replication.py
       - corporate_action_adjustments.py
   workflow_dispatch:
@@ -107,6 +108,12 @@ jobs:
           if r["symbols_completed"] == 0:
               raise SystemExit("No point-in-time top-ten constituent passed official-data gates.")
           PY
+      - name: Analyze pooled causal false-signal features with chronological holdout
+        run: |
+          python -m py_compile analyze_top10_false_signals.py
+          python analyze_top10_false_signals.py \
+            --trades artifacts/top10_full_official_audit/trade_feature_diagnostics_10bps.csv \
+            --output artifacts/top10_full_official_audit/false_signal_analysis
       - name: Upload full official top-ten audit results
         uses: actions/upload-artifact@v4
         with:
