@@ -5,13 +5,19 @@ on:
     branches: [research/top10-official-ohlcv-baseline-audit]
     paths:
       - .github/workflows/top10-complete-official-audit.yml
+      - collect_twse_historical_daily_top10.py
+      - collect_twse_twt49u_corporate_actions.py
+      - collect_twse_special_corporate_actions.py
+      - collect_tpex_corporate_actions.py
+      - top10_frozen_high_hold_transfer_audit.py
+      - corporate_action_adjustments.py
   workflow_dispatch:
 
 permissions:
   contents: read
   actions: read
 concurrency:
-  group: top10-complete-official-audit
+  group: top10-complete-official-audit-v2
   cancel-in-progress: false
 
 jobs:
@@ -40,10 +46,24 @@ jobs:
         run: |
           python -m py_compile collect_twse_historical_daily_top10.py
           python collect_twse_historical_daily_top10.py --raw-bars data/top10_official_raw/bars --output data/twse_marketwide_turnover --pause 0.2
+      - name: Upload point-in-time universe checkpoint
+        uses: actions/upload-artifact@v4
+        with:
+          name: top10-point-in-time-universe-checkpoint
+          path: data/twse_marketwide_turnover/
+          if-no-files-found: error
+          retention-days: 30
       - name: Collect all official TWT49U corporate actions
         run: |
           python -m py_compile collect_twse_twt49u_corporate_actions.py
           python collect_twse_twt49u_corporate_actions.py --start-date 2010-01-01 --end-date 2026-11-12 --output data/top10_actions_twt49u
+      - name: Upload TWT49U corporate-action checkpoint
+        uses: actions/upload-artifact@v4
+        with:
+          name: top10-twt49u-actions-checkpoint
+          path: data/top10_actions_twt49u/
+          if-no-files-found: error
+          retention-days: 30
       - name: Collect all official TWTAUU and TWTB8U special events
         run: |
           python -m py_compile collect_twse_special_corporate_actions.py
