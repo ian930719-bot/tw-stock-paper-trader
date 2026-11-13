@@ -64,6 +64,8 @@ jobs:
                   Path("mops_t108sb27_sii_2015.html").write_text(text,encoding="utf-8")
                 elif name=="t108sb27_all_otc_2015":
                   Path("mops_t108sb27_otc_2015.html").write_text(text,encoding="utf-8")
+                elif name.startswith("t108sb27_sii_"):
+                  Path(name+".html").write_text(text,encoding="utf-8")
                 if "FOR SECURITY REASONS" in text or "因為安全性考量" in text:
                   errors.append({"url":r.url,"error":"MOPS security interstitial; trying alternate host"})
                   continue
@@ -86,6 +88,19 @@ jobs:
             "step":"1","firstin":"true","off":"1","TYPEK":"otc","co_id_1":"","co_id_2":"",
             "year":"104","month":"","b_date":"","e_date":"","type":"1","rulesubmit2":"搜尋"
           })
+          # Targeted issuer queries for the remaining top-ten unresolved mixed events.
+          # These are diagnostic only: no values are accepted into the accounting
+          # overrides unless the full reference-price reconciliation succeeds.
+          for code,roc_year in [
+            ("2888","104"),("2888","107"),("2888","110"),
+            ("2892","104"),("5880","105")
+          ]:
+            time.sleep(1)
+            probe(f"t108sb27_sii_{code}_{roc_year}","/mops/web/ajax_t108sb27","GET",params={
+              "step":"1","firstin":"true","off":"1","TYPEK":"sii",
+              "co_id_1":code,"co_id_2":code,"year":roc_year,"month":"",
+              "b_date":"","e_date":"","type":"1","rulesubmit2":"搜尋"
+            })
           for name,url in [
             ("twse_openapi_json","https://openapi.twse.com.tw/v1/opendata/t187ap45_L"),
             ("mopsfin_csv","https://mopsfin.twse.com.tw/opendata/t187ap45_L.csv"),
@@ -115,4 +130,5 @@ jobs:
             mops_t05st09_1727_103.html
             mops_t108sb27_sii_2015.html
             mops_t108sb27_otc_2015.html
+            t108sb27_sii_*.html
           retention-days: 30
