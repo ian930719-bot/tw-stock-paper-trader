@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from top10_frozen_high_hold_transfer_audit import (
-    read_events, build_limits, make_features, hold_gate,
+    read_events, build_limits, make_features, hold_gate, align_action_entitlements_to_traded_sessions,
     run_shared_capital_portfolio, annual_metrics,
 )
 from tsmc_2330_4019_replication import build_candidate_signals, INITIAL_CAPITAL, SLIPPAGE_BPS
@@ -67,6 +67,7 @@ def main():
             if raw_full.empty: raise RuntimeError("empty official raw history")
             ev,cashdiv,refs,event_limits,share_adjustments=read_events(
                 a.actions,sym,stock_map[sym],market_map[sym],accounting_start_date="2022-01-01")
+            cashdiv,share_adjustments=align_action_entitlements_to_traded_sessions(raw_full,cashdiv,share_adjustments)
             limits=build_limits(raw_full,refs,event_limits,sym,strict_from="2022-01-01")
             raw=raw_full.dropna(subset=["open","high","low","close"]).copy()
             raw=raw[raw.volume>0].reset_index(drop=True)
