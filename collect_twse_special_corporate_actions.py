@@ -30,6 +30,8 @@ def get(session,dataset,year,start,end):
  params={"response":"json","strDate":start.replace("-",""),"endDate":end.replace("-","")}
  r=session.get(url,params=params,timeout=(15,120),headers={"User-Agent":"Mozilla/5.0"});r.raise_for_status()
  j=r.json()
+ if isinstance(j,dict) and "stat" in j and ("查無資料" in str(j.get("stat")) or "沒有符合條件" in str(j.get("stat"))):
+  return {"fields":[],"data":[],"stat":j.get("stat")}
  if not isinstance(j,dict) or not isinstance(j.get("fields"),list) or not isinstance(j.get("data"),list):
   raise RuntimeError(f"{dataset} {year} invalid payload {str(j)[:500]}")
  return j
