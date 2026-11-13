@@ -1,0 +1,73 @@
+name: TPEx Official Next-Day Price-Limit Probe
+
+on:
+  push:
+    branches: [research/top10-official-ohlcv-baseline-audit]
+    paths:
+      - .github/workflows/tpex-next-day-limit-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Query TPEx official dated daily quote records
+        run: |
+          python - <<'PY'
+          import json, re, time
+          from pathlib import Path
+          from urllib.parse import urlencode
+          from urllib.request import Request, urlopen
+          from html import unescape
+          dates = [
+            "2018/10/23", "2018/10/24", "2018/10/25",
+            "2018/10/31", "2018/11/01", "2018/11/02",
+            "2019/09/11", "2019/09/12", "2019/09/16",
+          ]
+          def norm(v):
+            return re.sub(r"\\s+", "", unescape(re.sub(r"<[^>]*>", "", str(v or ""))))
+          out=[]
+          for day in dates:
+            url="https://www.tpex.org.tw/www/zh-tw/afterTrading/otc?"+urlencode({
+              "date":day,"type":"EW","response":"json"
+            })
+            req=Request(url,headers={"User-Agent":"Mozilla/5.0","Accept":"application/json"})
+            with urlopen(req,timeout=45) as response:
+              payload=json.loads(response.read().decode("utf-8"))
+            tables=payload.get("tables") or []
+            table=None
+            for t in tables:
+              fields=[norm(x) for x in t.get("fields",[])]
+              if any(x in fields for x in ("代號","股票代號","證券代號")):
+                table=t;break
+            if table is None and isinstance(payload.get("fields"),list):
+              table={"fields":payload["fields"],"data":payload.get("data",[])}
+            if table is None:
+              raise RuntimeError(f"{day}: TPEx quote table missing; keys={list(payload)}")
+            fields=[norm(x) for x in table.get("fields",[])]
+            idx=next((i for i,x in enumerate(fields) if x in ("代號","股票代號","證券代號")),None)
+            if idx is None: raise RuntimeError(f"{day}: stock-code field missing: {fields}")
+            row=next((r for r in table.get("data",[]) if norm(r[idx])=="5314"),None)
+            record={"date":day,"fields":fields,"row":row}
+            if row is not None:
+              record["mapped"]={fields[i]:row[i] for i in range(min(len(fields),len(row)))}
+            out.append(record)
+            print(json.dumps(record,ensure_ascii=False))
+            time.sleep(0.4)
+          Path("tpex_next_day_limits_probe.json").write_text(
+            json.dumps(out,ensure_ascii=False,indent=2),encoding="utf-8")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tpex-next-day-limits-probe
+          path: tpex_next_day_limits_probe.json
+          retention-days: 30
