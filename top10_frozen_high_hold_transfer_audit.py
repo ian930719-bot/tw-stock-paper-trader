@@ -321,7 +321,13 @@ def main():
      "win_rate_delta_pp":(rep_metrics.get("win_rate")-expected["win_rate"])*100 if rep_metrics.get("win_rate") is not None else None,
      "trade_count_delta":rep_metrics.get("trade_count")-expected["trade_count"] if rep_metrics.get("trade_count") is not None else None,
      "max_drawdown_delta_pp":(rep_metrics.get("max_drawdown")-expected["max_drawdown"])*100 if rep_metrics.get("max_drawdown") is not None else None}
+    tsmc_reproduction["matches_benchmark_within_tolerance"]=bool(
+     abs(tsmc_reproduction["cagr_delta_pp"] or 999)<=1.0 and
+     abs(tsmc_reproduction["win_rate_delta_pp"] or 999)<=5.0 and
+     abs(tsmc_reproduction["trade_count_delta"] or 999)<=1 and
+     abs(tsmc_reproduction["max_drawdown_delta_pp"] or 999)<=1.0)
     pd.DataFrame(rep["trades"]).to_csv(out/"tsmc_2330_universe_free_reproduction_trades_10bps.csv",index=False)
+    pd.DataFrame(rep["equity_curve"]).to_csv(out/"tsmc_2330_universe_free_reproduction_equity_10bps.csv",index=False)
    for slip in SLIPPAGE_BPS:
     sim=simulate(d,low,high,risk,limits,cashdiv,slip,start,end,high_hold_signal=hold)
     m={k:v for k,v in sim.items() if k not in {"trades","equity_curve"}}
