@@ -63,6 +63,21 @@ jobs:
             gh run download 43357713305 --repo ian930719-bot/tw-stock-paper-trader \
               --name "top10-point-in-time-year-${year}" --dir "data/year_${year}"
           done
+      - name: Wait for refreshed official corporate-action checkpoint
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 240); do
+            count=$(gh api repos/ian930719-bot/tw-stock-paper-trader/actions/runs/43376383063/artifacts --jq '[.artifacts[] | select(.expired==false) | select(.name=="top10-fixed-basket-corporate-actions")] | length')
+            if [ "$count" -gt 0 ]; then
+              echo "Refreshed official corporate-action checkpoint is available."
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "Timed out waiting for refreshed official corporate-action checkpoint."
+          exit 1
       - name: Download verified official corporate-action checkpoint
         uses: actions/download-artifact@v4
         with:
