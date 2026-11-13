@@ -62,7 +62,7 @@ def get(session,dataset,year,start,end):
 
 def main():
  p=argparse.ArgumentParser();p.add_argument("--start-date",default="2011-01-01");p.add_argument("--end-date",default="2026-11-12");p.add_argument("--output",default="data/top10_actions_twt49u");a=p.parse_args()
- s=requests.Session();allrows=[];schemas={}
+ s=requests.Session();allrows=[];schemas={};skipped_periods=[]
  for dataset,kind in [("TWTAUU","capital_reduction"),("TWTB8U","par_value_change")]:
   rows=[];schema=[]
   periods=[(a.start_date,a.end_date)]
@@ -79,6 +79,7 @@ def main():
     except Exception as year_error:
      if y==2011:
       print(f"[NO 2011 ROWSET] {dataset}: {year_error}",flush=True)
+      skipped_periods.append({"dataset":dataset,"year":y,"reason":str(year_error)})
       continue
      raise
   for j,lo,hi in batches:
@@ -115,7 +116,7 @@ def main():
  frame.to_csv(out/"special_events.csv",index=False)
  m={"source":"TWSE official TWTAUU/TWTB8U","collected_at_taipei":datetime.now(ZoneInfo("Asia/Taipei")).isoformat(),
   "requested_period":[a.start_date,a.end_date],"rows":len(frame),"events_by_type":frame.event_type.value_counts().to_dict() if len(frame) else {},
-  "complete":True,"schemas":schemas,"note":"Empty response for a year is accepted only when endpoint returns a valid JSON schema and empty data list."}
+  "complete":len(skipped_periods)==0,"skipped_periods":skipped_periods,"schemas":schemas,"note":"Empty response for a year is accepted only when endpoint returns a valid JSON schema and empty data list."}
  (out/"special_events_manifest.json").write_text(json.dumps(m,ensure_ascii=False,indent=2),encoding="utf-8")
  print(json.dumps({k:v for k,v in m.items() if k!="schemas"},ensure_ascii=False,indent=2))
 if __name__=="__main__":main()
