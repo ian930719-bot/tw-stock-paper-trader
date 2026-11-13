@@ -1,0 +1,35 @@
+name: Probe TPEx Official Daily Quote Fallback
+
+on:
+  push:
+    branches: [research/top10-official-ohlcv-baseline-audit]
+    paths:
+      - .github/workflows/tpex-daily-quote-fallback.yml
+      - probe_tpex_daily_quote_fallback.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pandas requests
+      - name: Retrieve exact official fallback fields for TPEx 4147
+        run: |
+          python -m py_compile probe_tpex_daily_quote_fallback.py
+          python probe_tpex_daily_quote_fallback.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tpex-missing-limit-fallback
+          path: artifacts/tpex_missing_limit_fallback/
+          if-no-files-found: error
+          retention-days: 30
