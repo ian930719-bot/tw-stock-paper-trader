@@ -375,13 +375,20 @@ def main():
    "max_drawdown_25pct_pass":bool(shared_portfolio.get("max_drawdown") is not None and shared_portfolio["max_drawdown"]>=-.25),
    "universe_coverage_99pct_pass":bool(shared_portfolio.get("complete_universe_day_ratio",0)>=.99)}
   target_assessment["all_targets_and_coverage_pass"]=all(target_assessment.values())
+ data_provenance={}
+ if universe_path.exists():
+  mp=universe_path.parent/"manifest.json"
+  if mp.exists():data_provenance["daily_top10_universe"]=json.loads(mp.read_text(encoding="utf-8"))
+ for label,filename in (("twse_twt49u","manifest.json"),("twse_tpex_special_events","special_events_manifest.json")):
+  mp=Path(a.actions)/filename
+  if mp.exists():data_provenance[label]=json.loads(mp.read_text(encoding="utf-8"))
  result={"classification":"FIXED_TSMC_RULE_TRANSFER_AUDIT_DAILY_TOP10_VOLUME_UNIVERSE",
   "period":"2015 onward through last official raw bar","symbols_expected":len(symbols),
   "symbols_completed":len(set(x["symbol"] for x in rows)),"blocked":blocked,
   "costs":{"commission_per_side":.001425,"minimum_commission_ntd":20,"sell_tax":.003,"slippage_bps":list(SLIPPAGE_BPS)},
   "target":{"cagr_min":.50,"win_rate_min":.8695652173913043,"max_drawdown_floor":-.25},
   "status":"COMPLETE" if len(set(x["symbol"] for x in rows))==len(symbols) and not blocked else "BLOCKED_OR_PARTIAL",
-  "metrics":rows,"tsmc_2330_universe_free_reproduction":tsmc_reproduction,"shared_capital_portfolio":shared_portfolio,"target_assessment":target_assessment,"rules":RULES,
+  "data_provenance":data_provenance,"metrics":rows,"tsmc_2330_universe_free_reproduction":tsmc_reproduction,"shared_capital_portfolio":shared_portfolio,"target_assessment":target_assessment,"rules":RULES,
   "notes":["No per-symbol parameter tuning; frozen TSMC rule family only.",
    "Entry eligibility uses the official same-day closing traded-share top ten; signals are known after close and orders execute no earlier than the next session.",
    "Raw official TWSE MI_INDEX and TPEx afterTrading/otc OHLC used for fills; exchange-specific corporate-action back-adjustment used for signal indicators.",
