@@ -1,61 +1,95 @@
-"""Fallback verification for missing TPEx next-session price-limit rows.
-
-Source is the official TPEx historical Daily Stock Quotes page. It exposes
-next-day reference price, next-day upper limit and next-day lower limit.
-This script only fills an explicitly listed missing key; it does not calculate
-or reconstruct any limit prices.
-"""
+"""Probe official TPEx historical daily-quote routes for a missing limit row."""
 from __future__ import annotations
-import json, hashlib
+import json,hashlib
 from pathlib import Path
-import requests
+import requests,pandas as pd
 
 CASES=[{"date":"2015-11-23","roc_date":"104/11/23","stock_id":"4147"}]
-URL="https://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_result.php"
+LEGACY="https://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_result.php"
+ROUTES=[
+ ("legacy_roc_d",LEGACY,{"l":"zh-tw","o":"json","d":"104/11/23","s":"0,asc,0"}),
+ ("legacy_ad_d",LEGACY,{"l":"zh-tw","o":"json","d":"2015/11/23","s":"0,asc,0"}),
+ ("legacy_compact_d",LEGACY,{"l":"zh-tw","o":"json","d":"20151123","s":"0,asc,0"}),
+ ("legacy_date",LEGACY,{"l":"zh-tw","o":"json","date":"2015/11/23","s":"0,asc,0"}),
+ ("new_daily_quotes","https://www.tpex.org.tw/www/zh-tw/afterTrading/dailyQuotes",{"date":"2015/11/23","type":"EW","response":"json"}),
+ ("openapi_iso","https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes",{"date":"2015-11-23"}),
+ ("openapi_compact","https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes",{"date":"20151123"}),
+ ("openapi_roc","https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes",{"date":"104/11/23"}),
+]
+
+def extract(payload,code):
+    candidates=[]
+    if isinstance(payload,dict):
+        if isinstance(payload.get("aaData"),list): candidates.extend(payload["aaData"])
+        for table in payload.get("tables",[]) if isinstance(payload.get("tables"),list) else []:
+            if isinstance(table,dict) and isinstance(table.get("data"),list):
+                candidates.extend(table["data"])
+        if isinstance(payload.get("data"),list): candidates.extend(payload["data"])
+    elif isinstance(payload,list):
+        candidates.extend(payload)
+    out=[]
+    for row in candidates:
+        if isinstance(row,dict):
+            codev=str(row.get("代號",row.get("Code",row.get("stock_id","")))).strip()
+            if codev==code:out.append(row)
+        elif isinstance(row,(list,tuple)) and len(row)>=19 and str(row[0]).strip()==code:
+            out.append(row)
+    return out
 
 def main():
-    session=requests.Session()
-    session.headers.update({
-      "User-Agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36",
-      "Accept":"application/json,text/plain,*/*",
-      "Referer":"https://www.tpex.org.tw/zh-tw/mainboard/trading/info/pricing.html"
-    })
-    rows=[];raw={}
+    s=requests.Session()
+    s.headers.update({"User-Agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36",
+      "Accept":"application/json,text/plain,*/*","Referer":"https://www.tpex.org.tw/zh-tw/mainboard/trading/info/pricing.html"})
+    probes=[];resolved=[]
     for case in CASES:
-        params={"l":"zh-tw","o":"json","d":case["roc_date"],"s":"0,asc,0"}
-        response=session.get(URL,params=params,timeout=(15,90))
-        response.raise_for_status()
-        payload=response.json()
-        raw[case["date"]]=payload
-        data=payload.get("aaData")
-        if not isinstance(data,list):
-            raise RuntimeError(f"TPEx historical daily quotes missing aaData for {case['date']}: {str(payload)[:1000]}")
-        matches=[r for r in data if len(r)>=19 and str(r[0]).strip()==case["stock_id"]]
-        if len(matches)!=1:
-            raise RuntimeError(f"Expected one TPEx official daily quote row for {case['stock_id']} on {case['date']}; got {len(matches)}")
-        r=matches[0]
-        ref,up,down=[float(str(r[i]).replace(",","")) for i in (16,17,18)]
-        if min(ref,up,down)<=0:
-            raise RuntimeError(f"Invalid official TPEx next-day price fields for {case}: {r}")
-        rows.append({
-          "source_date":case["date"],"stock_id":case["stock_id"],
-          "next_day_reference_price":ref,"next_day_limit_up":up,"next_day_limit_down":down,
-          "source":"TPEx official historical Daily Stock Quotes (stk_quote_result.php)",
-          "source_url":response.url
-        })
-    import pandas as pd
+      for name,url,params in ROUTES:
+        try:
+          r=s.get(url,params=params,timeout=(10,45))
+          r.raise_for_status()
+          try:payload=r.json()
+          except Exception:payload={"text":r.text[:2000]}
+          matches=extract(payload,case["stock_id"])
+          fields=[]
+          if isinstance(payload,dict):
+            if payload.get("tables") and isinstance(payload["tables"],list) and isinstance(payload["tables"][0],dict):
+              fields=payload["tables"][0].get("fields",[])
+            else:fields=payload.get("fields",[])
+          record={"case":case,"route":name,"url":r.url,"status":r.status_code,
+             "payload_keys":list(payload.keys()) if isinstance(payload,dict) else None,
+             "payload_date":payload.get("date") if isinstance(payload,dict) else None,
+             "table_fields":fields,"match_count":len(matches),
+             "sample_match":matches[0] if matches else None}
+          probes.append(record)
+          if len(matches)==1:
+            row=matches[0]
+            if isinstance(row,dict):
+              def getv(*keys):
+                for k in keys:
+                  if k in row:return row[k]
+                return None
+              ref=getv("次日 參考價","次日參考價","next_day_reference_price")
+              up=getv("次日 漲停價","次日漲停價","next_day_limit_up")
+              down=getv("次日 跌停價","次日跌停價","next_day_limit_down")
+            else:ref,up,down=row[16],row[17],row[18]
+            def num(v):
+              return float(str(v).replace(",","").strip()) if v not in (None,"","--","-") else None
+            ref,up,down=map(num,(ref,up,down))
+            if all(v is not None and v>0 for v in (ref,up,down)):
+              resolved.append({"source_date":case["date"],"stock_id":case["stock_id"],
+                "next_day_reference_price":ref,"next_day_limit_up":up,"next_day_limit_down":down,
+                "source":f"TPEx official historical daily quote fallback ({name})","source_url":r.url})
+        except Exception as e:
+          probes.append({"case":case,"route":name,"url":url,"error":str(e)})
     out=Path("artifacts/tpex_missing_limit_fallback");out.mkdir(parents=True,exist_ok=True)
-    csv=out/"tpex_missing_limit_fallback.csv"
-    pd.DataFrame(rows).to_csv(csv,index=False)
-    (out/"raw_probe.json").write_text(json.dumps(raw,ensure_ascii=False,indent=2),encoding="utf-8")
-    manifest={
-      "source":"TPEx official historical Daily Stock Quotes",
-      "endpoint":URL,"rows":len(rows),"cases":CASES,
-      "complete":len(rows)==len(CASES),
-      "sha256":hashlib.sha256(csv.read_bytes()).hexdigest(),
-      "note":"Exact official next-day quote fields; no formula-derived price limits."
-    }
+    (out/"probe_results.json").write_text(json.dumps(probes,ensure_ascii=False,indent=2),encoding="utf-8")
+    pd.DataFrame(resolved,columns=["source_date","stock_id","next_day_reference_price","next_day_limit_up","next_day_limit_down","source","source_url"]).drop_duplicates(["source_date","stock_id"]).to_csv(out/"tpex_missing_limit_fallback.csv",index=False)
+    manifest={"source":"TPEx official historical daily quotes","cases":CASES,"probe_attempts":len(probes),
+      "resolved_rows":len(resolved),"complete":len(resolved)==len(CASES),
+      "sha256":hashlib.sha256((out/"tpex_missing_limit_fallback.csv").read_bytes()).hexdigest(),
+      "note":"Only official published next-day quote fields are accepted; no price-limit formula reconstruction.",
+      "probes":probes}
     (out/"manifest.json").write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding="utf-8")
-    print(json.dumps({"manifest":manifest,"rows":rows},ensure_ascii=False,indent=2))
+    print(json.dumps({"complete":manifest["complete"],"resolved_rows":resolved,
+      "probes":[{k:v for k,v in p.items() if k not in {"sample_match"}} for p in probes]},ensure_ascii=False,indent=2))
 
 if __name__=="__main__":main()
