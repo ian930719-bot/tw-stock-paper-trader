@@ -437,7 +437,7 @@ def main():
      for annual_row in annual_metrics(sim["equity_curve"],sim["trades"],INITIAL_CAPITAL):
       annual_rows.append({"symbol":symbol,"stock_id":stock_id_map[symbol],"market":market_map[symbol],"name":name_map.get(symbol,symbol),**annual_row})
     m={k:v for k,v in sim.items() if k not in {"trades","equity_curve"}}
-    row_out={"symbol":symbol,"stock_id":stock_id_map[symbol],"market":market_map[symbol],"name":name_map.get(symbol,NAMES.get(stock_id_map[symbol],str(raw.name.iloc[0]) if "name" in raw else symbol)),"variant":"frozen_high_hold_dynamic_top10_entry_filter","slippage_bps":slip,"top10_active_days":int(active_mask.sum()),"low_signal_days_after_universe_filter":int(low.sum()),**m}
+    row_out={"symbol":symbol,"stock_id":stock_id_map[symbol],"market":market_map[symbol],"name":name_map.get(symbol,NAMES.get(stock_id_map[symbol],str(raw.name.iloc[0]) if "name" in raw else symbol)),"variant":"frozen_high_hold_dynamic_top10_entry_filter","slippage_bps":slip,"share_adjustment_events":int(len(share_adjustments)),"top10_active_days":int(active_mask.sum()),"low_signal_days_after_universe_filter":int(low.sum()),**m}
     row_out["cagr_pass_50pct"]=bool(row_out.get("cagr_mark_to_market") is not None and row_out["cagr_mark_to_market"]>=.50)
     row_out["win_rate_pass_floor"]=bool(row_out.get("win_rate_completed_only") is not None and row_out["win_rate_completed_only"]>=.8695652173913043)
     row_out["drawdown_pass_25pct"]=bool(row_out.get("max_drawdown") is not None and row_out["max_drawdown"]>=-.25)
@@ -491,6 +491,7 @@ def main():
    "Raw official TWSE MI_INDEX and TPEx afterTrading/otc OHLC used for fills; exchange-specific corporate-action back-adjustment used for signal indicators.",
    "TWSE TWT49U covers ex-rights/ex-dividend events from 2010 and TPEx exDailyQ from 2014 (the required 200-session warmup window); TWSE TWTAUU/TWTB8U and TPEx revivt cover special resumption events from 2011/2013; performance measurement begins 2015.",
    "Any missing action data, missing limit reference, or OHLC-limit conflict blocks that symbol. The shared-capital portfolio also skips new entries when any daily top-ten constituent is unaudited.",
+  "Post-2015 stock dividends are modeled as share multipliers derived from official prior close, cash dividend, and ex-right reference price; fractional share entitlements are rounded down conservatively. Post-2015 loss-recovery capital reductions and par-value changes use official reference-price-derived share ratios; cash-refund reductions remain blocked until refund and share-ratio details are modeled.",
    "Single-symbol results are independent NT$100,000 per-stock transfer tests; shared_capital_portfolio is a separate one-position shared-NT$100,000 account."]}
  (out/"report.json").write_text(json.dumps(result,ensure_ascii=False,indent=2,default=float),encoding="utf-8")
  pd.DataFrame(rows).to_csv(out/"metrics.csv",index=False)
