@@ -58,6 +58,13 @@ jobs:
           assert s["complete"]
           print("TWT49U rows",m["rows"],"special events",s["rows"],"TPEx events",s["tpex"]["exDailyQ_rows"])
           PY
+      - name: Upload official dividend and corporate-action checkpoint
+        uses: actions/upload-artifact@v4
+        with:
+          name: top10-fixed-basket-corporate-actions
+          path: data/top10_actions_twt49u/
+          if-no-files-found: error
+          retention-days: 30
       - name: Run frozen high-hold strategy on the ten-stock fixed basket
         run: |
           python -m py_compile top10_frozen_high_hold_transfer_audit.py
