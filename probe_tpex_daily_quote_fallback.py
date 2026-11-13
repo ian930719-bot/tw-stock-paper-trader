@@ -4,17 +4,19 @@ import json,hashlib
 from pathlib import Path
 import requests,pandas as pd
 
-CASES=[{"date":"2015-11-23","roc_date":"104/11/23","stock_id":"4147"}]
-LEGACY="https://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_result.php"
+CASES=[
+ {"date":"2015-11-23","roc_date":"104/11/23","stock_id":"4147"},
+ {"date":"2015-11-24","roc_date":"104/11/24","stock_id":"4147"},
+ {"date":"2015-11-25","roc_date":"104/11/25","stock_id":"4147"},
+ {"date":"2015-11-26","roc_date":"104/11/26","stock_id":"4147"},
+ {"date":"2015-11-27","roc_date":"104/11/27","stock_id":"4147"},
+]
 ROUTES=[
- ("legacy_roc_d",LEGACY,{"l":"zh-tw","o":"json","d":"104/11/23","s":"0,asc,0"}),
- ("legacy_ad_d",LEGACY,{"l":"zh-tw","o":"json","d":"2015/11/23","s":"0,asc,0"}),
- ("legacy_compact_d",LEGACY,{"l":"zh-tw","o":"json","d":"20151123","s":"0,asc,0"}),
- ("legacy_date",LEGACY,{"l":"zh-tw","o":"json","date":"2015/11/23","s":"0,asc,0"}),
- ("new_daily_quotes","https://www.tpex.org.tw/www/zh-tw/afterTrading/dailyQuotes",{"date":"2015/11/23","type":"EW","response":"json"}),
- ("openapi_iso","https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes",{"date":"2015-11-23"}),
- ("openapi_compact","https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes",{"date":"20151123"}),
- ("openapi_roc","https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes",{"date":"104/11/23"}),
+ ("new_daily_quotes","https://www.tpex.org.tw/www/zh-tw/afterTrading/dailyQuotes",{"type":"EW","response":"json"}),
+ ("no_limit_page","https://www.tpex.org.tw/www/zh-tw/afterTrading/noLimit",{"type":"EW","response":"json"}),
+ ("ipo_no_limit_page","https://www.tpex.org.tw/www/zh-tw/afterTrading/ipoNoLimit",{"type":"EW","response":"json"}),
+ ("openapi_no_limit_iso","https://www.tpex.org.tw/openapi/v1/tpex_ipo_no_limit",{"date":"2015-11-23"}),
+ ("openapi_no_limit_compact","https://www.tpex.org.tw/openapi/v1/tpex_ipo_no_limit",{"date":"20151123"}),
 ]
 
 def extract(payload,code):
@@ -44,11 +46,16 @@ def main():
     for case in CASES:
       for name,url,params in ROUTES:
         try:
-          r=s.get(url,params=params,timeout=(10,45))
+          route_params=dict(params)
+          if name=="new_daily_quotes" or "no_limit" in name:
+            route_params["date"]=case["roc_date"] if name in {"new_daily_quotes","no_limit_page","ipo_no_limit_page"} else params.get("date")
+          r=s.get(url,params=route_params,timeout=(10,45))
           r.raise_for_status()
           try:payload=r.json()
           except Exception:payload={"text":r.text[:2000]}
           matches=extract(payload,case["stock_id"])
+          if isinstance(payload,dict) and payload.get("date") and str(payload.get("date"))!=case["date"].replace("-",""):
+            matches=[]
           fields=[]
           if isinstance(payload,dict):
             if payload.get("tables") and isinstance(payload["tables"],list) and isinstance(payload["tables"][0],dict):
@@ -60,7 +67,7 @@ def main():
              "table_fields":fields,"match_count":len(matches),
              "sample_match":matches[0] if matches else None}
           probes.append(record)
-          if len(matches)==1:
+          if len(matches)==1 and name=="new_daily_quotes":
             row=matches[0]
             if isinstance(row,dict):
               def getv(*keys):
@@ -82,16 +89,21 @@ def main():
               return float(str(v).replace(",","").strip()) if v not in (None,"","--","-") else None
             ref,up,down=map(num,(ref,up,down))
             if all(v is not None and v>0 for v in (ref,up,down)):
+              no_limit=(up>=9995 and down<=0.01)
               resolved.append({"source_date":case["date"],"stock_id":case["stock_id"],
-                "next_day_reference_price":ref,"next_day_limit_up":up,"next_day_limit_down":down,
+                "next_day_reference_price":ref,
+                "next_day_limit_up":None if no_limit else up,
+                "next_day_limit_down":None if no_limit else down,
+                "next_day_limit_status":"no_limit" if no_limit else "limited",
                 "source":f"TPEx official historical daily quote fallback ({name})","source_url":r.url})
         except Exception as e:
           probes.append({"case":case,"route":name,"url":url,"error":str(e)})
     out=Path("artifacts/tpex_missing_limit_fallback");out.mkdir(parents=True,exist_ok=True)
     (out/"probe_results.json").write_text(json.dumps(probes,ensure_ascii=False,indent=2),encoding="utf-8")
-    pd.DataFrame(resolved,columns=["source_date","stock_id","next_day_reference_price","next_day_limit_up","next_day_limit_down","source","source_url"]).drop_duplicates(["source_date","stock_id"]).to_csv(out/"tpex_missing_limit_fallback.csv",index=False)
+    pd.DataFrame(resolved,columns=["source_date","stock_id","next_day_reference_price","next_day_limit_up","next_day_limit_down","next_day_limit_status","source","source_url"]).drop_duplicates(["source_date","stock_id"]).to_csv(out/"tpex_missing_limit_fallback.csv",index=False)
     manifest={"source":"TPEx official historical daily quotes","cases":CASES,"probe_attempts":len(probes),
       "resolved_rows":len(resolved),"complete":len(resolved)==len(CASES),
+      "no_limit_rows":sum(1 for x in resolved if x.get("next_day_limit_status")=="no_limit"),
       "sha256":hashlib.sha256((out/"tpex_missing_limit_fallback.csv").read_bytes()).hexdigest(),
       "note":"Only official published next-day quote fields are accepted; no price-limit formula reconstruction.",
       "probes":probes}
