@@ -87,6 +87,8 @@ jobs:
           from pathlib import Path
           root=Path("data/top10_official_raw/bars")
           limits=pd.read_csv(next(Path("data/twse_official_limits").rglob("twse_twt84u_limits.csv")),dtype={"stock_id":str})
+          valid=limits[["official_limit_up","official_reference_price","official_limit_down"]].notna().all(axis=1)
+          limits=limits.loc[valid].copy()
           known=set(zip(pd.to_datetime(limits.date).dt.strftime("%Y-%m-%d"),limits.stock_id.astype(str).str.strip()))
           missing=[]
           for path in sorted(root.glob("*.csv")):
