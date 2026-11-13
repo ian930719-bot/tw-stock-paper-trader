@@ -43,6 +43,10 @@ jobs:
           assert len(rows)>=100, f"Too few TPEx common-stock rows: {len(rows)}"
           print(json.dumps({"date":"2026-11-12","tpex_common_stock_rows":len(rows),"sample":rows[:3]},ensure_ascii=False,indent=2))
           PY
+      - name: Collect and validate official TWSE capital-reduction and par-value events
+        run: |
+          python -m py_compile collect_twse_special_corporate_actions.py
+          python collect_twse_special_corporate_actions.py --start-date 2011-01-01 --end-date 2026-11-12 --output data/top10_actions_twt49u
       - name: Collect official TPEx corporate actions
         run: |
           python collect_tpex_corporate_actions.py --start-date 2014-01-01 --end-date 2026-11-12 --special-start-date 2013-01-01 --output data/top10_actions_twt49u
@@ -55,7 +59,7 @@ jobs:
           a=pd.read_csv(p/"tpex_exdailyq_all.csv")
           s=pd.read_csv(p/"special_events.csv")
           m=json.loads((p/"special_events_manifest.json").read_text(encoding="utf-8"))
-          assert len(a)>0 and len(s)>0
+          assert len(a)>0 and len(s)>0 and m["complete"]
           assert {2015,2020,2025}.issubset(set(pd.to_datetime(a.date).dt.year))
           assert 2025 in set(pd.to_datetime(s.date).dt.year)
           print(json.dumps({"exDailyQ_rows":len(a),"revivt_rows":len(s),"manifest":m},ensure_ascii=False,indent=2))
