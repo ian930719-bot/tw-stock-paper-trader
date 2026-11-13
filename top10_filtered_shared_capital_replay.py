@@ -128,6 +128,13 @@ def main():
     pd.DataFrame(partial_rows).to_csv(out/"shared_capital_eligible_members_only_metrics.csv",index=False)
     manifest_path=Path(a.universe_file).parent/"manifest.json"
     manifest=json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
+    supplement_path=Path(__file__).resolve().parent/"data"/"official_special_action_terms.csv"
+    manual_supplements=[]
+    if supplement_path.exists():
+        _supp=pd.read_csv(supplement_path,dtype={"symbol":str,"market":str})
+        if "event_type" in _supp:
+            _supp=_supp[_supp.event_type.notna()]
+            manual_supplements=_supp.where(pd.notna(_supp),None).to_dict("records")
     baseline_10bps=report_filters["baseline"].get("10bps",{})
     coverage=float(baseline_10bps.get("complete_universe_day_ratio",0.0) or 0.0)
     complete=(len(prepared)==len(symbols) and coverage>=1.0)
@@ -146,6 +153,7 @@ def main():
         "costs":{"commission_per_side":0.001425,"minimum_commission_ntd":20,
                  "sell_tax":0.003,"slippage_bps":list(SLIPPAGE_BPS)},
         "universe_manifest":manifest,
+        "official_manual_special_action_supplements":manual_supplements,
         "symbols_expected":len(symbols),"symbols_prepared":len(prepared),
         "blocked_symbols":blocked,
         "blocked_reason_counts":{reason:sum(1 for item in blocked if reason in item["reason"]) for reason in sorted({part for item in blocked for part in [item["reason"].split(": ",1)[-1].split(" on ")[0]]})},
