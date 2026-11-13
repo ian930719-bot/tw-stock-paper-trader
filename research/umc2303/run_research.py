@@ -95,26 +95,11 @@ def atr(rows, n=14):
 
 def build_signals(rows):
     c=[r["close"] for r in rows]
-    ma20,ma50,ma100,ma200=[sma(c,n) for n in (20,50,100,200)]
-    a=atr(rows)
-    sigs={}
-    for fast,slow in [(10,30),(20,50),(20,100),(50,150)]:
-        f=sma(c,fast); s=sma(c,slow)
-        sigs[f"ma_{fast}_{slow}"]=[i>0 and f[i] is not None and s[i] is not None and f[i]>s[i] and c[i]>s[i] for i in range(len(c))]
-    # Close-confirmed 55-session breakout with 50/200 trend filter.
-    hi=[None]*len(rows)
-    for i in range(55,len(rows)):
-        hi[i]=max(r["high"] for r in rows[i-55:i])
-    sigs["breakout_55"]=[i>=200 and hi[i] is not None and c[i]>hi[i] and ma50[i]>ma200[i] for i in range(len(c))]
-    # Trend-filtered pullback: long trend positive, close recovers above 20d average after prior close below.
-    sigs["trend_pullback"]=[i>=200 and ma50[i] is not None and ma200[i] is not None and ma50[i]>ma200[i] and c[i]>ma20[i] and c[i-1]<=ma20[i-1] for i in range(len(c))]
-    # Mean reversion only when long-term trend is positive; avoid unconditional falling-knife entries.
-    sigs["trend_mean_reversion"]=[i>=200 and c[i]<ma20[i]*0.97 and ma50[i]>ma200[i] for i in range(len(c))]
-    # Five-day moving-average + volume systems. Entry is a confirmed close crossover
-    # with relative volume; the position remains open until a close below MA5.
     ma5=sma(c,5)
     vol=[r["volume"] for r in rows]
     vol20=sma(vol,20)
+    sigs={}
+    # Pure MA5 + volume strategies only; no ATR or other indicators in core rules.
     for threshold in (1.0,1.2,1.5,2.0):
         active=False; state=[]
         for i in range(len(rows)):
@@ -124,8 +109,6 @@ def build_signals(rows):
                 elif c[i]<ma5[i]: active=False
             state.append(active)
         sigs[f"ma5_cross_volume_{threshold:.1f}x"]=state
-    # More selective trigger: close above MA5, MA5 rising, and volume expansion;
-    # stay invested until close breaks MA5.
     active=False; state=[]
     for i in range(len(rows)):
         if i>=20 and ma5[i] is not None and ma5[i-1] is not None and vol20[i] and vol20[i]>0:
@@ -135,9 +118,8 @@ def build_signals(rows):
                 active=False
         state.append(active)
     sigs["ma5_rising_volume_1.5x"]=state
-    return sigs,a
-
-def run_backtest(rows, signal, start_idx, end_idx, stop_atr=2.5):
+    return sigs, None
+def run_backtest(rows, signal, start_idx, end_idx, stop_atr=None):
     cash=INITIAL_CASH; qty=0; entry=0.0; stop=None; highwater=0.0
     equity=[]; trades=[]
     for i in range(start_idx,end_idx):
@@ -155,16 +137,16 @@ def run_backtest(rows, signal, start_idx, end_idx, stop_atr=2.5):
             if buy_qty>0:
                 gross=buy_qty*px; fee=gross*FEE_RATE
                 cash-=gross+fee; qty=buy_qty; entry=px; highwater=px
-                prev_atr=atr_values[i-1] if i>0 else None
-                stop=px-stop_atr*prev_atr if prev_atr else None
+                prev_atr=atr_values[i-1] if i>0 and atr_values is not None else None
+                stop=px-stop_atr*prev_atr if stop_atr is not None and prev_atr else None
                 trades.append({"entry_date":r["date"],"entry_price":px,"qty":qty})
         # Stop known before today's session; gap-through fills at open, otherwise at stop.
-        if qty and stop is not None and r["low"]<=stop:
+        if stop_atr is not None and qty and stop is not None and r["low"]<=stop:
             fill=min(r["open"],stop)*(1-SLIPPAGE)
             gross=qty*fill; cash+=gross-gross*(FEE_RATE+SELL_TAX)
             trades[-1].update({"exit_date":r["date"],"exit_price":fill,"return_pct":(fill/entry-1)*100,"stop_exit":True})
             qty=0; entry=0.0; stop=None; highwater=0.0
-        elif qty:
+        elif stop_atr is not None and qty:
             highwater=max(highwater,r["high"])
             a=atr_values[i] if atr_values[i] is not None else entry*0.04
             # Updated at today's close; the new stop is effective from next session.
@@ -205,25 +187,25 @@ def main():
     if first is None: raise RuntimeError("No 2013+ observations")
     results=[]
     for name, sig in signals.items():
-        eq,tr,_=run_backtest(rows,sig,first,len(rows))
+        eq,tr,_=run_backtest(rows,sig,first,len(rows),stop_atr=None)
         results.append({"strategy":name,**metrics(eq,tr)})
-    # Buy-and-hold benchmark uses whole 1,000-share lots and the same cost assumptions.
-    bh_signal=[False]*len(rows); bh_signal[first]=True
-    eq,tr,_=run_backtest(rows,bh_signal,first,len(rows),stop_atr=1e9)
-    # For benchmark, disable trend exits by keeping signal true after first entry.
+    # Buy-and-hold benchmark uses the same execution timing, sizing, and costs.
     bh_signal=[i>=first for i in range(len(rows))]
-    eq,tr,_=run_backtest(rows,bh_signal,first,len(rows),stop_atr=1e9)
+    eq,tr,_=run_backtest(rows,bh_signal,first,len(rows),stop_atr=None)
     results.append({"strategy":"buy_and_hold_2013+" ,**metrics(eq,tr)})
     report={"symbol":SYMBOL,"source":"TWSE official STOCK_DAY raw daily OHLCV","source_url":"https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY",
             "generated_utc":datetime.utcnow().isoformat()+"Z","first_date":rows[0]["date"],"last_date":rows[-1]["date"],
             "rows":len(rows),"test_start":rows[first]["date"],"initial_cash":INITIAL_CASH,"fee_rate_each_side":FEE_RATE,
             "sell_tax":SELL_TAX,"slippage_each_side":SLIPPAGE,
             "corporate_action_adjustment":"NOT IMPLEMENTED; raw prices only; dividend/split distortions can affect indicators and returns",
-            "method":"fixed predeclared signals; close-confirmed signal executed at next open; one continuous account from 2013; whole-share sizing for odd-lot-compatible simulation; estimated fee, sell tax and slippage. MA5+volume variants enter on MA5 close crossover with volume threshold vs 20-session average and hold until close below MA5.",
-            "limitations":["No point-in-time fundamentals or institutional flow in this run","No official corporate-action adjustment / dividends; do not interpret as total-return performance","No queue, partial fills, limit-up/down or market-impact model","Parameter candidates are fixed, not optimized on this test interval"],
+            "method":"pure MA5 + volume rules only; entry confirmed at close and executed next open; exit after close below MA5 and execute next open; volume thresholds compare with 20-session average; one continuous account from 2013; whole-share sizing; estimated fee, sell tax and slippage. No ATR stop in core results.",
+            "limitations":["No official corporate-action adjustment / dividends; do not interpret as total-return performance","No queue, partial fills, limit-up/down or market-impact model","Parameter candidates are fixed, not optimized on this test interval","Daily-bar approximation; close-confirmed exits execute at next session open"],
             "results":results}
     (OUT/"umc2303_research_report.json").write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding="utf-8")
     with (OUT/"umc2303_strategy_summary.csv").open("w",newline="",encoding="utf-8-sig") as f:
         w=csv.DictWriter(f,fieldnames=sorted({k for r in results for k in r})); w.writeheader(); w.writerows(results)
     print(json.dumps(report,ensure_ascii=False,indent=2))
 
+
+if __name__ == "__main__":
+    main()
