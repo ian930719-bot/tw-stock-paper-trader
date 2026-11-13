@@ -98,8 +98,6 @@ def main():
    for r in dayframe.itertuples(index=False):
     sym=str(r.symbol)
     if sym not in handles:continue
-    vals=[r.open,r.high,r.low,r.close]
-    if any(pd.isna(x) for x in vals):continue
     handles[sym][1].writerow([sym,r.name,r.date,r.open,r.high,r.low,r.close,
       r.volume_shares,r.turnover_ntd,getattr(r,"note",""),"TWSE MI_INDEX"])
  finally:
