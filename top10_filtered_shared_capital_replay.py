@@ -46,9 +46,12 @@ def main():
     p.add_argument("--output",required=True)
     a=p.parse_args()
     out=Path(a.output);out.mkdir(parents=True,exist_ok=True)
-    uni=pd.read_csv(a.universe_file,dtype={"symbol":str,"stock_id":str,"market":str})
-    uni["date"]=pd.to_datetime(uni.date,errors="coerce").dt.strftime("%Y-%m-%d")
-    uni["symbol"]=uni.symbol.astype(str).str.strip()
+    uni_full=pd.read_csv(a.universe_file,dtype={"symbol":str,"stock_id":str,"market":str})
+    uni_full["date"]=pd.to_datetime(uni_full.date,errors="coerce").dt.strftime("%Y-%m-%d")
+    uni_full["symbol"]=uni_full.symbol.astype(str).str.strip()
+    # Strict OOT portfolio window; indicator history remains full-length for warmup.
+    uni=uni_full[uni_full.date>="2022-01-01"].copy()
+    if uni.empty: raise RuntimeError("No point-in-time top-ten dates in the 2022+ out-of-time test window")
     symbols=sorted(uni.symbol.unique())
     stock_map=uni.drop_duplicates("symbol").set_index("symbol").stock_id.astype(str).to_dict()
     market_map=uni.drop_duplicates("symbol").set_index("symbol").market.astype(str).to_dict()
@@ -106,7 +109,7 @@ def main():
         "signal_timing":"signal at close t; fill at next session open",
         "test_universe":"daily official top ten by traded shares, point-in-time",
         "training_period":"2015-01-01 through 2021-12-31",
-        "test_period":"2022-01-01 through 2026-11-12 (bounded by available official data)",
+        "test_period":[str(uni.date.min()),str(uni.date.max())],
         "thresholds_frozen_from_training_only":{
             "sma50_slope_10_min":0.006062,
             "distance_sma_200_min":0.073873,
