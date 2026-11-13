@@ -11,6 +11,10 @@ permissions:
   contents: read
   actions: read
 
+concurrency:
+  group: top10-official-reconciled-audit
+  cancel-in-progress: true
+
 jobs:
   audit:
     runs-on: ubuntu-latest
@@ -48,7 +52,9 @@ jobs:
                 artifact_id=$(gh api "repos/$repo/actions/runs/$run_id/artifacts" --jq                   ".artifacts[] | select(.name==\"$artifact_name\" and .expired==false) | .id" | head -n 1)
                 if [ -n "$artifact_id" ]; then
                   echo "Found $artifact_name in run $run_id (artifact $artifact_id)"
-                  echo "${artifact_name//-/_}_RUN_ID=$run_id" >> "$GITHUB_ENV"
+                  local env_name
+                  env_name=$(echo "$artifact_name" | tr '[:lower:]-' '[:upper:]_')
+                  echo "${env_name}_RUN_ID=$run_id" >> "$GITHUB_ENV"
                   return 0
                 fi
               fi
