@@ -38,20 +38,23 @@ def index(headers,*terms,required=True):
  return None
 
 def fetch_year(session,year,start_date,end_date):
- params={"response":"json","strDate":start_date.replace("-",""),"endDate":end_date.replace("-","")}
- last=None
- for attempt in range(4):
+ lo=pd.Timestamp(start_date);hi=pd.Timestamp(end_date)
+ candidates=[
+  {"response":"json","strDate":lo.strftime("%Y%m%d"),"endDate":hi.strftime("%Y%m%d")},
+  {"response":"json","strDate":lo.strftime("%Y%m%d"),"endDate":hi.strftime("%Y%m%d"),"lang":"zh"},
+  {"response":"json","strDate":f"{lo.year-1911:03d}{lo.strftime('%m%d')}","endDate":f"{hi.year-1911:03d}{hi.strftime('%m%d')}"},
+  {"response":"json","startDate":lo.strftime("%Y%m%d"),"endDate":hi.strftime("%Y%m%d")},
+ ]
+ errors=[]
+ for params in candidates:
   try:
    r=session.get(URL,params=params,timeout=(15,150),headers={"User-Agent":"Mozilla/5.0"})
-   r.raise_for_status()
-   payload=r.json()
-   if not isinstance(payload,dict) or not isinstance(payload.get("fields"),list) or not isinstance(payload.get("data"),list):
-    raise RuntimeError(f"Invalid TWT49U JSON payload: {str(payload)[:600]}")
-   return payload,r.url
-  except Exception as e:
-   last=e
-   if attempt<3:time.sleep(2**attempt)
- raise RuntimeError(f"TWT49U {year} failed: {last}")
+   r.raise_for_status();payload=r.json()
+   if isinstance(payload,dict) and isinstance(payload.get("fields"),list) and isinstance(payload.get("data"),list):
+    return payload,r.url
+   errors.append({"url":r.url,"stat":payload.get("stat") if isinstance(payload,dict) else str(payload)[:200]})
+  except Exception as e:errors.append({"params":params,"error":str(e)})
+ raise RuntimeError(f"TWT49U {year} failed; attempts={errors}")
 
 def main():
  p=argparse.ArgumentParser()
