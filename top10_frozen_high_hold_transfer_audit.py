@@ -43,6 +43,37 @@ def read_events(action_root,symbol_key,stock_id,market,accounting_start_date="20
  special=special[(special.market.astype(str).str.upper()==market.upper()) &
                  (special.symbol.astype(str).str.strip()==stock_id) &
                  (special.date>=pd.Timestamp("2014-01-01"))].copy()
+ # Merge independently documented exchange/issuer special actions that are not
+ # present in the generic resumption feed (e.g. TPEx flexible-par-value changes).
+ terms_path=Path(__file__).resolve().parent/"data"/"official_special_action_terms.csv"
+ if terms_path.exists():
+  supplemental=pd.read_csv(terms_path,dtype={"symbol":str,"market":str})
+  if "market" not in supplemental:supplemental["market"]="TWSE"
+  required={"event_type","previous_close","reference_price","limit_up","limit_down"}
+  if required.issubset(supplemental.columns):
+   supplemental=supplemental[
+    (supplemental.market.fillna("TWSE").astype(str).str.upper()==market.upper()) &
+    (supplemental.symbol.astype(str).str.strip()==stock_id) &
+    supplemental.event_type.notna() &
+    supplemental.event_date.notna()
+   ].copy()
+   if not supplemental.empty:
+    supplemental["date"]=pd.to_datetime(supplemental.event_date,errors="coerce")
+    supplemental=supplemental[supplemental.date>=pd.Timestamp("2014-01-01")]
+    existing=set(special.date.dt.strftime("%Y-%m-%d"))
+    supplemental=supplemental[~supplemental.date.dt.strftime("%Y-%m-%d").isin(existing)]
+    if not supplemental.empty:
+     extra=pd.DataFrame({
+      "market":market.upper(),"symbol":stock_id,"date":supplemental.date,
+      "event_type":supplemental.event_type.astype(str),
+      "previous_close":pd.to_numeric(supplemental.previous_close,errors="coerce"),
+      "reference_price":pd.to_numeric(supplemental.reference_price,errors="coerce"),
+      "limit_up":pd.to_numeric(supplemental.limit_up,errors="coerce"),
+      "limit_down":pd.to_numeric(supplemental.limit_down,errors="coerce"),
+      "reason":supplemental.reason.fillna("documented special action").astype(str) if "reason" in supplemental else "documented special action",
+      "source":supplemental.source.fillna("official supplemental action terms").astype(str) if "source" in supplemental else "official supplemental action terms",
+     })
+     special=pd.concat([special,extra],ignore_index=True)
  invalid_special_path=root/"special_events_invalid_rows.csv"
  if invalid_special_path.exists():
   invalid_special=pd.read_csv(invalid_special_path,dtype={"symbol":str})
