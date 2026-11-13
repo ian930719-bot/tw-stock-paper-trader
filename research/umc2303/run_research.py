@@ -30,7 +30,7 @@ def fetch_month(year: int, month: int):
     rows = []
     for row in payload.get("data", []):
         try:
-            d = datetime.strptime(row[0].replace("/", ""), "%Y%m%d").date().isoformat()
+            parts = row[0].split("/")\n            if len(parts[0]) == 3:\n                d = datetime(int(parts[0]) + 1911, int(parts[1]), int(parts[2])).date().isoformat()\n            else:\n                d = datetime.strptime(row[0].replace("/", ""), "%Y%m%d").date().isoformat()
             nums = [float(x.replace(",", "")) for x in row[1:6]]
             volume, turnover, opn, high, low = nums
             close = float(row[6].replace(",", ""))
@@ -114,7 +114,7 @@ def run_backtest(rows, signal, start_idx, end_idx, stop_atr=2.5):
     for i in range(start_idx,end_idx):
         r=rows[i]
         # A signal confirmed at yesterday's close can only trade at today's open.
-        prior_signal = signal[i-1] if i > start_idx else False
+        prior_signal = signal[i-1] if i > 0 else False
         if qty and not prior_signal:
             px=r["open"]*(1-SLIPPAGE); gross=qty*px
             cash+=gross-gross*(FEE_RATE+SELL_TAX)
