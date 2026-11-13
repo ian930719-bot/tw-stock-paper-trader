@@ -45,6 +45,7 @@ def collect_exdailyq(session,start,end):
  pi=idx(f,"除權息前收盤價");ri=idx(f,"除權息參考價")
  ti=idx(f,"權/息",required=False);cash_i=idx(f,"現金股利","息值",required=False)
  stock_i=idx(f,"每仟股無償配股","權值",required=False)
+ rights_fields=[idx(f,n,required=False) for n in ("現金增資股數","公開承銷股數","員工認購股數","原股東認購股數","按持股比例仟股認購")]
  ui=idx(f,"漲停價","漲停價格",required=False);li=idx(f,"跌停價","跌停價格",required=False)
  out=[]
  for raw in rows:
@@ -56,6 +57,7 @@ def collect_exdailyq(session,start,end):
   if not prev or not ref or prev<=0 or ref<=0:raise RuntimeError(f"Invalid TPEx exDailyQ reference {sym} {day}: {raw}")
   cash=num(raw[cash_i]) if cash_i is not None else None
   stock=num(raw[stock_i]) if stock_i is not None else None
+  rights_shares=sum((num(raw[k]) or 0.0) for k in rights_fields if k is not None)
   kind=clean(raw[ti]) if ti is not None else ""
   status="resolved"
   if cash is None and ("息" in kind or kind not in {"權"}):status="unresolved_cash_component"
@@ -64,7 +66,7 @@ def collect_exdailyq(session,start,end):
   if stock is None and kind=="息":stock=0.0
   out.append({"market":"TPEX","symbol":sym,"date":day,"action_type":kind,
    "previous_close":prev,"reference_price":ref,"adjustment_ratio":ref/prev,
-   "cash_dividend":cash,"stock_dividend":stock,"cash_dividend_status":status,
+   "cash_dividend":cash,"stock_dividend":stock,"rights_issue_shares":rights_shares,"cash_dividend_status":status,
    "limit_up":num(raw[ui]) if ui is not None else None,
    "limit_down":num(raw[li]) if li is not None else None,
    "source":"TPEx bulletin/exDailyQ"})
