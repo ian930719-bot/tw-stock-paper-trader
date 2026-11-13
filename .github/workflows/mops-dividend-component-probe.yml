@@ -1,0 +1,81 @@
+name: MOPS Official Dividend Component Probe
+
+on:
+  push:
+    branches: [research/top10-official-ohlcv-baseline-audit]
+    paths:
+      - .github/workflows/mops-dividend-component-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pandas beautifulsoup4 requests
+      - name: Probe official MOPS dividend detail endpoints
+        run: |
+          python - <<'PY'
+          import json, time, io
+          from pathlib import Path
+          import pandas as pd
+          import requests
+          from bs4 import BeautifulSoup
+          session=requests.Session()
+          session.headers.update({
+            "User-Agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36",
+            "Referer":"https://mops.twse.com.tw/mops/web/index",
+            "Origin":"https://mops.twse.com.tw",
+          })
+          tests=[]
+          def probe(name,endpoint,method,data=None,params=None):
+            errors=[]
+            for host in ["https://mops.twse.com.tw","https://mopsov.twse.com.tw"]:
+              url=host+endpoint
+              try:
+                if method=="POST": r=session.post(url,data=data,params=params,timeout=60)
+                else: r=session.get(url,params=params,timeout=60)
+                r.raise_for_status()
+                r.encoding="utf-8"
+                text=r.text
+                try:
+                  tables=pd.read_html(io.StringIO(text))
+                  parsed=[{"shape":list(t.shape),"columns":[str(x) for x in t.columns],"rows":t.head(15).fillna("").astype(str).values.tolist()} for t in tables[:8]]
+                except Exception as e: parsed=[{"parse_error":str(e)}]
+                result={"name":name,"url":r.url,"status":r.status_code,"content_type":r.headers.get("content-type"),"length":len(text),"contains_1727":"1727" in text,"html_start":text[:1800],"tables":parsed}
+                print(json.dumps(result,ensure_ascii=False))
+                tests.append(result)
+                return
+              except Exception as e: errors.append({"url":url,"error":str(e)})
+            tests.append({"name":name,"errors":errors})
+            print(json.dumps(tests[-1],ensure_ascii=False))
+          probe("t05st09_company_1727_dividend_year_103","/mops/web/ajax_t05st09","POST",data={
+            "encodeURIComponent":"1","step":"1","firstin":"1","off":"1","keyword4":"","code1":"",
+            "TYPEK2":"","checkbtn":"","queryName":"co_id","inpuType":"co_id","TYPEK":"all",
+            "isnew":"false","co_id":"1727","year":"103"
+          })
+          time.sleep(1)
+          probe("t108sb27_all_listed_2015","/mops/web/ajax_t108sb27","GET",params={
+            "step":"1","firstin":"true","off":"1","TYPEK":"sii","co_id_1":"","co_id_2":"",
+            "year":"104","month":"","b_date":"","e_date":"","type":"1","rulesubmit2":"搜尋"
+          })
+          time.sleep(1)
+          probe("t108sb27_all_otc_2015","/mops/web/ajax_t108sb27","GET",params={
+            "step":"1","firstin":"true","off":"1","TYPEK":"otc","co_id_1":"","co_id_2":"",
+            "year":"104","month":"","b_date":"","e_date":"","type":"1","rulesubmit2":"搜尋"
+          })
+          Path("mops_dividend_probe.json").write_text(json.dumps(tests,ensure_ascii=False,indent=2),encoding="utf-8")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mops-official-dividend-probe
+          path: mops_dividend_probe.json
+          retention-days: 30
