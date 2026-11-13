@@ -11,14 +11,26 @@ on:
 
 permissions:
   contents: read
-  actions: read
+  actions: write
 
 concurrency:
   group: top10-full-batched-research
   cancel-in-progress: true
 
 jobs:
+  cancel-stale:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel obsolete monolithic collector and its waiting audit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for run_id in 43342607119 43356733682; do
+            gh api --method POST "repos/ian930719-bot/tw-stock-paper-trader/actions/runs/${run_id}/cancel" || true
+          done
+
   collect-year:
+    needs: cancel-stale
     runs-on: ubuntu-latest
     timeout-minutes: 360
     strategy:
