@@ -277,7 +277,7 @@ def main():
  p.add_argument("--output",default="artifacts/top10_frozen_high_hold")
  a=p.parse_args()
  out=Path(a.output);out.mkdir(parents=True,exist_ok=True)
- rows=[];blocked=[]
+ rows=[];blocked=[];prepared={}
  universe_path=Path(a.universe_file)
  use_universe_filter=universe_path.exists()
  if use_universe_filter:
@@ -308,6 +308,7 @@ def main():
    else:
     active_mask=np.ones(len(d),dtype=bool)
    hold=hold_gate(d)
+   prepared[symbol]={"d":d,"low":low,"high":high,"risk":risk,"hold":hold,"limits":limits,"dividends":cashdiv}
    start_idx=np.flatnonzero((d.date.dt.year>=2015).to_numpy())
    if not len(start_idx):raise RuntimeError("no 2015+ data")
    start=int(start_idx[0]);end=len(d)-1
@@ -323,18 +324,26 @@ def main():
   except Exception as e:
    blocked.append({"symbol":symbol,"name":name_map.get(symbol,NAMES.get(symbol,symbol)),"reason":f"{type(e).__name__}: {e}"})
    print(f"[BLOCKED] {symbol}: {e}",flush=True)
- result={"classification":"FIXED_TSMC_RULE_TRANSFER_AUDIT_DAILY_TOP10_TURNOVER_UNIVERSE",
+ shared_portfolio=None
+ if use_universe_filter and prepared:
+  portfolio=run_shared_capital_portfolio(prepared,uni,slippage_bps=10,initial_capital=INITIAL_CAPITAL)
+  pd.DataFrame(portfolio.get("trades",[])).to_csv(out/"shared_capital_trades_10bps.csv",index=False)
+  pd.DataFrame(portfolio.get("equity_curve",[])).to_csv(out/"shared_capital_equity_10bps.csv",index=False)
+  if portfolio.get("equity_curve"):
+   pd.DataFrame(annual_metrics(portfolio["equity_curve"],portfolio["trades"],INITIAL_CAPITAL)).to_csv(out/"shared_capital_annual_10bps.csv",index=False)
+  shared_portfolio={k:v for k,v in portfolio.items() if k not in {"trades","equity_curve"}}
+ result={"classification":"FIXED_TSMC_RULE_TRANSFER_AUDIT_DAILY_TOP10_VOLUME_UNIVERSE",
   "period":"2015 onward through last official raw bar","symbols_expected":len(symbols),
   "symbols_completed":len(set(x["symbol"] for x in rows)),"blocked":blocked,
   "costs":{"commission_per_side":.001425,"minimum_commission_ntd":20,"sell_tax":.003,"slippage_bps":list(SLIPPAGE_BPS)},
   "target":{"cagr_min":.50,"win_rate_min":.8695652173913043,"max_drawdown_floor":-.25},
   "status":"COMPLETE" if len(set(x["symbol"] for x in rows))==len(symbols) and not blocked else "BLOCKED_OR_PARTIAL",
-  "metrics":rows,"rules":RULES,
+  "metrics":rows,"shared_capital_portfolio":shared_portfolio,"rules":RULES,
   "notes":["No per-symbol parameter tuning; frozen TSMC rule family only.",
-   "Entry eligibility uses the official same-day closing turnover top ten; signals are known after close and orders execute no earlier than the next session.",
+   "Entry eligibility uses the official same-day closing traded-share top ten; signals are known after close and orders execute no earlier than the next session.",
    "Raw official TWSE OHLC used for fills; corporate-action back-adjustment used for signal indicators.",
-   "Any missing action data, missing limit reference, or OHLC-limit conflict blocks that symbol.",
-   "Single-symbol results do not represent shared-capital portfolio results."]}
+   "Any missing action data, missing limit reference, or OHLC-limit conflict blocks that symbol. The shared-capital portfolio also skips new entries when any daily top-ten constituent is unaudited.",
+   "Single-symbol results are independent NT$100,000 per-stock transfer tests; shared_capital_portfolio is a separate one-position shared-NT$100,000 account."]}
  (out/"report.json").write_text(json.dumps(result,ensure_ascii=False,indent=2,default=float),encoding="utf-8")
  pd.DataFrame(rows).to_csv(out/"metrics.csv",index=False)
  print(json.dumps({k:v for k,v in result.items() if k!="metrics"},ensure_ascii=False,indent=2,default=float))
