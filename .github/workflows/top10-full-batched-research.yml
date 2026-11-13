@@ -106,7 +106,7 @@ jobs:
         with:
           name: top10-fixed-basket-corporate-actions
           repository: ian930719-bot/tw-stock-paper-trader
-          run-id: 43355250385
+          run-id: 43376383063
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: data/top10_actions_twt49u
       - name: Download all yearly universe checkpoints
