@@ -58,7 +58,7 @@ def fetch_year(session, roc_year, symbols, raw_dir, raw_cache_dir=None, retries=
             source_url=response.url
             if "FOR SECURITY REASONS" in html or "因為安全性考量" in html:
                 raise RuntimeError("MOPS security interstitial")
-            filename_match=re.search(r"name=['\\\"]filename['\\\"]\\s+value=['\\\"]([^'\\\"]+)",html,re.I)
+            filename_match=re.search(r"""name=['"]filename['"]\s+value=['"]([^'"]+)""",html,re.I)
             if not filename_match:
                 raise RuntimeError(f"MOPS t108sb27 export filename missing for ROC year {roc_year}")
             filename=filename_match.group(1)
