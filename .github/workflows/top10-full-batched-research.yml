@@ -1,0 +1,203 @@
+name: Complete Batched Point-in-Time Top 10 Research
+
+on:
+  push:
+    branches: [research/top10-official-ohlcv-baseline-audit]
+    paths:
+      - .github/workflows/top10-full-batched-research.yml
+      - collect_twse_historical_daily_top10.py
+      - top10_frozen_high_hold_transfer_audit.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: top10-full-batched-research
+  cancel-in-progress: false
+
+jobs:
+  collect-year:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        year: [2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/top10-official-ohlcv-baseline-audit
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pandas numpy requests beautifulsoup4
+      - name: Download verified official seed trading calendar
+        uses: actions/download-artifact@v4
+        with:
+          name: top10-official-raw-ohlcv
+          repository: ian930719-bot/tw-stock-paper-trader
+          run-id: 43225571777
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: data/top10_official_raw
+      - name: Collect official TWSE and TPEx daily market-wide turnover for this year
+        env:
+          YEAR: ${{ matrix.year }}
+        run: |
+          set -euo pipefail
+          python -m py_compile collect_twse_historical_daily_top10.py
+          python collect_twse_historical_daily_top10.py \
+            --raw-bars data/top10_official_raw/bars \
+            --output data/twse_marketwide_turnover_${YEAR} \
+            --start-date ${YEAR}-01-01 --end-date ${YEAR}-12-31 --pause 0.15
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          p=Path("data")/f"twse_marketwide_turnover_{os.environ['YEAR']}"/"manifest.json"
+          m=json.loads(p.read_text(encoding="utf-8"))
+          assert m["complete"] and m["dates_completed"]>0
+          print("YEAR",os.environ["YEAR"],"DATES",m["dates_completed"],"TOP10_ROWS",m["top10_rows"],"SYMBOLS",m["point_in_time_union_symbols"])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: top10-point-in-time-year-${{ matrix.year }}
+          path: data/twse_marketwide_turnover_${{ matrix.year }}/
+          if-no-files-found: error
+          retention-days: 30
+
+  merge-and-audit:
+    needs: collect-year
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/top10-official-ohlcv-baseline-audit
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - run: pip install -r requirements.txt
+      - name: Download official seed and verified corporate-action checkpoints
+        uses: actions/download-artifact@v4
+        with:
+          name: top10-official-raw-ohlcv
+          repository: ian930719-bot/tw-stock-paper-trader
+          run-id: 43225571777
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: data/top10_official_raw
+      - name: Download official TWT49U and special-event checkpoint
+        uses: actions/download-artifact@v4
+        with:
+          name: top10-fixed-basket-corporate-actions
+          repository: ian930719-bot/tw-stock-paper-trader
+          run-id: 43355250385
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: data/top10_actions_twt49u
+      - name: Download all yearly universe checkpoints
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          for year in {2014..2026}; do
+            mkdir -p "data/year_${year}"
+            gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+              --name "top10-point-in-time-year-${year}" --dir "data/year_${year}"
+          done
+      - name: Merge yearly official data into one verified point-in-time universe
+        run: |
+          python - <<'PY'
+          import csv,hashlib,json,shutil
+          from pathlib import Path
+          import pandas as pd
+          root=Path("data/twse_marketwide_turnover")
+          daily=root/"daily"; daily.mkdir(parents=True,exist_ok=True)
+          year_manifests=[]
+          for year in range(2014,2027):
+              src=Path(f"data/year_{year}")
+              m=json.loads((src/"manifest.json").read_text(encoding="utf-8"))
+              assert m["complete"] and m["dates_completed"]==m["dates_requested"], (year,m)
+              year_manifests.append(m)
+              for f in (src/"daily").glob("*.csv"):
+                  shutil.copy2(f,daily/f.name)
+          daily_files=sorted(daily.glob("*.csv"))
+          assert daily_files, "No daily official market-wide files"
+          frames=[]
+          for year in range(2014,2027):
+              f=Path(f"data/year_{year}/historical_daily_top10_by_volume.csv")
+              frames.append(pd.read_csv(f,dtype={"symbol":str,"stock_id":str}))
+          top=pd.concat(frames,ignore_index=True).sort_values(["date","rank_by_volume","symbol"])
+          top=top.drop_duplicates(["date","symbol"])
+          top.to_csv(root/"historical_daily_top10_by_volume.csv",index=False)
+          union=sorted(top.symbol.astype(str).unique())
+          bars=root/"symbol_bars"; bars.mkdir(exist_ok=True)
+          handles={}
+          try:
+              for sym in union:
+                  fh=(bars/f"{sym}.csv").open("w",newline="",encoding="utf-8")
+                  wr=csv.writer(fh)
+                  wr.writerow(["symbol","stock_id","market","name","date","open","high","low","close","volume","turnover","note","source"])
+                  handles[sym]=(fh,wr)
+              for f in daily_files:
+                  d=pd.read_csv(f,dtype={"symbol":str,"stock_id":str})
+                  d=d[d.symbol.isin(handles)]
+                  for r in d.itertuples(index=False):
+                      handles[str(r.symbol)][1].writerow([r.symbol,r.stock_id,r.market,r.name,r.date,r.open,r.high,r.low,r.close,r.volume_shares,r.turnover_ntd,getattr(r,"note",""),r.source])
+          finally:
+              for fh,wr in handles.values(): fh.close()
+          dates=sorted({f.stem for f in daily_files})
+          manifest={
+              "source":["TWSE official MI_INDEX","TPEx official afterTrading/otc"],
+              "markets_included":["TWSE","TPEX"],
+              "dates_requested":sum(m["dates_requested"] for m in year_manifests),
+              "dates_completed":len(dates),
+              "complete":len(dates)==sum(m["dates_requested"] for m in year_manifests),
+              "first_date":dates[0],"last_date":dates[-1],
+              "top10_rows":len(top),"point_in_time_union_symbols":len(union),
+              "symbol_bar_files":len(union),
+              "top10_rows_by_market":top.market.value_counts().to_dict(),
+              "sha256":hashlib.sha256((root/"historical_daily_top10_by_volume.csv").read_bytes()).hexdigest(),
+              "yearly_checkpoints":[{"year":2014+i,"dates":m["dates_completed"],"complete":m["complete"]} for i,m in enumerate(year_manifests)],
+              "method":"Each trading date ranked TWSE and TPEx four-digit common-stock rows together by official daily traded shares; top ten determined at close and eligible no earlier than next session.",
+              "limitations":["Four-digit code class filter excludes 00xx ETF and 91xx TDR; six-digit warrants excluded.","Seed-stock trading calendar defines requested sessions; every year checkpoint is required complete.","All official daily raw rows are retained for any symbol that entered the point-in-time top ten at least once."]
+          }
+          assert manifest["complete"]
+          (root/"manifest.json").write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding="utf-8")
+          print(json.dumps(manifest,ensure_ascii=False,indent=2))
+          PY
+      - name: Run full point-in-time universe transfer audit and shared-capital simulation
+        run: |
+          set -euo pipefail
+          python -m py_compile top10_frozen_high_hold_transfer_audit.py analyze_top10_false_signals.py
+          python top10_frozen_high_hold_transfer_audit.py \
+            --raw-bars data/twse_marketwide_turnover/symbol_bars \
+            --universe-file data/twse_marketwide_turnover/historical_daily_top10_by_volume.csv \
+            --actions data/top10_actions_twt49u \
+            --output artifacts/top10_full_official_audit
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path("artifacts/top10_full_official_audit/report.json").read_text(encoding="utf-8"))
+          print("STATUS",r["status"],"COMPLETED",r["symbols_completed"],"EXPECTED",r["symbols_expected"],"BLOCKED",len(r["blocked"]))
+          print("TSMC_REPRODUCTION",json.dumps(r.get("tsmc_2330_universe_free_reproduction"),ensure_ascii=False))
+          print("SHARED_PORTFOLIO",json.dumps({k:v for k,v in (r.get("shared_capital_portfolio") or {}).items() if k not in {"trades","equity_curve"}},ensure_ascii=False))
+          if r["symbols_completed"]==0: raise SystemExit("No point-in-time constituent passed official data gates.")
+          PY
+      - name: Analyze pooled causal false-signal features with chronological holdout
+        run: |
+          python analyze_top10_false_signals.py \
+            --trades artifacts/top10_full_official_audit/trade_feature_diagnostics_10bps.csv \
+            --output artifacts/top10_full_official_audit/false_signal_analysis
+      - name: Upload complete point-in-time top-ten research results
+        uses: actions/upload-artifact@v4
+        with:
+          name: top10-complete-batched-research
+          path: |
+            data/twse_marketwide_turnover/manifest.json
+            data/twse_marketwide_turnover/historical_daily_top10_by_volume.csv
+            artifacts/top10_full_official_audit/
+          if-no-files-found: error
+          retention-days: 30
