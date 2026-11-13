@@ -87,11 +87,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          mkdir -p data/tpex_limits data/twse_limits data/mops_download
+          mkdir -p data/tpex_next_day_limits data/twse_official_limits data/mops_download
           gh run download "$TPEX_OFFICIAL_NEXT_DAY_LIMITS_RUN_ID" --repo ian930719-bot/tw-stock-paper-trader \
-            --name tpex-official-next-day-limits --dir data/tpex_limits
+            --name tpex-official-next-day-limits --dir data/tpex_next_day_limits
           gh run download "$TWSE_OFFICIAL_DAILY_PRICE_LIMITS_RUN_ID" --repo ian930719-bot/tw-stock-paper-trader \
-            --name twse-official-daily-price-limits --dir data/twse_limits
+            --name twse-official-daily-price-limits --dir data/twse_official_limits
           gh run download "$MOPS_OFFICIAL_DIVIDEND_COMPONENT_OVERRIDES_RUN_ID" --repo ian930719-bot/tw-stock-paper-trader \
             --name mops-official-dividend-component-overrides --dir data/mops_download
           find data/mops_download -name official_dividend_component_overrides.csv -exec cp {} data/official_dividend_component_overrides.csv \;
@@ -108,7 +108,7 @@ jobs:
               root=Path(f"data/year_{year}")
               m=json.loads((root/"manifest.json").read_text(encoding="utf-8"))
               assert m["complete"] and m["dates_completed"]==m["dates_requested"], (year,m)
-          for root in ["data/top10_actions_twt49u","data/tpex_limits","data/twse_limits"]:
+          for root in ["data/top10_actions_twt49u","data/tpex_next_day_limits","data/twse_official_limits"]:
               manifests=list(Path(root).rglob("manifest.json"))
               assert manifests, f"Missing manifest in {root}"
               print(root, json.loads(manifests[0].read_text(encoding="utf-8")))
@@ -131,8 +131,8 @@ jobs:
           top=pd.concat(frames,ignore_index=True).drop_duplicates(["date","symbol"])
           top.to_csv(root/"historical_daily_top10_by_volume.csv",index=False)
           union=sorted(top.symbol.astype(str).unique())
-          twse=pd.read_csv(next(Path("data/twse_limits").rglob("twse_twt84u_limits.csv")),dtype={"stock_id":str})
-          tpex=pd.read_csv(next(Path("data/tpex_limits").rglob("tpex_next_day_limits.csv")),dtype={"stock_id":str})
+          twse=pd.read_csv(next(Path("data/twse_official_limits").rglob("twse_twt84u_limits.csv")),dtype={"stock_id":str})
+          tpex=pd.read_csv(next(Path("data/tpex_next_day_limits").rglob("tpex_next_day_limits.csv")),dtype={"stock_id":str})
           for name,df in [("TWSE",twse),("TPEx",tpex)]:
               if df.duplicated(["date","stock_id"]).any(): raise RuntimeError(f"Duplicate {name} limit keys")
           twse_lookup=twse.set_index(["date","stock_id"]).to_dict("index")
@@ -203,8 +203,8 @@ jobs:
             data/twse_marketwide_turnover/manifest.json
             data/twse_marketwide_turnover/historical_daily_top10_by_volume.csv
             data/top10_actions_twt49u/
-            data/twse_limits/
-            data/tpex_limits/
+            data/twse_official_limits/
+            data/tpex_next_day_limits/
             data/mops_dividend_reconciliation/
             data/official_dividend_component_overrides.csv
             artifacts/top10_reconciled_official_audit/
