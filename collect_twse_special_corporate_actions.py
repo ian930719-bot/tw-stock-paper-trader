@@ -108,9 +108,6 @@ def main():
   schemas[dataset]=schema
   allrows.extend(rows)
   print(f"[DONE] {dataset}: {len(rows)} special events",flush=True)
-  schemas[dataset]=schema
-  allrows.extend(rows)
-  print(f"[DONE] {dataset}: {len(rows)} basket events",flush=True)
  out=Path(a.output);out.mkdir(parents=True,exist_ok=True)
  frame=pd.DataFrame(allrows,columns=["symbol","date","event_type","previous_close","reference_price","limit_up","limit_down","reason","source"])
  frame.to_csv(out/"special_events.csv",index=False)
