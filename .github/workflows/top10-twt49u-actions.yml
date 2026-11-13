@@ -29,6 +29,10 @@ jobs:
         run: |
           python -m py_compile collect_twse_twt49u_corporate_actions.py
           python collect_twse_twt49u_corporate_actions.py --start-date 2010-01-04 --end-date 2026-11-12 --output data/top10_actions_twt49u
+      - name: Collect official capital-reduction and par-value change events
+        run: |
+          python -m py_compile collect_twse_special_corporate_actions.py
+          python collect_twse_special_corporate_actions.py --start-date 2010-01-04 --end-date 2026-11-12 --output data/top10_actions_twt49u
       - name: Download official raw OHLCV artifact
         uses: actions/download-artifact@v4
         with:
