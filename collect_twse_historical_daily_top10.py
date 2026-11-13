@@ -75,8 +75,9 @@ def fetch_twse_day(session,day,retries=6):
 
 def fetch_tpex_day(session,day,retries=6):
  day=pd.Timestamp(day)
- roc=f"{day.year-1911}/{day.month:02d}/{day.day:02d}"
- params={"date":roc,"type":"EW","response":"json"}
+ # TPEx afterTrading/otc expects Gregorian YYYY/MM/DD, not ROC year.
+ gregorian=day.strftime("%Y/%m/%d")
+ params={"date":gregorian,"type":"EW","response":"json"}
  err=None
  for k in range(retries):
   try:
