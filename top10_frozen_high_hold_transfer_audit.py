@@ -290,7 +290,7 @@ def main():
  universe_path=Path(a.universe_file)
  use_universe_filter=universe_path.exists()
  if use_universe_filter:
-  uni=pd.read_csv(universe_path,dtype={"symbol":str})
+  uni=pd.read_csv(universe_path,dtype={"symbol":str,"stock_id":str,"market":str})
   symbols=sorted(uni.symbol.astype(str).str.strip().unique())
   name_map=uni.drop_duplicates("symbol").set_index("symbol").name.astype(str).to_dict()
   stock_id_map=uni.drop_duplicates("symbol").set_index("symbol").stock_id.astype(str).to_dict()
