@@ -1,0 +1,23 @@
+{
+  "source": "TPEx official historical dailyQuotes endpoint",
+  "stock_id": "4147",
+  "source_dates": [
+    "2015-11-23",
+    "2015-11-24",
+    "2015-11-25",
+    "2015-11-26",
+    "2015-11-27"
+  ],
+  "rows": 5,
+  "no_limit_rows": 4,
+  "limited_rows": 1,
+  "missing_row_recovered": "2015-11-23",
+  "no_limit_sentinel": {
+    "next_day_limit_up": 9995,
+    "next_day_limit_down": 0.01
+  },
+  "sha256": "93b0e90eb1e3bc1aeb8eafecb7c472dd16f85faeb755b4c9290bb3e51d84ccd7",
+  "note": "Official next-day quote fields retained verbatim. 9995 and 0.01 are TPEx published no-limit sentinel values, not formula-derived price limits. 2015-11-23 through 2015-11-27 are the five consecutive trading sessions from initial OTC trading; 2015-11-27 row carries the next-session normal limits for 2015-11-30.",
+  "rule_source": "https://www.tpex.org.tw/zh-tw/mainboard/trading/rules/system.html",
+  "data_source": "https://www.tpex.org.tw/zh-tw/mainboard/trading/info/pricing.html"
+}

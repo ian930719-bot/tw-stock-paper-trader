@@ -1,0 +1,6 @@
+source_date,stock_id,next_day_reference_price,next_day_limit_up,next_day_limit_down,next_day_limit_status,source,source_url
+2015-11-23,4147,170.0,9995,0.01,no_limit,TPEx official historical daily quote fallback (new_daily_quotes),https://www.tpex.org.tw/www/zh-tw/afterTrading/dailyQuotes?type=EW&response=json&date=104%2F11%2F23
+2015-11-24,4147,175.0,9995,0.01,no_limit,TPEx official historical daily quote fallback (new_daily_quotes),https://www.tpex.org.tw/www/zh-tw/afterTrading/dailyQuotes?type=EW&response=json&date=104%2F11%2F24
+2015-11-25,4147,202.0,9995,0.01,no_limit,TPEx official historical daily quote fallback (new_daily_quotes),https://www.tpex.org.tw/www/zh-tw/afterTrading/dailyQuotes?type=EW&response=json&date=104%2F11%2F25
+2015-11-26,4147,212.0,9995,0.01,no_limit,TPEx official historical daily quote fallback (new_daily_quotes),https://www.tpex.org.tw/www/zh-tw/afterTrading/dailyQuotes?type=EW&response=json&date=104%2F11%2F26
+2015-11-27,4147,201.5,221.5,181.5,limited,TPEx official historical daily quote fallback (new_daily_quotes),https://www.tpex.org.tw/www/zh-tw/afterTrading/dailyQuotes?type=EW&response=json&date=104%2F11%2F27
