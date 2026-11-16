@@ -5,6 +5,9 @@ on:
     branches: [research/top10-official-ohlcv-baseline-audit]
     paths:
       - .github/workflows/top10-official-reconciled-audit.yml
+      - top10_frozen_high_hold_transfer_audit.py
+      - collect_mops_dividend_components.py
+      - collect_twse_twt49u_corporate_actions.py
   workflow_dispatch:
 
 permissions:
