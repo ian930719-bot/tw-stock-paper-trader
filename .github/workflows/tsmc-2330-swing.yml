@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - research/200cagr-blind-validation
+      - research/top10-official-ohlcv-baseline-audit
     paths:
       - "tsmc_swing_research.py"
       - "tsmc_2330_annual_swing_scale_research.py"
@@ -46,6 +47,7 @@ on:
       - "tests/test_tsmc_2330_walk_forward.py"
       - "tests/test_tsmc_2330_probability_policy.py"
       - "tsmc_2330_execution_backtest.py"
+      - "tsmc_2330_account_dd_event_backtest.py"
       - "tsmc_2330_40pct_rule_search.py"
       - "tsmc_2330_annual_rule_oof_backtest.py"
       - "tests/test_tsmc_annual_rule_oof_backtest.py"
@@ -329,6 +331,18 @@ jobs:
             --limits data/tsmc_2330/corporate_actions/price_limits_2330.csv \
             --dividends data/tsmc_2330/corporate_actions/TaiwanStockDividendResult_2330.csv \
             --output artifacts/tsmc_2330_swing
+      - name: Run event-driven account drawdown stop and re-entry grid
+        run: |
+          python -m py_compile tsmc_2330_execution_backtest.py
+          python -m py_compile tsmc_2330_account_dd_event_backtest.py
+          python -m unittest discover -s tests -p "test_account_drawdown_circuit_breaker.py" -v
+          python -m unittest discover -s tests -p "test_tsmc_execution_backtest.py" -v
+          python tsmc_2330_account_dd_event_backtest.py \
+            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
+            --limits data/tsmc_2330/corporate_actions/price_limits_2330.csv \
+            --dividends data/tsmc_2330/corporate_actions/TaiwanStockDividendResult_2330.csv \
+            --rule-search artifacts/tsmc_2330_swing/tsmc_2330_40pct_rule_search.json \
+            --output artifacts/tsmc_2330_event_driven_drawdown
       - name: Run 2010-2026 annual expanding executable rule validation
         run: |
           python tsmc_2330_annual_rule_oof_backtest.py \\
@@ -364,3 +378,4 @@ jobs:
             data/tsmc_2330/corporate_actions/
             data/tsmc_2330/chip/
             artifacts/tsmc_2330_swing/
+            artifacts/tsmc_2330_event_driven_drawdown/
