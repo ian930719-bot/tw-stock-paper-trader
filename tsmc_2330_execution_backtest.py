@@ -157,7 +157,9 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
                      trailing_drawdown_pct: float | None = None,
                      account_drawdown_stop_pct: float | None = None,
                      account_reentry_signal: np.ndarray | None = None,
-                     account_reentry_cooldown: int = 5) -> dict:
+                     account_reentry_cooldown: int = 5,
+                     regime_exit_signal: np.ndarray | None = None,
+                     regime_entry_allowed: np.ndarray | None = None) -> dict:
     dates = bars["date"].dt.normalize()
     period_idx = np.flatnonzero(
         (dates >= pd.Timestamp(start_date)).to_numpy()
@@ -185,6 +187,14 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
         np.asarray(account_reentry_signal, dtype=bool)[first:last + 1])
     if period_account_reentry is not None and len(period_account_reentry) != len(period_bars):
         raise ValueError("account_reentry_signal must align with the full bars frame")
+    period_regime_exit = (None if regime_exit_signal is None else
+        np.asarray(regime_exit_signal, dtype=bool)[first:last + 1])
+    period_regime_entry_allowed = (None if regime_entry_allowed is None else
+        np.asarray(regime_entry_allowed, dtype=bool)[first:last + 1])
+    for name, arr in (("regime_exit_signal", period_regime_exit),
+                      ("regime_entry_allowed", period_regime_entry_allowed)):
+        if arr is not None and len(arr) != len(period_bars):
+            raise ValueError(f"{name} must align with the full bars frame")
     slip = slippage_bps / 10_000.0
     cash = float(initial_capital)
     shares = 0
@@ -198,6 +208,8 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
     pending_account_reentry = False
     account_stop_count = 0
     account_reentry_count = 0
+    regime_reentry_locked = False
+    pending_regime_reentry = False
     entry_date = None
     entry_cash_cost = 0.0
     trade_dividends = 0.0
@@ -215,6 +227,7 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
         nonlocal cash, shares, entry_date, entry_cash_cost, trade_dividends, peak_close
         nonlocal total_commission, total_slippage, blocked_limit_orders, missing_limit_orders
         nonlocal pending_account_reentry, account_risk_off, account_risk_peak, account_reentry_count
+        nonlocal regime_reentry_locked, pending_regime_reentry
         row = period_bars.iloc[i]
         day = row["date"].strftime("%Y-%m-%d")
         if day not in limit_lookup:
@@ -245,12 +258,15 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
             account_risk_peak = float(initial_capital) if not equity_rows else float(equity_rows[-1]["equity"])
             pending_account_reentry = False
             account_reentry_count += 1
+        if pending_regime_reentry:
+            regime_reentry_locked = False
+            pending_regime_reentry = False
         return True
 
     def attempt_sell(i: int, forced: bool = False) -> bool:
         nonlocal cash, shares, entry_date, entry_cash_cost, trade_dividends, peak_close
         nonlocal total_commission, total_tax, total_slippage, blocked_limit_orders, missing_limit_orders
-        nonlocal account_last_exit_i
+        nonlocal account_last_exit_i, regime_reentry_locked
         row = period_bars.iloc[i]
         day = row["date"].strftime("%Y-%m-%d")
         if not forced:
@@ -291,6 +307,8 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
         peak_close = None
         if pending_sell_reason == "account_drawdown_stop":
             account_last_exit_i = i
+        if pending_sell_reason == "regime_deterioration_exit" and period_regime_entry_allowed is not None:
+            regime_reentry_locked = True
         entry_date = None
         entry_cash_cost = 0.0
         trade_dividends = 0.0
@@ -355,7 +373,15 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
                     pending_buy = True
                     pending_account_reentry = True
             elif not account_risk_off and shares == 0 and period_low[i]:
-                pending_buy = True
+                entry_ok = (not regime_reentry_locked) or (
+                    period_regime_entry_allowed is not None and bool(period_regime_entry_allowed[i])
+                )
+                if entry_ok:
+                    pending_buy = True
+                    pending_regime_reentry = regime_reentry_locked
+            elif shares > 0 and not pending_sell and period_regime_exit is not None and bool(period_regime_exit[i]):
+                pending_sell = True
+                pending_sell_reason = "regime_deterioration_exit"
             elif shares > 0 and not pending_sell and period_high[i]:
                 pending_sell = True
                 pending_sell_reason = "strategy_high_signal"
