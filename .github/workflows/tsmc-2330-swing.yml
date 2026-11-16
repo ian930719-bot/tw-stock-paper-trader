@@ -344,12 +344,12 @@ jobs:
             --rule-search artifacts/tsmc_2330_swing/tsmc_2330_40pct_rule_search.json \
             --output artifacts/tsmc_2330_event_driven_drawdown
       - name: Run 2010-2026 annual expanding executable rule validation
-        run: |
-          python tsmc_2330_annual_rule_oof_backtest.py \
-            --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
-            --limits data/tsmc_2330/corporate_actions/price_limits_2330.csv \
-            --dividends data/tsmc_2330/corporate_actions/TaiwanStockDividendResult_2330.csv \
-            --output artifacts/tsmc_2330_swing
+        run: >-
+          python tsmc_2330_annual_rule_oof_backtest.py --features
+          artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv --limits
+          data/tsmc_2330/corporate_actions/price_limits_2330.csv --dividends
+          data/tsmc_2330/corporate_actions/TaiwanStockDividendResult_2330.csv
+          --output artifacts/tsmc_2330_swing
       - name: Search ATR stop and causal re-entry variants with win-rate floor
         run: |
           python tsmc_2330_atr_reentry_rule_search.py \
