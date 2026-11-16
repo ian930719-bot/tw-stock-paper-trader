@@ -205,11 +205,11 @@ def read_events(action_root,symbol_key,stock_id,market,accounting_start_date="20
     _rights_price=float(_rights_price) if _rights_price is not None and pd.notna(_rights_price) else 0.0
     if _rights_ratio>0 and (not np.isfinite(_rights_price) or _rights_price<=0):
      raise RuntimeError(f"{symbol_key}: MOPS cash-rights issue has no valid subscription price on {day}")
-    if status=="resolved":
-     if pd.notna(cash_value) and abs(float(cash_value)-_cash)>0.03:
-      raise RuntimeError(f"{symbol_key}: MOPS/TWT49U cash dividend conflict on {day}: MOPS {_cash}, TWT49U {cash_value}")
-     if pd.notna(stock_value) and abs(float(stock_value)-_stock)>0.03:
-      raise RuntimeError(f"{symbol_key}: MOPS/TWT49U stock dividend conflict on {day}: MOPS {_stock}, TWT49U {stock_value}")
+    # TWT49U's combined "權值+息值" field is an ex-right/ex-dividend
+    # reference-price adjustment, not necessarily the per-share stock-dividend
+    # component. Do not compare that combined amount with MOPS stock dividend.
+    # MOPS cash/stock/rights components are independently accepted only after
+    # the exact official TWT49U reference-price formula reconciles within NT$0.03.
     prev=float(r.previous_close);ref=float(r.reference_price)
     expected=(prev-_cash+_rights_ratio*_rights_price)/(1.0+_stock/_par+_rights_ratio)
     if not np.isfinite(expected) or abs(expected-ref)>0.03:
@@ -372,7 +372,10 @@ def build_limits(bars,ref_prices,event_limits,symbol,strict_from="2015-01-01"):
    up,down=map(float,event_pair)
    ref=ref_prices.get(day,prev_close)
    src="official exchange corporate-action/special-event reference"
-   comparison=current_next_limits if is_tpex else current_twse_limits[:2] if current_twse_limits else None
+   # TPEx raw daily quotes publish next-session limits on each source date.
+   # For an event on this session, compare against the prior session's published
+   # next-day limits, not today's next-session limits.
+   comparison=prior_official_limits if is_tpex else current_twse_limits[:2] if current_twse_limits else None
    if comparison is not None and (abs(float(comparison[0])-up)>0.011 or abs(float(comparison[1])-down)>0.011):
     conflicts.append({"date":day,"type":"event-vs-daily-official-limit-mismatch",
       "event_up":up,"event_down":down,"daily_up":float(comparison[0]),"daily_down":float(comparison[1])})
