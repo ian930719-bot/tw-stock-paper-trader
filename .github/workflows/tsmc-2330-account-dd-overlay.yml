@@ -1,0 +1,50 @@
+name: TSMC Account Drawdown Overlay Screen
+
+on:
+  push:
+    branches: [research/top10-official-ohlcv-baseline-audit]
+    paths:
+      - .github/workflows/tsmc-2330-account-dd-overlay.yml
+      - research/tsmc_2330_account_drawdown_overlay.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: tsmc-account-dd-overlay-screen
+  cancel-in-progress: false
+
+jobs:
+  drawdown-overlay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/top10-official-ohlcv-baseline-audit
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Download frozen official-data audit artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: top10-fixed-basket-official-audit
+          repository: ian930719-bot/tw-stock-paper-trader
+          run-id: 43786627088
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: baseline
+      - name: Validate and run causal drawdown overlay screen
+        run: |
+          python -m py_compile research/tsmc_2330_account_drawdown_overlay.py
+          python research/tsmc_2330_account_drawdown_overlay.py \
+            --input baseline/artifacts/top10_fixed_basket/tsmc_2330_universe_free_reproduction_equity_10bps.csv \
+            --output artifacts/tsmc_2330_account_drawdown_overlay
+      - name: Upload drawdown overlay research results
+        uses: actions/upload-artifact@v4
+        with:
+          name: tsmc-2330-account-drawdown-overlay-screen
+          path: artifacts/tsmc_2330_account_drawdown_overlay/
+          if-no-files-found: error
+          retention-days: 30
