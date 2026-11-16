@@ -282,6 +282,7 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
             "net_pnl": round(pnl, 2),
             "net_return": pnl / entry_cash_cost if entry_cash_cost else None,
             "forced_end_liquidation": bool(forced),
+            "exit_reason": pending_sell_reason or ("forced_end_liquidation" if forced else "strategy_exit"),
         })
         total_commission += fee
         total_tax += tax
