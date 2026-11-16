@@ -154,7 +154,10 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
                      initial_capital: float, strategy: bool,
                      atr_stop_multiple: float | None = None,
                      atr_stop_mask: np.ndarray | None = None,
-                     trailing_drawdown_pct: float | None = None) -> dict:
+                     trailing_drawdown_pct: float | None = None,
+                     account_drawdown_stop_pct: float | None = None,
+                     account_reentry_signal: np.ndarray | None = None,
+                     account_reentry_cooldown: int = 5) -> dict:
     dates = bars["date"].dt.normalize()
     period_idx = np.flatnonzero(
         (dates >= pd.Timestamp(start_date)).to_numpy()
@@ -174,12 +177,27 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
         raise ValueError("ATR stop mask must align with the full bars frame")
     if trailing_drawdown_pct is not None and not 0 < trailing_drawdown_pct < 1:
         raise ValueError("trailing_drawdown_pct must be between 0 and 1")
+    if account_drawdown_stop_pct is not None and not 0 < account_drawdown_stop_pct < 1:
+        raise ValueError("account_drawdown_stop_pct must be between 0 and 1")
+    if account_reentry_cooldown < 0:
+        raise ValueError("account_reentry_cooldown must be non-negative")
+    period_account_reentry = (None if account_reentry_signal is None else
+        np.asarray(account_reentry_signal, dtype=bool)[first:last + 1])
+    if period_account_reentry is not None and len(period_account_reentry) != len(period_bars):
+        raise ValueError("account_reentry_signal must align with the full bars frame")
     slip = slippage_bps / 10_000.0
     cash = float(initial_capital)
     shares = 0
     peak_close = None
     pending_buy = not strategy
     pending_sell = False
+    pending_sell_reason = None
+    account_risk_off = False
+    account_risk_peak = float(initial_capital)
+    account_last_exit_i = None
+    pending_account_reentry = False
+    account_stop_count = 0
+    account_reentry_count = 0
     entry_date = None
     entry_cash_cost = 0.0
     trade_dividends = 0.0
@@ -196,6 +214,7 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
     def attempt_buy(i: int) -> bool:
         nonlocal cash, shares, entry_date, entry_cash_cost, trade_dividends, peak_close
         nonlocal total_commission, total_slippage, blocked_limit_orders, missing_limit_orders
+        nonlocal pending_account_reentry, account_risk_off, account_risk_peak, account_reentry_count
         row = period_bars.iloc[i]
         day = row["date"].strftime("%Y-%m-%d")
         if day not in limit_lookup:
@@ -221,11 +240,17 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
         trade_dividends = 0.0
         total_commission += fee
         total_slippage += qty * (fill - raw_open)
+        if pending_account_reentry:
+            account_risk_off = False
+            account_risk_peak = float(initial_capital) if not equity_rows else float(equity_rows[-1]["equity"])
+            pending_account_reentry = False
+            account_reentry_count += 1
         return True
 
     def attempt_sell(i: int, forced: bool = False) -> bool:
         nonlocal cash, shares, entry_date, entry_cash_cost, trade_dividends, peak_close
         nonlocal total_commission, total_tax, total_slippage, blocked_limit_orders, missing_limit_orders
+        nonlocal account_last_exit_i
         row = period_bars.iloc[i]
         day = row["date"].strftime("%Y-%m-%d")
         if not forced:
@@ -263,6 +288,8 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
         total_slippage += shares * (raw_price - fill)
         shares = 0
         peak_close = None
+        if pending_sell_reason == "account_drawdown_stop":
+            account_last_exit_i = i
         entry_date = None
         entry_cash_cost = 0.0
         trade_dividends = 0.0
@@ -281,6 +308,7 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
         if pending_sell and shares > 0:
             if attempt_sell(i):
                 pending_sell = False
+                pending_sell_reason = None
         elif pending_buy and shares == 0:
             if attempt_buy(i):
                 pending_buy = False
@@ -291,12 +319,20 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
 
         close = float(row.raw_close)
         equity = cash + shares * close
+        if account_drawdown_stop_pct is not None:
+            account_risk_peak = max(account_risk_peak, equity)
         equity_rows.append({
             "date": day, "equity": equity, "cash": cash,
             "shares": shares, "close": close,
         })
         if shares > 0:
             exposure_days += 1
+            if (account_drawdown_stop_pct is not None and not account_risk_off
+                    and equity <= account_risk_peak * (1.0 - account_drawdown_stop_pct)):
+                account_risk_off = True
+                pending_sell = True
+                pending_sell_reason = "account_drawdown_stop"
+                account_stop_count += 1
             peak_close = close if peak_close is None else max(peak_close, close)
             if trailing_drawdown_pct is not None and trailing_drawdown_stop_hit(
                 close, peak_close, float(trailing_drawdown_pct)
@@ -309,10 +345,19 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
                         pending_sell = True
 
         if strategy and i < len(period_bars) - 1:
-            if shares == 0 and period_low[i]:
+            if account_risk_off and shares == 0:
+                cooled = (account_last_exit_i is not None and
+                          i - account_last_exit_i >= account_reentry_cooldown)
+                signal_ok = (period_account_reentry is not None and
+                             bool(period_account_reentry[i]))
+                if cooled and signal_ok:
+                    pending_buy = True
+                    pending_account_reentry = True
+            elif not account_risk_off and shares == 0 and period_low[i]:
                 pending_buy = True
             elif shares > 0 and not pending_sell and period_high[i]:
                 pending_sell = True
+                pending_sell_reason = "strategy_high_signal"
 
     # Liquidate any remaining position at the final close for comparable
     # calendar-period equity; this is an explicit end-of-test assumption.
@@ -348,6 +393,10 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
         "estimated_slippage_cost": total_slippage,
         "blocked_limit_orders": blocked_limit_orders,
         "missing_price_limit_orders": missing_limit_orders,
+        "account_drawdown_stop_count": account_stop_count,
+        "account_drawdown_reentry_count": account_reentry_count,
+        "account_drawdown_stop_pct": account_drawdown_stop_pct,
+        "account_reentry_cooldown": account_reentry_cooldown if account_drawdown_stop_pct is not None else None,
         "trades": trades,
         "equity_curve": curve.to_dict(orient="records"),
     }
