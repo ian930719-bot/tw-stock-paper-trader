@@ -357,11 +357,15 @@ def _simulate_period(bars: pd.DataFrame, low_signal: np.ndarray, high_signal: np
                 close, peak_close, float(trailing_drawdown_pct)
             ):
                 pending_sell = True
+                if pending_sell_reason is None:
+                    pending_sell_reason = "trailing_drawdown_stop"
             if atr_stop_multiple is not None and period_atr_stop_mask[i]:
                 atr_pct = pd.to_numeric(pd.Series([row.get("atr_pct14", np.nan)]), errors="coerce").iloc[0]
                 if np.isfinite(atr_pct) and atr_pct > 0:
                     if trailing_atr_stop_hit(close, peak_close, float(atr_pct), float(atr_stop_multiple)):
                         pending_sell = True
+                        if pending_sell_reason is None:
+                            pending_sell_reason = "atr_trailing_stop"
 
         if strategy and i < len(period_bars) - 1:
             if account_risk_off and shares == 0:
