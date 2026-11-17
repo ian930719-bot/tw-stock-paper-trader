@@ -50,6 +50,7 @@ class TSMCExecutionBacktestTests(unittest.TestCase):
         )
         self.assertEqual(result["trades"][0]["entry_date"], "2024-01-03")
         self.assertEqual(result["trades"][0]["exit_date"], "2024-01-05")
+        self.assertEqual(result["trades"][0]["exit_reason"], "trailing_drawdown_stop")
         self.assertEqual(result["trades"][1]["entry_date"], "2024-01-08")
 
     def test_atr_trailing_stop_uses_peak_and_current_atr(self):
