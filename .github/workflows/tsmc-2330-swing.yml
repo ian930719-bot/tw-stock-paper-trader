@@ -381,7 +381,7 @@ jobs:
       - name: Test and evaluate causal SMA200 structural regime exits
         run: |
           python -m py_compile tsmc_2330_sma200_regime_research.py
-          python -m unittest tests.test_tsmc_sma200_regime_research -v
+          python -m unittest discover -s tests -p "test_tsmc_sma200_regime_research.py" -v
           python tsmc_2330_sma200_regime_research.py \
             --features artifacts/tsmc_2330_swing/tsmc_2330_causal_features.csv \
             --limits data/tsmc_2330/corporate_actions/price_limits_2330.csv \
