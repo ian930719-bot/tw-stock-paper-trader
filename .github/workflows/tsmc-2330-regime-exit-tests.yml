@@ -29,4 +29,4 @@ jobs:
           python -m py_compile tsmc_2330_execution_backtest.py
           python -m py_compile tests/test_tsmc_execution_backtest.py
       - name: Run execution and regime gate unit tests
-        run: python -m unittest tests/test_tsmc_execution_backtest.py -v
+        run: python -m unittest discover -s tests -p "test_tsmc_execution_backtest.py" -v
